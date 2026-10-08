@@ -64,7 +64,7 @@ const environment = defineModel<PayrollRegzelEnvironment>('environment', {
 })
 const { testAllowed: submissionTestAllowed } = useSubmissionEnvironment(environment)
 const excludedDaysConfirmed = ref(false)
-const deductedDaysNone = ref(false)
+const deathOn = ref('')
 const requestedByAuthority = ref(false)
 const authorityRequestReceivedOn = ref('')
 const authorityRequestDueOn = ref('')
@@ -164,7 +164,6 @@ const canPrepare = computed(() =>
   && employmentId.value !== null
   && standaloneAllowed.value
   && excludedDaysConfirmed.value
-  && deductedDaysNone.value
   && pensionConfirmed.value
   && (!requestedByAuthority.value || authorityRequestReceivedOn.value !== '')
   && (!authorityDueOnRequired.value || authorityRequestDueOn.value !== '')
@@ -188,7 +187,6 @@ const prepareBlockers = computed<string[]>(() => {
   const missing: string[] = []
   if (employmentId.value === null) missing.push(t('payroll.eldp.blockers.employment'))
   if (!excludedDaysConfirmed.value) missing.push(t('payroll.eldp.blockers.excluded'))
-  if (!deductedDaysNone.value) missing.push(t('payroll.eldp.blockers.deducted'))
   if (!pensionConfirmed.value) missing.push(t('payroll.eldp.blockers.pension'))
   if (requestedByAuthority.value && authorityRequestReceivedOn.value === '') {
     missing.push(t('payroll.eldp.blockers.authorityDate'))
@@ -466,7 +464,7 @@ async function prepare(): Promise<void> {
       year: year.value,
       environment: environment.value,
       excluded_days_confirmed: excludedDaysConfirmed.value,
-      deducted_days_none: deductedDaysNone.value,
+      death_on: deathOn.value !== '' ? deathOn.value : null,
       requested_by_authority: requestedByAuthority.value,
       authority_request_received_on: requestedByAuthority.value
         ? authorityRequestReceivedOn.value
@@ -541,6 +539,7 @@ watch([employmentId, year, environment], () => {
   prepared.value = null
   correction.value = false
   preparedOn.value = ''
+  deathOn.value = ''
   manualCompletion.value = null
   completionError.value = ''
   completionSuccess.value = ''
@@ -690,15 +689,9 @@ watch(requestedByAuthority, value => {
           >
           <span>{{ t('payroll.eldp.confirmExcluded') }}</span>
         </label>
-        <label class="flex items-start gap-2 text-sm text-neutral-700">
-          <input
-            v-model="deductedDaysNone"
-            type="checkbox"
-            class="mt-0.5"
-            data-test="eldp-deducted-confirm"
-          >
-          <span>{{ t('payroll.eldp.confirmDeducted') }}</span>
-        </label>
+        <p class="max-w-prose text-xs text-neutral-500" data-test="eldp-deducted-hint">
+          {{ t('payroll.eldp.deductedDerivedHint') }}
+        </p>
         <fieldset
           class="space-y-3 rounded-lg border border-neutral-200 p-3"
           data-test="eldp-pension"
@@ -799,6 +792,18 @@ watch(requestedByAuthority, value => {
             data-test="eldp-authority-request-due-on" />
           <span class="mt-1 block text-xs text-neutral-500">
             {{ t('payroll.eldp.authorityRequestDueOnHint') }}
+          </span>
+        </label>
+        <label class="block max-w-sm text-sm">
+          <span class="mb-1 block font-medium text-neutral-700">
+            {{ t('payroll.eldp.deathOn') }}
+          </span>
+          <DateInput
+            v-model="deathOn"
+            class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20"
+            data-test="eldp-death-on" />
+          <span class="mt-1 block text-xs text-neutral-500">
+            {{ t('payroll.eldp.deathOnHint') }}
           </span>
         </label>
         <label class="block text-sm">

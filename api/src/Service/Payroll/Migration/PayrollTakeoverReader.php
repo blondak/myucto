@@ -93,6 +93,10 @@ final class PayrollTakeoverReader
             $this->repository->calculatedPeriods($supplierId, $year, $employeeId),
             $employeeId,
             $employmentId,
+            // Nepřítomnosti s daty jsou druhým doloženým zdrojem převzatého
+            // měsíce: z nich evidenční list skládá rozpad vyloučených dob,
+            // který převzatý měsíc nenese. Čtou se jen tam, kde nějaký leží.
+            $rows === [] ? [] : [$employmentId => $this->repository->approvedAbsences($supplierId, $employmentId, $year)],
         );
     }
 
@@ -131,6 +135,7 @@ final class PayrollTakeoverReader
         array $calculatedPeriods,
         ?int $employeeId,
         ?int $employmentId,
+        array $absences = [],
     ): PayrollTakeoverYear {
         $months = array_map(PayrollTakeoverMonth::fromRow(...), $rows);
         // Repozitář řadí podle období a identity z původního systému; pořadí se
@@ -152,6 +157,7 @@ final class PayrollTakeoverReader
             $employeeId,
             $employmentId,
             $this->clock->now()->format('Y-m'),
+            $absences,
         );
     }
 

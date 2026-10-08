@@ -193,7 +193,8 @@ describe('PayrollEldpPanel', () => {
 
     const blockers = wrapper.get('[data-test="eldp-prepare-blockers"]').text()
     expect(blockers).toContain('payroll.eldp.blockers.excluded')
-    expect(blockers).toContain('payroll.eldp.blockers.deducted')
+    // Odečtené doby odvozuje server z nepřítomností, potvrzení už nechybí.
+    expect(blockers).not.toContain('payroll.eldp.blockers.deducted')
     expect(blockers).toContain('payroll.eldp.blockers.pension')
     expect(blockers).not.toContain('payroll.eldp.blockers.note')
 
@@ -218,7 +219,6 @@ describe('PayrollEldpPanel', () => {
     await flushPromises()
 
     await wrapper.get('[data-test="eldp-excluded-confirm"]').setValue(true)
-    await wrapper.get('[data-test="eldp-deducted-confirm"]').setValue(true)
     await wrapper.get('[data-test="eldp-pension-confirm"]').setValue(true)
     await wrapper.get('[data-test="eldp-note"]').setValue('')
     await flushPromises()
@@ -568,7 +568,6 @@ async function fillConfirmation(
   selects[0]!.vm.$emit('update:modelValue', 101)
   await flushPromises()
   await wrapper.get('[data-test="eldp-excluded-confirm"]').setValue(true)
-  await wrapper.get('[data-test="eldp-deducted-confirm"]').setValue(true)
   await wrapper.get('[data-test="eldp-pension-confirm"]').setValue(true)
   await wrapper.get('[data-test="eldp-note"]')
     .setValue('Syntetické potvrzení evidenčního listu.')

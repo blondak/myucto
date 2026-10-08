@@ -11,6 +11,7 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEldpEvidenceBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
+use Psr\Clock\ClockInterface;
 
 /**
  * Sestavení evidenčního listu důchodového pojištění za kalendářní rok.
@@ -66,8 +67,12 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
  *   v § 38, stojí lhůta **3 kalendářní roky**. Do listu se proto nezapisuje:
  *   uchovávací lhůty modul drží na jednom místě, v retenčním katalogu
  *   (kategorie `PENSION_EVIDENCE_SHEETS`), ne v jednotlivých sestavovačích.
- * - **Odečítané doby** (10375, 10462–10469): nula je podmíněná výslovným
- *   potvrzením mzdové účetní, ne výpočtem.
+ * - **Nový list po žádosti o invalidní důchod** (§ 39 odst. 5 zákona
+ *   č. 582/1991 Sb. ve znění do 31. 12. 2025): zůstane-li občan v zaměstnání
+ *   po podání žádosti o invalidní důchod, zaměstnavatel mu založí nový
+ *   evidenční list. Den podání žádosti mzdová revize nenese a modul vede
+ *   jediný list za vztah a rok, takže takový list nerozdělí; podává se mimo
+ *   aplikaci (popsáno v manuálu, kapitola 85.13).
  *
  * ## Důchodové údaje zaměstnance: výslovné potvrzení
  *
@@ -125,6 +130,13 @@ final class EldpAnnualStatementBuilder
             = new EldpExcludedPeriodDeriver(),
         private readonly EldpDeadlinePolicy $deadlines
             = new EldpDeadlinePolicy(),
+        /**
+         * Dnešek pro logický test ELDP12 č. 54 (datum vyhotovení nejpozději
+         * v den přijetí). Kontejner ho dodá explicitní definicí v Bootstrapu
+         * (PHP-DI volitelný parametr autowiringem nevyplní); bez hodin (čisté
+         * sestavení v testech) se datum vyhotovení proti dnešku neporovnává.
+         */
+        private readonly ?ClockInterface $clock = null,
     ) {}
 
     /**
@@ -193,11 +205,24 @@ final class EldpAnnualStatementBuilder
                 'Vyloučené doby evidenčního listu musí mzdová účetní výslovně potvrdit.',
             );
         }
-        if (($confirmation['deducted_days_none'] ?? null) !== true) {
+        /*
+         * Odečtené doby (údaj 40, § 38 odst. 4 písm. h) zákona č. 582/1991 Sb.)
+         * se odvozují z nepřítomností u sekcí s kódem D
+         * ({@see self::applyPensionAgeCode()}). Dřívější potvrzení „žádné nejsou"
+         * se proto nevyžaduje: u kódu D by bylo nepravdivé a ČSSZ by list
+         * odmítla logickým testem 39.
+         */
+        $deathOn = $confirmation['death_on'] ?? null;
+        if ($deathOn === '') {
+            $deathOn = null;
+        }
+        if ($deathOn !== null
+            && (!is_string($deathOn) || !self::isDate($deathOn) || (int) substr($deathOn, 0, 4) < $year)
+        ) {
             throw new EldpValidationException(
-                'eldp_deducted_days_unsupported',
-                'Modul neumí odvodit odečítané doby po dosažení důchodového věku; '
-                    . 'evidenční list lze sestavit jen s výslovným potvrzením, že žádné nejsou.',
+                'eldp_death_date_invalid',
+                'Datum úmrtí zaměstnance musí být platné datum RRRR-MM-DD, které neleží '
+                    . 'před vykazovaným rokem.',
             );
         }
         $pension = self::pensionStatus($confirmation['pension_status'] ?? null);
@@ -246,6 +271,7 @@ final class EldpAnnualStatementBuilder
             throw EldpValidationException::blocked($blockers);
         }
         ksort($months, SORT_STRING);
+        $allMonths = $months;
 
         $employmentFromTakeover = false;
         $employment = $this->resolveEmployment(
@@ -254,6 +280,13 @@ final class EldpAnnualStatementBuilder
             $blockers,
             $takeoverRows,
             $employmentFromTakeover,
+        );
+        $this->assertNoRehireWithinThreeMonths(
+            $allMonths,
+            $employment,
+            $employmentId,
+            $year,
+            $blockers,
         );
         $this->assertPensionStatusMatchesEvidence(
             $months,
@@ -390,11 +423,13 @@ final class EldpAnnualStatementBuilder
                     $takeoverMonths[$periodStart],
                     $employment,
                     $blockers,
+                    $takeover,
                 );
             if ($line !== null) {
                 $lines[] = $line;
             }
         }
+        $lines = $this->applySection15a($lines, $year, $employment['start'], $employmentId, $blockers);
         foreach ($postTerminationMonths as $periodStart) {
             $line = $this->postTerminationLine(
                 $employmentId,
@@ -476,6 +511,8 @@ final class EldpAnnualStatementBuilder
                 $year,
                 is_string($authorityRequestDueOn) ? $authorityRequestDueOn : null,
             );
+        } elseif ($deathOn !== null) {
+            $window = $this->deadlines->forDeath($year, $deathOn);
         } elseif ($participationEnd !== null
             && $participationEnd < sprintf('%04d-01-01', $year)
         ) {
@@ -502,7 +539,7 @@ final class EldpAnnualStatementBuilder
             : $lastLine['period_end'];
         $form = $this->form(
             $confirmation,
-            $window->statementKind,
+            self::eldpType($employment['end'], $year, $deathOn),
             $employment['start'],
             $sections,
             $lastLine['period_end'],
@@ -585,6 +622,18 @@ final class EldpAnnualStatementBuilder
                         'excluded_days_total' => $line['excluded']['total'],
                         'excluded_days_provenance' => $line['excluded']['provenance'],
                     ];
+                    // Krytí příjmem a odečtené doby jen tam, kde nastaly: otisk
+                    // ostatních listů zůstává stejný.
+                    if (($line['excluded']['covered'] ?? []) !== []) {
+                        $entry['excluded_days_covered'] = $line['excluded']['covered'];
+                    }
+                    if (($line['deducted'] ?? null) !== null) {
+                        $entry['deducted_days'] = $line['deducted']['components'];
+                        $entry['deducted_days_total'] = $line['deducted']['total'];
+                    }
+                    if (($line['section_15a'] ?? null) !== null) {
+                        $entry['section_15a'] = $line['section_15a'];
+                    }
                     if ($mixedSources) {
                         $entry['source'] = $line['source'];
                         if ($line['source'] === 'takeover') {
@@ -603,7 +652,9 @@ final class EldpAnnualStatementBuilder
             ],
             'confirmation' => [
                 'excluded_days_confirmed' => true,
-                'deducted_days_none' => true,
+                // Odečtené doby se odvozují z nepřítomností, nepotvrzují se.
+                'deducted_days_derived' => true,
+                ...($deathOn !== null ? ['death_on' => $deathOn] : []),
                 'requested_by_authority' => $requestedByAuthority,
                 'authority_request_received_on' => $authorityRequestReceivedOn,
                 'authority_request_due_on' => $authorityRequestDueOn,
@@ -913,7 +964,34 @@ final class EldpAnnualStatementBuilder
 
             return null;
         }
+        /*
+         * Různá data mezi řádky jsou u převodu běžná, když původní program
+         * skončení vztahu později opravil: každý řádek nese trvání, jak ho
+         * program znal při zpracování svého měsíce. Platí nejpozdější řádek
+         * s vyplněným skončením ({@see self::supersededTakeoverDates()});
+         * starší řádky se proti němu v takeoverLine() jen ověří.
+         */
         if (count($starts) > 1 || count($ends) > 1) {
+            $latest = null;
+            foreach ($rows as $row) {
+                if (($row->relationshipStartDate !== null || $row->relationshipEndDate !== null)
+                    && ($latest === null || $row->period > $latest->period)
+                ) {
+                    $latest = $row;
+                }
+            }
+            if ($latest !== null && $latest->relationshipEndDate !== null
+                && ($latest->relationshipStartDate !== null || count($starts) === 1)
+            ) {
+                $start = $latest->relationshipStartDate ?? $starts[0];
+                if ($latest->relationshipEndDate >= $start) {
+                    return [
+                        'employee_id' => (int) array_key_first($employeeIds),
+                        'start' => $start,
+                        'end' => $latest->relationshipEndDate,
+                    ];
+                }
+            }
             $blockers[] = [
                 'code' => 'eldp_takeover_employment_dates_ambiguous',
                 'message' => 'Převzaté měsíce pracovního vztahu uvádějí různá data nástupu nebo skončení ('
@@ -1041,14 +1119,17 @@ final class EldpAnnualStatementBuilder
             return null;
         }
         $socialKind = self::socialKind($relation);
+        $result = is_array($month['result'] ?? null) ? $month['result'] : [];
         $relationship = $this->socialRelationship(
-            is_array($month['result'] ?? null) ? $month['result'] : [],
+            $result,
             $employeeId,
             $employmentId,
             $label,
             $periodStart,
             $blockers,
             $socialKind,
+            false,
+            $relation === 'small_scale_employment',
         );
         if ($relationship === null) {
             return null;
@@ -1060,52 +1141,64 @@ final class EldpAnnualStatementBuilder
         if ($insuranceFrom > $insuranceTo) {
             return null;
         }
-        /*
-         * DPČ a DPP se důchodového pojištění účastní jen v měsících, kdy
-         * zúčtovaný příjem dosáhl rozhodné částky (§ 7 odst. 1 písm. a) bod 2
-         * zákona č. 187/2006 Sb.). Měsíc bez účasti není dobou pojištění:
-         * sekce jde dál se svým kódem a měsíc se v listu vyznačí „X", přesně
-         * jako měsíc pracovního poměru bez započitatelného příjmu.
-         */
-        if (($relationship['participation']['status'] ?? null) === 'does_not_participate') {
-            return [
-                'period_start' => $periodStart,
-                'period_end' => $periodEnd,
-                'source' => 'revision',
-                'revision_id' => $month['revision_id'],
-                'run_id' => $month['run_id'],
-                'input_snapshot_hash' => $month['input_snapshot_hash'],
-                'result_snapshot_hash' => $month['result_snapshot_hash'],
-                'insurance_from' => $insuranceFrom,
-                'insurance_to' => $insuranceTo,
-                'insurance_days' => 0,
-                'assessment_base_czk' => 0,
-                'code' => $activityCode . '++',
-                'participates' => false,
-                'post_termination' => false,
-                'excluded' => [
-                    'components' => array_fill_keys(EldpExcludedPeriodDeriver::COMPONENTS, 0),
-                    'total' => 0,
-                    'provenance' => [],
-                ],
-            ];
-        }
-        $uncapped = $relationship['assessment_base_minor_units'] ?? null;
-        $capped = $relationship['capped_assessment_base_minor_units'] ?? null;
-        if (!is_int($uncapped) || $uncapped < 0 || !is_int($capped) || $capped < 0) {
+        $absences = $data['absences'] ?? null;
+        if (!is_array($absences) || !array_is_list($absences)) {
             $blockers[] = [
-                'code' => 'eldp_assessment_base_missing',
-                'message' => "Za {$label} chybí vyměřovací základ sociálního pojištění.",
+                'code' => 'eldp_absences_invalid',
+                'message' => "Absence za {$label} nejsou ve zmrazené revizi seznam.",
                 'detail' => ['period_start' => $periodStart],
             ];
 
             return null;
         }
-        if ($uncapped !== $capped) {
+        /** @var list<array<string,mixed>> $absences */
+        $revisionSource = [
+            'period_start' => $periodStart,
+            'period_end' => $periodEnd,
+            'source' => 'revision',
+            'revision_id' => $month['revision_id'],
+            'run_id' => $month['run_id'],
+            'input_snapshot_hash' => $month['input_snapshot_hash'],
+            'result_snapshot_hash' => $month['result_snapshot_hash'],
+            'insurance_from' => $insuranceFrom,
+            'insurance_to' => $insuranceTo,
+        ];
+        /*
+         * DPČ, DPP a zaměstnání malého rozsahu se důchodového pojištění účastní
+         * jen v měsících, kdy zúčtovaný příjem dosáhl rozhodné částky (§ 7 a 7a
+         * zákona č. 187/2006 Sb.). Měsíc bez účasti není dobou pojištění: sekce
+         * jde dál se svým kódem a měsíc se v listu vyznačí „X". Nemoc, karanténu
+         * nebo PPM v takovém měsíci posoudí až {@see self::applySection15a()},
+         * protože nárok podle § 15a zákona č. 187/2006 Sb. závisí na účasti
+         * v předchozích měsících.
+         */
+        if (($relationship['participation']['status'] ?? null) === 'does_not_participate') {
+            return $revisionSource + [
+                'insurance_days' => 0,
+                'assessment_base_czk' => 0,
+                'code' => $activityCode . '++',
+                'participates' => false,
+                'outside_insurance' => true,
+                'post_termination' => false,
+                'excluded' => self::noExcludedDays(),
+                'deductible' => [
+                    'components' => array_fill_keys(EldpExcludedPeriodDeriver::DEDUCTED_COMPONENTS, 0),
+                    'total' => EldpExcludedPeriodDeriver::inclusiveDays($insuranceFrom, $insuranceTo),
+                ],
+                'section_15a_absences' => self::section15aAbsences($absences, $insuranceFrom, $insuranceTo),
+            ];
+        }
+        /*
+         * Do evidenčního listu jde vyměřovací základ v plné výši, i nad roční
+         * maximum (§ 15a zákona č. 589/1992 Sb. omezuje jen základ pro
+         * pojistné). Měsíce po dosažení maxima jsou dobou pojištění (Metodická
+         * pomůcka ČSSZ k ELDP, př. 1; Všeobecné zásady, údaj Vyměřovací základ).
+         */
+        $uncapped = $relationship['assessment_base_minor_units'] ?? null;
+        if (!is_int($uncapped) || $uncapped < 0) {
             $blockers[] = [
-                'code' => 'eldp_capped_base_unsupported',
-                'message' => "Za {$label} došlo ke krácení ročním maximem vyměřovacího základu; "
-                    . 'zápis takového měsíce do evidenčního listu modul neumí doložit.',
+                'code' => 'eldp_assessment_base_missing',
+                'message' => "Za {$label} chybí vyměřovací základ sociálního pojištění.",
                 'detail' => ['period_start' => $periodStart],
             ];
 
@@ -1121,17 +1214,6 @@ final class EldpAnnualStatementBuilder
             return null;
         }
 
-        $absences = $data['absences'] ?? null;
-        if (!is_array($absences) || !array_is_list($absences)) {
-            $blockers[] = [
-                'code' => 'eldp_absences_invalid',
-                'message' => "Absence za {$label} nejsou ve zmrazené revizi seznam.",
-                'detail' => ['period_start' => $periodStart],
-            ];
-
-            return null;
-        }
-        /** @var list<array<string,mixed>> $absences */
         /*
          * § 11 odst. 2 zákona č. 155/1995 Sb.: měsíc bez započitatelného
          * příjmu kvůli nepřítomnosti bez příjmu není dobou pojištění. Sekce
@@ -1162,6 +1244,15 @@ final class EldpAnnualStatementBuilder
             $insuranceFrom,
             $insuranceTo,
             $label,
+            $uncapped,
+            EldpExcludedPeriodDeriver::concurrentIncomeDays(
+                is_array($input) ? $input : [],
+                $result,
+                $employeeId,
+                $employmentId,
+                $insuranceFrom,
+                $insuranceTo,
+            ),
         );
         foreach ($excluded['blockers'] as $blocker) {
             $blocker['detail']['period_start'] = $periodStart;
@@ -1171,7 +1262,8 @@ final class EldpAnnualStatementBuilder
         if ($excluded['blockers'] !== []) {
             return null;
         }
-        $days = $monthStatus === EldpExcludedPeriodDeriver::MONTH_OUTSIDE_INSURANCE
+        $outside = $monthStatus === EldpExcludedPeriodDeriver::MONTH_OUTSIDE_INSURANCE;
+        $days = $outside
             ? 0
             : EldpExcludedPeriodDeriver::inclusiveDays($insuranceFrom, $insuranceTo);
         if ($excluded['total'] > $days) {
@@ -1184,22 +1276,21 @@ final class EldpAnnualStatementBuilder
             return null;
         }
 
-        return [
-            'period_start' => $periodStart,
-            'period_end' => $periodEnd,
-            'source' => 'revision',
-            'revision_id' => $month['revision_id'],
-            'run_id' => $month['run_id'],
-            'input_snapshot_hash' => $month['input_snapshot_hash'],
-            'result_snapshot_hash' => $month['result_snapshot_hash'],
-            'insurance_from' => $insuranceFrom,
-            'insurance_to' => $insuranceTo,
+        return $revisionSource + [
             'insurance_days' => $days,
             'assessment_base_czk' => intdiv($uncapped, 100),
             'code' => $activityCode . '++',
             'participates' => true,
+            'outside_insurance' => $outside,
             'post_termination' => false,
             'excluded' => $excluded,
+            'deductible' => $this->excludedPeriods->deriveDeducted(
+                $absences,
+                $insuranceFrom,
+                $insuranceTo,
+                $excluded,
+                $outside,
+            ),
         ];
     }
 
@@ -1256,18 +1347,38 @@ final class EldpAnnualStatementBuilder
         if ($relationship === null) {
             return null;
         }
-        $base = $relationship['capped_assessment_base_minor_units'] ?? null;
+        // Plný vyměřovací základ i nad roční maximum, stejně jako v monthLine().
+        $base = $relationship['assessment_base_minor_units'] ?? null;
         if (!is_int($base) || $base <= 0) {
             return null;
         }
-        if ($base !== ($relationship['assessment_base_minor_units'] ?? null)
-            || $base % 100 !== 0
-            || intdiv($base, 100) > 9_999_999_999
-        ) {
+        /*
+         * Druhý znak „P" nepřichází v úvahu u zaměstnání malého rozsahu ani
+         * u DPP: příjem zúčtovaný po skončení se u nich považuje za příjem
+         * měsíce, ve kterém zaměstnání skončilo (§ 7 odst. 3 a § 7a odst. 2
+         * zákona č. 187/2006 Sb.; Všeobecné zásady ELDP, Kód — druhý znak).
+         * Může tím zpětně založit účast v posledním měsíci, a to je oprava
+         * listu za ten měsíc (Metodická pomůcka ČSSZ, př. 30), ne řádek „P+".
+         */
+        if (in_array($relation, ['small_scale_employment', 'dpp'], true)) {
+            $blockers[] = [
+                'code' => 'eldp_post_termination_small_scale_unsupported',
+                'message' => "Za {$label} je zúčtován příjem po skončení "
+                    . ($relation === 'dpp' ? 'dohody o provedení práce' : 'zaměstnání malého rozsahu')
+                    . '. U těchto vztahů se kód „P+" nepoužívá: příjem patří do měsíce skončení '
+                    . 'a může zpětně založit účast na pojištění (§ 7 odst. 3 a § 7a odst. 2 zákona '
+                    . 'č. 187/2006 Sb.). Přepočtěte měsíc skončení s tímto příjmem, nebo evidenční '
+                    . 'list (opravný, typ 52) podejte mimo aplikaci.',
+                'detail' => ['period_start' => $periodStart, 'relation_type' => $relation],
+            ];
+
+            return null;
+        }
+        if ($base % 100 !== 0 || intdiv($base, 100) > 9_999_999_999) {
             $blockers[] = [
                 'code' => 'eldp_assessment_base_not_whole_czk',
                 'message' => "Vyměřovací základ příjmu zúčtovaného po skončení zaměstnání za {$label} "
-                    . 'není celé Kč bez krácení ročním maximem.',
+                    . 'není celé Kč v rozsahu datové věty.',
                 'detail' => ['period_start' => $periodStart],
             ];
 
@@ -1299,12 +1410,21 @@ final class EldpAnnualStatementBuilder
             'assessment_base_czk' => intdiv($base, 100),
             'code' => $code,
             'participates' => true,
+            'outside_insurance' => false,
             'post_termination' => true,
-            'excluded' => [
-                'components' => array_fill_keys(EldpExcludedPeriodDeriver::COMPONENTS, 0),
-                'total' => 0,
-                'provenance' => [],
-            ],
+            'excluded' => self::noExcludedDays(),
+            'deductible' => null,
+        ];
+    }
+
+    /** @return array{components:array<string,int>,total:int,provenance:list<array<string,mixed>>,covered:list<array<string,mixed>>} */
+    private static function noExcludedDays(): array
+    {
+        return [
+            'components' => array_fill_keys(EldpExcludedPeriodDeriver::COMPONENTS, 0),
+            'total' => 0,
+            'provenance' => [],
+            'covered' => [],
         ];
     }
 
@@ -1479,6 +1599,20 @@ final class EldpAnnualStatementBuilder
      * doby nebo složky vyloučených dob z jejich součtu by vyrobilo nedoložený
      * údaj v zákonné evidenci, ze které se za desítky let počítá důchod.
      *
+     * Druhým doloženým zdrojem je evidence nepřítomností vztahu (s daty od–do,
+     * převedená týmž převodem, {@see PayrollTakeoverYear::absencesFor()}). Z ní,
+     * a jedině z ní, se u převzatého měsíce rozhoduje totéž co u spočítaného:
+     *
+     * - měsíc s nulovým vyměřovacím základem je dobou pojištění, jen když ho
+     *   vysvětluje omluvný důvod, a mimo ni („X"), když ho vysvětluje jen
+     *   nepřítomnost bez příjmu (§ 11 odst. 2 zákona č. 155/1995 Sb.,
+     *   {@see EldpExcludedPeriodDeriver::insuranceMonthStatus()}); převzaté dny
+     *   pojištění u PAMICA vznikají z kalendářních dnů (`DnyKal`) a o § 11
+     *   odst. 2 nic neříkají,
+     * - rozpad vyloučených dob podle § 16 odst. 4 se odvodí z nepřítomností
+     *   týmž modulem včetně krytí příjmem a jeho úhrn se musí rovnat úhrnu,
+     *   který vydal původní program. Rozpor obou zdrojů blokuje.
+     *
      * @param array{employee_id:int,start:string,end:string|null} $employment
      * @param list<array{code:string,message:string,detail:array<string,mixed>}> $blockers
      * @return array<string,mixed>|null
@@ -1489,6 +1623,7 @@ final class EldpAnnualStatementBuilder
         PayrollTakeoverMonth $month,
         array $employment,
         array &$blockers,
+        ?PayrollTakeoverYear $takeover = null,
     ): ?array {
         $label = self::monthLabel($periodStart);
         $periodEnd = (new \DateTimeImmutable($periodStart))
@@ -1537,26 +1672,36 @@ final class EldpAnnualStatementBuilder
          * kontrolují. Je to tatáž přísnost jako u `eldp_employment_dates_inconsistent`
          * mezi revizemi: nesourodý podklad se nesjednocuje, protože právě datum
          * „od" a „do" je to, co ČSSZ z listu čte.
+         *
+         * Výjimkou je řádek, jehož data později opravil sám původní program:
+         * převzatý řádek nese trvání vztahu, jak ho program znal v době zpracování
+         * měsíce, a pozdější řádek téhož vztahu s daty listu je jeho opravou
+         * ({@see self::supersededTakeoverDates()}).
          */
+        $superseded = false;
         if (($month->relationshipStartDate !== null
                 && $month->relationshipStartDate !== $employment['start'])
             || ($month->relationshipEndDate !== null
                 && $month->relationshipEndDate !== $employment['end'])
         ) {
-            $blockers[] = [
-                'code' => 'eldp_takeover_employment_dates_inconsistent',
-                'message' => "Převzatý měsíc {$label} eviduje jiné trvání pracovního vztahu ("
-                    . ($month->relationshipStartDate ?? '?') . ' – '
-                    . ($month->relationshipEndDate ?? 'trvá') . ') než schválené mzdové revize ('
-                    . $employment['start'] . ' – ' . ($employment['end'] ?? 'trvá')
-                    . '); evidenční list nesmí sečíst nesourodé podklady.',
-                'detail' => $detail + [
-                    'takeover_start_date' => $month->relationshipStartDate,
-                    'takeover_end_date' => $month->relationshipEndDate,
-                ],
-            ];
+            $superseded = $takeover !== null
+                && self::supersededTakeoverDates($takeover->forEmployment($employmentId), $month, $employment);
+            if (!$superseded) {
+                $blockers[] = [
+                    'code' => 'eldp_takeover_employment_dates_inconsistent',
+                    'message' => "Převzatý měsíc {$label} eviduje jiné trvání pracovního vztahu ("
+                        . ($month->relationshipStartDate ?? '?') . ' – '
+                        . ($month->relationshipEndDate ?? 'trvá') . ') než schválené mzdové revize ('
+                        . $employment['start'] . ' – ' . ($employment['end'] ?? 'trvá')
+                        . '); evidenční list nesmí sečíst nesourodé podklady.',
+                    'detail' => $detail + [
+                        'takeover_start_date' => $month->relationshipStartDate,
+                        'takeover_end_date' => $month->relationshipEndDate,
+                    ],
+                ];
 
-            return null;
+                return null;
+            }
         }
 
         $insuranceFrom = max($periodStart, $employment['start']);
@@ -1577,14 +1722,45 @@ final class EldpAnnualStatementBuilder
 
             return null;
         }
+        $base = $month->socialBaseMinor;
+        if ($base < 0) {
+            $blockers[] = [
+                'code' => 'eldp_takeover_assessment_base_missing',
+                'message' => "Převzatý měsíc {$label} má záporný vyměřovací základ sociálního pojištění."
+                    . $where,
+                'detail' => $detail,
+            ];
+
+            return null;
+        }
+        $absences = $takeover?->absencesFor($employmentId, $insuranceFrom, $insuranceTo) ?? [];
         /*
          * Nula dnů je u převzatého měsíce dvojznačná — může znamenat „původní
-         * systém to nevydal" i „měsíc není dobou pojištění". Rozhoduje výhradně
-         * příznak účasti, který zapisovatel převzatých mezd drží v souladu s § 11
-         * odst. 2 zákona č. 155/1995 Sb. Dopočítat dny odjinud se nesmí.
+         * systém to nevydal" i „měsíc není dobou pojištění". Rozhoduje příznak
+         * účasti; měsíc s účastí a nulovým základem pak § 11 odst. 2 zákona
+         * č. 155/1995 Sb. nad evidovanými nepřítomnostmi.
          */
-        $days = $month->pensionParticipation ? $month->insuranceDays : 0;
-        if ($month->pensionParticipation && $days <= 0) {
+        $outside = false;
+        if ($month->pensionParticipation && $base === 0) {
+            $status = EldpExcludedPeriodDeriver::insuranceMonthStatus($absences, 0, $insuranceFrom, $insuranceTo);
+            if ($status === EldpExcludedPeriodDeriver::MONTH_UNEXPLAINED) {
+                $blockers[] = [
+                    'code' => 'eldp_takeover_assessment_base_missing',
+                    'message' => "Převzatý měsíc {$label} vykazuje dobu pojištění, ale nemá vyměřovací "
+                        . 'základ sociálního pojištění a evidované nepřítomnosti to nevysvětlí '
+                        . '(§ 11 odst. 2 zákona č. 155/1995 Sb.). Zaevidujte nepřítomnost s daty '
+                        . 'v Mzdy → Nepřítomnosti, nebo doplňte základ u převzatého měsíce v Mzdy → '
+                        . 'Kontrola převodu mezd.',
+                    'detail' => $detail,
+                ];
+
+                return null;
+            }
+            $outside = $status === EldpExcludedPeriodDeriver::MONTH_OUTSIDE_INSURANCE;
+        }
+        $available = EldpExcludedPeriodDeriver::inclusiveDays($insuranceFrom, $insuranceTo);
+        $days = $month->pensionParticipation && !$outside ? $month->insuranceDays : 0;
+        if ($month->pensionParticipation && !$outside && $days <= 0) {
             $blockers[] = [
                 'code' => 'eldp_takeover_insurance_days_missing',
                 'message' => "Převzatý měsíc {$label} se účastní důchodového pojištění, ale nemá dny "
@@ -1594,7 +1770,18 @@ final class EldpAnnualStatementBuilder
 
             return null;
         }
-        $available = EldpExcludedPeriodDeriver::inclusiveDays($insuranceFrom, $insuranceTo);
+        /*
+         * Dny řádku s opraveným trváním vztahu odpovídají starému trvání; dobou
+         * pojištění měsíce je ale interval podle opravy. Přijme se jen tehdy,
+         * když převzaté dny přesně odpovídají starému intervalu — jiný rozdíl
+         * by nebyl následkem opravy data, ale jiným údajem.
+         */
+        if ($superseded && $days > 0 && $days !== $available) {
+            $ownSpan = $month->insuranceSpan();
+            if ($ownSpan !== null && $days === EldpExcludedPeriodDeriver::inclusiveDays($ownSpan[0], $ownSpan[1])) {
+                $days = $available;
+            }
+        }
         if ($days > $available) {
             $blockers[] = [
                 'code' => 'eldp_takeover_insurance_days_exceed_period',
@@ -1608,29 +1795,51 @@ final class EldpAnnualStatementBuilder
         /*
          * Vyloučené doby jdou do listu jen rozepsané na složky § 16 odst. 4
          * (nemoc, PPM, OČR, otcovská, ostatní) — převzatá data mají jen jejich
-         * součet. Zařadit celý součet do jedné složky by byl vymyšlený údaj,
-         * takže měsíc s vyloučenými dobami zůstává blokátorem. Součet nula se
-         * bere jako doložená nula; stvrzuje ji výslovné potvrzení účetní
-         * (`excluded_days_confirmed`), které se vztahuje na celý list.
+         * součet. Rozpad se proto odvodí z evidovaných nepřítomností měsíce
+         * (týmž modulem jako u spočítaného měsíce, s krytím příjmem) a jeho úhrn
+         * se musí shodovat s převzatým. Bez nepřítomností, nebo při rozporu,
+         * zůstává blokátor: zařadit součet do jedné složky by byl vymyšlený údaj.
          */
-        if ($month->excludedDays !== 0) {
+        $excluded = self::noExcludedDays();
+        if ($absences !== [] && !$outside && $month->pensionParticipation) {
+            $excluded = $this->excludedPeriods->derive($absences, $insuranceFrom, $insuranceTo, $label, $base);
+            foreach ($excluded['blockers'] as $blocker) {
+                $blockers[] = array_replace_recursive($blocker, ['detail' => $detail]);
+            }
+            if ($excluded['blockers'] !== []) {
+                return null;
+            }
+            if ($excluded['total'] !== $month->excludedDays) {
+                $blockers[] = [
+                    'code' => 'eldp_takeover_excluded_days_mismatch',
+                    'message' => "Převzatý měsíc {$label} má {$month->excludedDays} dnů vyloučených dob, ale "
+                        . "evidované nepřítomnosti jich podle § 16 odst. 4 zákona č. 155/1995 Sb. dávají "
+                        . "{$excluded['total']}. Opravte nepřítomnosti v Mzdy → Nepřítomnosti, nebo "
+                        . 'převzatý měsíc v Mzdy → Kontrola převodu mezd.',
+                    'detail' => $detail + [
+                        'excluded_days' => $month->excludedDays,
+                        'derived_excluded_days' => $excluded['total'],
+                    ],
+                ];
+
+                return null;
+            }
+        } elseif ($month->excludedDays !== 0) {
             $blockers[] = [
                 'code' => 'eldp_takeover_excluded_days_breakdown_missing',
                 'message' => "Převzatý měsíc {$label} má {$month->excludedDays} dnů vyloučených dob, "
                     . 'ale ne jejich rozpad podle § 16 odst. 4 zákona č. 155/1995 Sb. '
-                    . 'Zaevidujte odpovídající nepřítomnosti v Mzdy → Nepřítomnosti a měsíc '
-                    . 'přepočítejte, nebo evidenční list podejte mimo aplikaci.',
+                    . 'Zaevidujte odpovídající nepřítomnosti s daty v Mzdy → Nepřítomnosti, '
+                    . 'nebo evidenční list podejte mimo aplikaci.',
                 'detail' => $detail + ['excluded_days' => $month->excludedDays],
             ];
 
             return null;
         }
-        $base = $month->socialBaseMinor;
-        if ($base < 0 || ($days > 0 && $base === 0)) {
+        if ($excluded['total'] > $days) {
             $blockers[] = [
-                'code' => 'eldp_takeover_assessment_base_missing',
-                'message' => "Převzatý měsíc {$label} vykazuje dobu pojištění, ale nemá vyměřovací "
-                    . 'základ sociálního pojištění.' . $where,
+                'code' => 'eldp_excluded_days_exceed_period',
+                'message' => "Vyloučené doby za {$label} přesahují dobu pojištění v měsíci.",
                 'detail' => $detail,
             ];
 
@@ -1660,6 +1869,11 @@ final class EldpAnnualStatementBuilder
                 // Otisk přesně toho řádku, ze kterého měsíc vznikl — protějšek
                 // otisků snapshotů mzdové revize v `source_revisions`.
                 'row_sha256' => hash('sha256', CanonicalJson::encode($month->toArray())),
+                // Odchylky od převzatého řádku, jen kde nastaly (otisk ostatních
+                // listů se nemění): opravené trvání vztahu a měsíc mimo dobu
+                // pojištění podle evidovaných nepřítomností.
+                ...($superseded ? ['dates_superseded_by_later_row' => true] : []),
+                ...($outside ? ['outside_insurance_by_absences' => true] : []),
             ],
             'insurance_from' => $insuranceFrom,
             'insurance_to' => $insuranceTo,
@@ -1667,13 +1881,52 @@ final class EldpAnnualStatementBuilder
             'assessment_base_czk' => intdiv($base, 100),
             'code' => $code,
             'participates' => $month->pensionParticipation,
+            'outside_insurance' => !$month->pensionParticipation || $outside,
             'post_termination' => false,
-            'excluded' => [
-                'components' => array_fill_keys(EldpExcludedPeriodDeriver::COMPONENTS, 0),
-                'total' => 0,
-                'provenance' => [],
-            ],
+            'excluded' => $excluded,
+            // Odečtené doby převzatý měsíc neumí doložit; kód D nad ním blokuje.
+            'deductible' => null,
         ];
+    }
+
+    /**
+     * Opravil převzatý řádek s jiným trváním vztahu pozdější řádek téhož vztahu?
+     *
+     * Převod přebírá trvání vztahu z každého zpracovaného měsíce zvlášť (u PAMICA
+     * `DatOdch` záznamu `MZ`), tedy jak ho původní program znal v době zpracování.
+     * Když program skončení vztahu později opraví, starší měsíc dál nese původní
+     * datum a novější měsíc nové. Platí poslední verze: řádek je opravený, když
+     * nejpozdější převzatý řádek vztahu s vyplněným datem nese přesně trvání
+     * listu a žádný DŘÍVĚJŠÍ řádek ho ještě nenesl. Odchylka uprostřed řady,
+     * kterou obklopují řádky s platným trváním, opravou není (program by se
+     * k původnímu datu musel vrátit) a dál blokuje.
+     *
+     * @param list<PayrollTakeoverMonth> $rows
+     * @param array{employee_id:int,start:string,end:string|null} $employment
+     */
+    private static function supersededTakeoverDates(array $rows, PayrollTakeoverMonth $month, array $employment): bool
+    {
+        $latest = null;
+        $finalBefore = false;
+        $matchesFinal = static fn (PayrollTakeoverMonth $row): bool =>
+            ($row->relationshipStartDate ?? $employment['start']) === $employment['start']
+            && $row->relationshipEndDate === $employment['end'];
+        foreach ($rows as $row) {
+            if ($row->relationshipStartDate === null && $row->relationshipEndDate === null) {
+                continue;
+            }
+            if ($latest === null || $row->period > $latest->period) {
+                $latest = $row;
+            }
+            if ($row->period < $month->period && $matchesFinal($row)) {
+                $finalBefore = true;
+            }
+        }
+
+        return $latest !== null
+            && !$finalBefore
+            && $latest->period > $month->period
+            && $matchesFinal($latest);
     }
 
     /**
@@ -1815,6 +2068,13 @@ final class EldpAnnualStatementBuilder
      * vyměřovací základ jen za celý měsíc a rozdělit ho na dvě sekce by byl
      * vymyšlený údaj v zákonné evidenci.
      *
+     * Měsíc s kódem D nese odečtené doby (§ 38 odst. 4 písm. h) zákona
+     * č. 582/1991 Sb., údaj 40 ELDP) odvozené z nepřítomností
+     * ({@see EldpExcludedPeriodDeriver::deriveDeducted()}) a dny pojištění jsou
+     * interval Od–Do minus odečtené doby (Všeobecné zásady ELDP, údaj Dny).
+     * Převzatý měsíc nepřítomnosti v potřebném rozsahu doložit neumí, takže kód
+     * D nad ním blokuje.
+     *
      * @param list<array<string,mixed>> $lines
      * @param list<array{code:string,message:string,detail:array<string,mixed>}> $blockers
      * @return list<array<string,mixed>>
@@ -1834,6 +2094,25 @@ final class EldpAnnualStatementBuilder
             $placement = EldpPensionAgeCode::placement($codeFrom, $from, $to);
             if ($placement === EldpPensionAgeCode::PENSION_AGE) {
                 $lines[$index]['code'] = EldpPensionAgeCode::withPensionAge((string) $line['code']);
+                $deductible = $line['deductible'] ?? null;
+                if ($deductible === null) {
+                    $blockers[] = [
+                        'code' => 'eldp_deducted_days_unknown',
+                        'message' => 'Za ' . self::monthLabel((string) $line['period_start'])
+                            . ' platí kód D (po dovršení důchodového věku), ale převzatý měsíc '
+                            . 'nedoloží odečtené doby (neplacené volno, neomluvenou absenci, '
+                            . 'omluvné důvody, § 38 odst. 4 písm. h) zákona č. 582/1991 Sb.). '
+                            . 'Evidenční list podejte mimo aplikaci.',
+                        'detail' => [
+                            'period_start' => (string) $line['period_start'],
+                            'employment_id' => $employmentId,
+                        ],
+                    ];
+                    continue;
+                }
+                $lines[$index]['deducted'] = $deductible;
+                $lines[$index]['insurance_days'] = EldpExcludedPeriodDeriver::inclusiveDays($from, $to)
+                    - (int) $deductible['total'];
                 continue;
             }
             if ($placement === EldpPensionAgeCode::MID_INTERVAL) {
@@ -1854,6 +2133,223 @@ final class EldpAnnualStatementBuilder
         }
 
         return $lines;
+    }
+
+    /**
+     * Nemoc, karanténa a mateřství v měsíci bez účasti (DPP, zaměstnání malého
+     * rozsahu, DPČ pod rozhodnou částkou).
+     *
+     * Nárok na dávku, a tedy vyloučená doba podle § 16 odst. 4 písm. a) zákona
+     * č. 155/1995 Sb., vzniká, když sociální událost začala v měsíci s účastí,
+     * nebo podle § 15a zákona č. 187/2006 Sb. (od 1. 2. 2018), když vztah byl
+     * účasten pojištění ve třech kalendářních měsících bezprostředně před
+     * měsícem, v němž událost vznikla. Pak se vyloučená doba vykáže v rozsahu
+     * trvání vztahu, započte se do dnů a měsíc zůstane označen „X" (Metodická
+     * pomůcka ČSSZ k ELDP, př. 31 a 38; Zadání ELDP12, údaj Dny: u specifické
+     * doby Dny = Vyloučené doby). Bez nároku se doba nevykazuje (př. 32).
+     *
+     * Účast v měsících před vykazovaným rokem list nezná; nedá-li se nárok bez
+     * nich rozhodnout, blokuje.
+     *
+     * @param list<array<string,mixed>> $lines
+     * @param list<array{code:string,message:string,detail:array<string,mixed>}> $blockers
+     * @return list<array<string,mixed>>
+     */
+    private function applySection15a(array $lines, int $year, string $employmentStart, int $employmentId, array &$blockers): array
+    {
+        $participation = [];
+        foreach ($lines as $line) {
+            $participation[substr((string) $line['period_start'], 0, 7)] = $line['participates'] === true;
+        }
+        $yearStart = sprintf('%04d-01', $year);
+        $startPeriod = substr($employmentStart, 0, 7);
+        $participates = static function (string $period) use ($participation, $yearStart, $startPeriod): ?bool {
+            if (isset($participation[$period])) {
+                return $participation[$period];
+            }
+            // Měsíc před nástupem nebo mimo vztah účastný nebyl; měsíc trvání
+            // vztahu před vykazovaným rokem list nezná.
+            if ($period < $startPeriod || $period >= $yearStart) {
+                return false;
+            }
+
+            return null;
+        };
+        foreach ($lines as $index => $line) {
+            $candidates = $line['section_15a_absences'] ?? [];
+            unset($lines[$index]['section_15a_absences']);
+            if ($candidates === []) {
+                continue;
+            }
+            $entitled = [];
+            $decisions = [];
+            foreach ($candidates as $absence) {
+                $eventMonth = substr((string) $absence['date_from'], 0, 7);
+                $eventParticipates = $participates($eventMonth);
+                $preceding = [];
+                for ($back = 1; $back <= 3; ++$back) {
+                    $preceding[] = (new \DateTimeImmutable($eventMonth . '-01'))
+                        ->modify("-{$back} month")->format('Y-m');
+                }
+                $precedingParticipation = array_map($participates, $preceding);
+                if ($eventParticipates === null
+                    || ($eventParticipates === false && in_array(null, $precedingParticipation, true))
+                ) {
+                    $blockers[] = [
+                        'code' => 'eldp_section_15a_history_unavailable',
+                        'message' => 'V měsíci ' . self::monthLabel((string) $line['period_start'])
+                            . ' bez účasti na pojištění trvala nemoc, karanténa nebo mateřství (#'
+                            . $absence['id'] . '). Zda je vyloučenou dobou, rozhoduje účast '
+                            . 'v měsících před vznikem události (§ 15a zákona č. 187/2006 Sb.), '
+                            . 'které leží před vykazovaným rokem. Evidenční list podejte mimo aplikaci.',
+                        'detail' => [
+                            'period_start' => (string) $line['period_start'],
+                            'employment_id' => $employmentId,
+                            'absence_id' => $absence['id'],
+                        ],
+                    ];
+                    continue;
+                }
+                $rule = $eventParticipates
+                    ? 'event_in_participating_month'
+                    : (!in_array(false, $precedingParticipation, true) ? 'section_15a' : null);
+                $decisions[] = [
+                    'absence_id' => $absence['id'],
+                    'event_month' => $eventMonth,
+                    'entitled' => $rule !== null,
+                    'rule' => $rule ?? 'no_entitlement',
+                ];
+                if ($rule !== null) {
+                    $entitled[] = $absence;
+                }
+            }
+            if ($decisions === []) {
+                continue;
+            }
+            $lines[$index]['section_15a'] = $decisions;
+            if ($entitled === []) {
+                continue;
+            }
+            $excluded = $this->excludedPeriods->derive(
+                $entitled,
+                (string) $line['insurance_from'],
+                (string) $line['insurance_to'],
+                self::monthLabel((string) $line['period_start']),
+            );
+            foreach ($excluded['blockers'] as $blocker) {
+                $blocker['detail']['period_start'] = $line['period_start'];
+                $blocker['detail']['employment_id'] = $employmentId;
+                $blockers[] = $blocker;
+            }
+            $lines[$index]['excluded'] = $excluded;
+            $lines[$index]['insurance_days'] = $excluded['total'];
+        }
+
+        return $lines;
+    }
+
+    /**
+     * Nemoc, karanténa a mateřství (jen předporodní část) v měsíci bez účasti,
+     * o kterých rozhoduje {@see self::applySection15a()}.
+     *
+     * @param list<array<string,mixed>> $absences
+     * @return list<array<string,mixed>>
+     */
+    private static function section15aAbsences(array $absences, string $from, string $to): array
+    {
+        return array_values(array_filter(
+            $absences,
+            static fn (array $absence): bool => in_array($absence['absence_type'] ?? null, ['dpn', 'quarantine', 'ppm'], true)
+                && is_string($absence['date_from'] ?? null)
+                && is_string($absence['date_to'] ?? null)
+                && $absence['date_from'] <= $to
+                && $absence['date_to'] >= $from,
+        ));
+    }
+
+    /**
+     * Opětovný nástup do tří měsíců ve stejném roce.
+     *
+     * Všeobecné zásady ELDP, Hlavní zásady: skončí-li výdělečná činnost
+     * a občan ve stejném roce do tří měsíců u téhož zaměstnavatele činnost
+     * znovu zahájí, evidenční list se neuzavírá ani neodesílá a další doba se
+     * zapíše do dalších řádků téhož listu. Modul vede list za pracovní vztah,
+     * takže dva vztahy do jednoho listu nespojí; doložený opětovný nástup proto
+     * zastaví uzavření listu prvního vztahu.
+     *
+     * @param array<string,array<string,mixed>> $months všechny revize roku
+     * @param array{employee_id:int,start:string,end:?string} $employment
+     * @param list<array{code:string,message:string,detail:array<string,mixed>}> $blockers
+     */
+    private function assertNoRehireWithinThreeMonths(
+        array $months,
+        array $employment,
+        int $employmentId,
+        int $year,
+        array &$blockers,
+    ): void {
+        $end = $employment['end'];
+        if ($end === null || substr($end, 0, 4) !== sprintf('%04d', $year)) {
+            return;
+        }
+        $endDate = new \DateTimeImmutable($end);
+        $limit = $endDate->modify('+3 months');
+        if ($limit->format('d') !== $endDate->format('d')) {
+            $limit = $endDate->modify('first day of +3 months')->modify('last day of this month');
+        }
+        $limit = min($limit->format('Y-m-d'), sprintf('%04d-12-31', $year));
+        foreach ($months as $periodStart => $month) {
+            if ((string) $periodStart < substr($end, 0, 7) . '-01') {
+                continue;
+            }
+            $people = is_array($month['input'] ?? null) ? ($month['input']['people'] ?? []) : [];
+            foreach (is_array($people) ? $people : [] as $person) {
+                if (!is_array($person) || (($person['employee'] ?? [])['id'] ?? null) !== $employment['employee_id']) {
+                    continue;
+                }
+                foreach ((array) ($person['employments'] ?? []) as $entry) {
+                    $other = is_array($entry) ? ($entry['employment'] ?? null) : null;
+                    if (!is_array($other) || ($other['id'] ?? null) === $employmentId) {
+                        continue;
+                    }
+                    $start = $other['actual_start_date'] ?? $other['start_date'] ?? null;
+                    if (is_string($start) && $start > $end && $start <= $limit) {
+                        $blockers[] = [
+                            'code' => 'eldp_rehire_within_three_months',
+                            'message' => 'Zaměstnanec u vás znovu nastoupil ' . $start . ' (pracovní vztah #'
+                                . $other['id'] . '), do tří měsíců od skončení ' . $end . ' ve stejném roce. '
+                                . 'Evidenční list se v takovém případě neuzavírá a další doba se zapíše do '
+                                . 'dalších řádků téhož listu (Všeobecné zásady ELDP). Modul vede list za '
+                                . 'pracovní vztah a oba vztahy do jednoho listu nespojí; list za oba vztahy '
+                                . 'podejte mimo aplikaci.',
+                            'detail' => [
+                                'employment_id' => $employmentId,
+                                'rehire_employment_id' => $other['id'],
+                                'rehire_start_date' => $start,
+                            ],
+                        ];
+
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Typ ELDP v záhlaví (Všeobecné zásady ELDP, Typ ELDP): 03 při úmrtí,
+     * 02 když činnost ve vykazovaném roce skončila, a to i přesně 31. prosince
+     * nebo dříve (list jen s dodatečně zúčtovaným příjmem), jinak 01. Opravný
+     * list nese 5 a druhou číslici opravovaného typu ({@see self::form()}).
+     * Typ je nezávislý na lhůtě: konec 31. 12. má řádnou roční lhůtu, ale typ 02.
+     */
+    private static function eldpType(?string $employmentEnd, int $year, ?string $deathOn): string
+    {
+        if ($deathOn !== null) {
+            return '03';
+        }
+
+        return $employmentEnd !== null && $employmentEnd <= sprintf('%04d-12-31', $year) ? '02' : '01';
     }
 
     private static function missingMonthMessage(
@@ -1880,10 +2376,10 @@ final class EldpAnnualStatementBuilder
      * u samostatného evidenčního listu čte: typ listu, „zaměstnán od" a datum
      * vyhotovení. Kontrolní XML je proto nemá a obrazovka je ukazuje k opisu.
      *
-     * - **Typ** `01` = evidenční list za rok nebo na výzvu, `02` = při skončení
-     *   zaměstnání (přijaté listy jiných mzdových programů takhle rozlišují
-     *   roční a ukončovací list). Opravný list nese `5` + druhou číslici
-     *   opravovaného typu (`51`, `52`) a odkaz na opravovaný list.
+     * - **Typ** podle {@see self::eldpType()}: `01` = činnost trvá, `02` =
+     *   činnost v roce skončila (i k 31. 12.), `03` = úmrtí. Opravný list nese
+     *   `5` + druhou číslici opravovaného typu (`51`, `52`, `53`) a odkaz na
+     *   opravovaný list.
      * - **Datum vyhotovení** nesmí předcházet údaji „Do" žádného řádku — ČSSZ
      *   takový list odmítne chybou 251 („Datum vyhotovení ELDP předchází datum
      *   v údaji Do"). Nezadá-li ho účetní, bere se nejdřívější přípustné datum:
@@ -1896,7 +2392,7 @@ final class EldpAnnualStatementBuilder
      */
     private function form(
         array $confirmation,
-        string $statementKind,
+        string $type,
         string $employedFrom,
         array $sections,
         string $lastSettlementEnd,
@@ -1927,14 +2423,28 @@ final class EldpAnnualStatementBuilder
                     . 'nejdříve v den „Do“.',
             );
         }
-        $type = $statementKind === 'termination' ? '02' : '01';
+        /*
+         * Logický test ELDP12 č. 54: datum vyhotovení nesmí být pozdější než
+         * datum přijetí listu. List s datem v budoucnosti ČSSZ odmítne; týká se
+         * i výchozího data (konec posledního zúčtovaného měsíce), když se list
+         * připravuje před jeho koncem.
+         */
+        $today = $this->clock?->now()->setTimezone(new \DateTimeZone('Europe/Prague'))->format('Y-m-d');
+        if ($today !== null && $preparedOn > $today) {
+            throw new EldpValidationException(
+                'eldp_prepared_on_future',
+                "Datum vyhotovení {$preparedOn} je v budoucnosti; ČSSZ list s datem vyhotovení "
+                    . 'pozdějším než den přijetí odmítne (logický test 54). Zadejte datum '
+                    . 'vyhotovení mezi datem „Do“ a dneškem.',
+            );
+        }
         $corrects = $confirmation['corrects'] ?? null;
         $correction = null;
         if ($corrects !== null) {
             $correctedType = is_array($corrects) ? ($corrects['eldp_type'] ?? null) : null;
             $correctedId = is_array($corrects) ? ($corrects['statement_id'] ?? null) : null;
             $correctedOn = is_array($corrects) ? ($corrects['prepared_on'] ?? null) : null;
-            if (!in_array($correctedType, ['01', '02'], true)
+            if (!in_array($correctedType, ['01', '02', '03'], true)
                 || !is_int($correctedId)
                 || $correctedId <= 0
                 || ($correctedOn !== null && (!is_string($correctedOn) || !self::isDate($correctedOn)))
@@ -2009,7 +2519,7 @@ final class EldpAnnualStatementBuilder
              * vyznačuje „X" v řádku měsíců. Datová věta JMHZ `eldpType` pro to
              * prvek nemá; údaj proto nese podklad a obrazovka evidenčního listu.
              */
-            if ($line['insurance_days'] === 0) {
+            if (($line['outside_insurance'] ?? $line['insurance_days'] === 0) === true) {
                 $current['months_without_insurance'][] = (int) substr(
                     (string) $line['period_start'],
                     5,
@@ -2022,6 +2532,7 @@ final class EldpAnnualStatementBuilder
                 $current['excluded_days'][$key] += $value;
             }
             $current['excluded_days_total'] += $line['excluded']['total'];
+            $current['deducted_days_total'] += (int) ($line['deducted']['total'] ?? 0);
             foreach ($line['excluded']['provenance'] as $item) {
                 $current['excluded_days_provenance'][] = $item + [
                     'period_start' => $line['period_start'],
@@ -2031,6 +2542,7 @@ final class EldpAnnualStatementBuilder
         if ($current !== null) {
             $sections[] = $current;
         }
+        $sections = self::moveBaseIntoPensionAgeSection($sections);
         /*
          * Dodatečně zúčtovaný příjem po skončení vztahu tvoří vlastní řádek
          * bez „Od", „Do" a dnů — jen s kódem „P+" a vyměřovacím základem.
@@ -2060,11 +2572,106 @@ final class EldpAnnualStatementBuilder
                         . 'písm. a) a j) zákona č. 155/1995 Sb.',
                 );
             }
-            if ($section['excluded_days_total'] > $section['insurance_days']) {
+            $code = (string) $section['code'];
+            $second = $code[strlen($code) - 2] ?? '';
+            $third = $code[strlen($code) - 1] ?? '';
+            /*
+             * U kódu D jsou vyloučené doby podmnožinou odečtených (logický
+             * test ELDP12 č. 39) a dny pojištění jsou interval minus odečtené
+             * doby, takže vyloučené doby počet dnů přesáhnout smějí (test 37
+             * se na kód D nevztahuje).
+             */
+            if ($second === 'D') {
+                if ($section['excluded_days_total'] > $section['deducted_days_total']) {
+                    throw new EldpValidationException(
+                        'eldp_excluded_days_exceed_deducted',
+                        'Vyloučené doby sekce s kódem D přesahují odečtené doby (logický test ELDP12 č. 39).',
+                    );
+                }
+                // Logický test 43 a kontrola JMHZ 59 část 4.
+                if ($section['insurance_days'] === 0
+                    && $section['deducted_days_total'] === $section['excluded_days_total']
+                    && $section['assessment_base_czk'] !== 0
+                ) {
+                    throw new EldpValidationException(
+                        'eldp_base_with_fully_excluded_section',
+                        'Sekce ' . $code . ' po dovršení důchodového věku nemá započtené dny a celá je '
+                            . 'vyloučenou dobou, ale nese vyměřovací základ, který nejde přiřadit '
+                            . 'předcházejícímu řádku (logický test 43). Evidenční list podejte mimo aplikaci.',
+                    );
+                }
+            } elseif ($section['excluded_days_total'] > $section['insurance_days']) {
                 throw new EldpValidationException(
                     'eldp_excluded_days_exceed_period',
                     'Vyloučené doby sekce přesahují dobu pojištění.',
                 );
+            }
+            /*
+             * Logický test ELDP12 č. 41 a kontrola JMHZ 59 část 2: jsou-li dny
+             * sekce celé vyloučenou dobou (a druhý znak není D ani P, třetí
+             * není S), vyměřovací základ se neuvádí. Krytí příjmem
+             * ({@see EldpExcludedPeriodDeriver::derive()}) takovou sekci se
+             * základem nedovolí; kdyby přesto vznikla, nesmí odejít.
+             */
+            if ($section['valid_from'] !== null
+                && $second !== 'D' && $second !== 'P' && $third !== 'S'
+                && $section['insurance_days'] === $section['excluded_days_total']
+                && $section['assessment_base_czk'] !== 0
+            ) {
+                throw new EldpValidationException(
+                    'eldp_base_with_fully_excluded_section',
+                    'Sekce ' . $code . ' od ' . $section['valid_from'] . ' má všechny dny pojištění '
+                        . 'vyloučenou dobou, ale nese vyměřovací základ; ČSSZ takovou sekci odmítne '
+                        . '(logický test 41). Zkontrolujte nepřítomnosti a příjmy sekce.',
+                );
+            }
+        }
+
+        return $sections;
+    }
+
+    /**
+     * Vyměřovací základ při přechodu na kód D (logický test ELDP12 č. 61,
+     * Zadání ELDP12 údaj 39, kontrola JMHZ 59 část 3).
+     *
+     * Navazují-li na sebe řádek před dovršením důchodového věku a řádek s kódem
+     * D téhož druhu činnosti, uvede se vyměřovací základ úhrnem v řádku po
+     * dovršení věku a v předcházejícím řádku se neuvádí. Výjimka: je-li celé
+     * období po dovršení věku dobou odečtenou (řádek D bez započtených dnů),
+     * uvede se základ úhrnem v řádku do dovršení věku. Řádky jiného druhu
+     * činnosti nebo nenavazující zůstávají se svým základem.
+     *
+     * @param list<array<string,mixed>> $sections
+     * @return list<array<string,mixed>>
+     */
+    private static function moveBaseIntoPensionAgeSection(array $sections): array
+    {
+        $activity = static fn (string $code): string => substr($code, 0, strlen($code) - 2);
+        $second = static fn (string $code): string => $code[strlen($code) - 2] ?? '';
+        for ($index = 1, $count = count($sections); $index < $count; ++$index) {
+            $before = $sections[$index - 1];
+            $after = $sections[$index];
+            if ($second((string) $after['code']) !== 'D'
+                || $second((string) $before['code']) === 'D'
+                || $activity((string) $after['code']) !== $activity((string) $before['code'])
+                || !is_string($before['valid_to']) || !is_string($after['valid_from'])
+                || (new \DateTimeImmutable($before['valid_to']))->modify('+1 day')->format('Y-m-d')
+                    !== $after['valid_from']
+            ) {
+                continue;
+            }
+            if ($after['insurance_days'] > 0) {
+                $sections[$index]['assessment_base_czk'] += $before['assessment_base_czk'];
+                $sections[$index - 1]['assessment_base_czk'] = 0;
+                if ($before['assessment_base_czk'] !== 0) {
+                    $sections[$index]['assessment_base_moved_from_ordinal'] = $before['ordinal'];
+                }
+                continue;
+            }
+            $sections[$index - 1]['assessment_base_czk'] += $after['assessment_base_czk'];
+            $sections[$index]['assessment_base_czk'] = 0;
+            if ($after['assessment_base_czk'] !== 0) {
+                $sections[$index - 1]['assessment_base_moved_from_ordinal'] = $after['ordinal'];
             }
         }
 
@@ -2130,6 +2737,7 @@ final class EldpAnnualStatementBuilder
         array &$blockers,
         ?string $expectedKind = 'employment',
         bool $postTermination = false,
+        bool $smallScale = false,
     ): ?array {
         $people = $result['people'] ?? null;
         $matched = null;
@@ -2174,12 +2782,13 @@ final class EldpAnnualStatementBuilder
         $participation = is_array($match) ? ($match['participation'] ?? null) : null;
         $status = is_array($participation) ? ($participation['status'] ?? null) : null;
         /*
-         * Pracovní poměr bez účasti je rozpor, který list nesmí překrýt. DPČ
-         * a DPP se naopak účastní jen v některých měsících, takže neúčast je
-         * u nich doložený stav měsíce, ne chybějící podklad. U příjmu
-         * zúčtovaného po skončení vztahu rozhoduje jen vyměřovací základ.
+         * Pracovní poměr bez účasti je rozpor, který list nesmí překrýt. DPČ,
+         * DPP a zaměstnání malého rozsahu se naopak účastní jen v některých
+         * měsících, takže neúčast je u nich doložený stav měsíce, ne chybějící
+         * podklad. U příjmu zúčtovaného po skončení vztahu rozhoduje jen
+         * vyměřovací základ.
          */
-        $acceptedStatuses = $postTermination
+        $acceptedStatuses = $postTermination || $smallScale
             ? ['participates', 'does_not_participate']
             : ($expectedKind === 'employment'
                 ? ['participates']

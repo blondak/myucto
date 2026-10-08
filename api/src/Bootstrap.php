@@ -436,6 +436,13 @@ final class Bootstrap
                     $c->get(\MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationReceiptIdentityService::class),
                     $c->get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzReceiptIdentityService::class),
                 ),
+            // Hodiny jsou v builderu volitelné (čisté sestavení v unit testech), PHP-DI
+            // je ale autowiringem nevyplní. Bez nich by logický test ELDP12 č. 54
+            // (datum vyhotovení v budoucnosti) v produkci tiše neproběhl.
+            \MyInvoice\Service\Payroll\Submission\Eldp\EldpAnnualStatementBuilder::class
+                => fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Submission\Eldp\EldpAnnualStatementBuilder(
+                    clock: $c->get(ClockInterface::class),
+                ),
             // Zmrazená datová věta se čte až v okamžiku, kdy protokol opravdu
             // nese identitu. Přímá závislost by byla kruhová: čtečka artefaktu
             // si bere PayrollSubmissionService, který si bere tuhle službu.

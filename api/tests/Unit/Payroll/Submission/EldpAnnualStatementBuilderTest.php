@@ -366,7 +366,11 @@ final class EldpAnnualStatementBuilderTest extends TestCase
         self::assertSame('2025-04-01', $sections[1]['valid_from']);
         self::assertSame('2025-12-31', $sections[1]['valid_to']);
         self::assertSame(275, $sections[1]['insurance_days']);
-        self::assertSame(90_000, $sections[1]['assessment_base_czk']);
+        // Logický test ELDP12 č. 61: základ úhrnem v řádku po dovršení věku,
+        // v navazujícím řádku před ním se neuvádí.
+        self::assertSame(0, $sections[0]['assessment_base_czk']);
+        self::assertSame(120_000, $sections[1]['assessment_base_czk']);
+        self::assertSame(0, $sections[1]['deducted_days_total']);
 
         $xml = (new EldpXmlSerializer())->serialize($statement);
         self::assertStringContainsString('<kod>1D+</kod>', $xml);
@@ -654,20 +658,25 @@ final class EldpAnnualStatementBuilderTest extends TestCase
         $this->build($revisions);
     }
 
-    public function testDeductedDaysMustBeConfirmedExplicitly(): void
+    /**
+     * Odečtené doby se odvozují, potvrzení „žádné nejsou" už list nepotřebuje
+     * (u kódu D by bylo nepravdivé).
+     */
+    public function testStatementNoLongerRequiresDeductedDaysConfirmation(): void
     {
         $confirmation = $this->confirmation();
         unset($confirmation['deducted_days_none']);
 
-        $this->expectException(EldpValidationException::class);
-        $this->expectExceptionMessage('odečítané doby');
-        (new EldpAnnualStatementBuilder())->build(
+        $statement = (new EldpAnnualStatementBuilder())->build(
             self::SUPPLIER_ID,
             self::EMPLOYMENT_ID,
             2025,
             $this->wholeYear(2025),
             $confirmation,
         );
+
+        self::assertTrue($statement->payload['confirmation']['deducted_days_derived']);
+        self::assertSame(0, $statement->sections()[0]['deducted_days_total']);
     }
 
     /**
