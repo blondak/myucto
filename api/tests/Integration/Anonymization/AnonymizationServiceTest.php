@@ -97,12 +97,14 @@ final class AnonymizationServiceTest extends TestCase
             self::assertStringNotContainsString($needle, $dump, "V kopii zůstal originální údaj {$needle}.");
         }
 
-        $client = $this->row($this->target, 'SELECT company_name, ic, dic, main_email, note FROM clients WHERE id = ?', [$this->clientId]);
+        $client = $this->row($this->target, 'SELECT company_name, ic, dic, main_email, note, email_subject_format, email_attachment_name_format FROM clients WHERE id = ?', [$this->clientId]);
         self::assertStringEndsWith('s.r.o.', (string) $client['company_name']);
         self::assertTrue(Pseudonymizer::isValidIco((string) $client['ic']));
         self::assertSame('CZ' . $client['ic'], $client['dic']);
         self::assertStringEndsWith('@' . Pseudonymizer::EMAIL_DOMAIN, (string) $client['main_email']);
         self::assertStringContainsString((string) $client['ic'], (string) $client['note'], 'IČO v poznámce má dostat tentýž pseudonym.');
+        self::assertStringContainsString('{DUZP_MM}/{DUZP_YYYY}', (string) $client['email_subject_format'], 'Zástupné znaky formátu mají zůstat.');
+        self::assertStringContainsString('{VS}', (string) $client['email_attachment_name_format']);
 
         $account = $this->row($this->target, 'SELECT account_number, account_key FROM client_bank_accounts WHERE client_id = ?', [$this->clientId]);
         self::assertTrue(Pseudonymizer::isValidAccountPart((string) $account['account_number']));
@@ -169,9 +171,11 @@ final class AnonymizationServiceTest extends TestCase
         $country = (int) $pdo->query('SELECT MIN(id) FROM countries')->fetchColumn();
         $currency = (int) $pdo->query('SELECT MIN(id) FROM currencies')->fetchColumn();
 
-        $pdo->prepare('INSERT INTO clients (supplier_id, company_name, ic, dic, street, city, zip, country_id, currency_default_id, main_email, phone, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        // Formáty předmětu a názvu PDF (#277) mívají jméno klienta i dodavatele přímo v textu.
+        $pdo->prepare('INSERT INTO clients (supplier_id, company_name, ic, dic, street, city, zip, country_id, currency_default_id, main_email, phone, note, email_subject_format, email_attachment_name_format) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
             ->execute([$this->supplierId, self::COMPANY, $this->ico, 'CZ' . $this->ico, 'Zkušební 12', 'Zkušebnice', '123 45', $country, $currency,
-                self::EMAIL, '+420 601 234 567', 'Smlouvu podepsala ' . self::PERSON . ', IČO: ' . $this->ico . ', účet ' . self::ACCOUNT . '/0100']);
+                self::EMAIL, '+420 601 234 567', 'Smlouvu podepsala ' . self::PERSON . ', IČO: ' . $this->ico . ', účet ' . self::ACCOUNT . '/0100',
+                self::COMPANY . ' {DUZP_MM}/{DUZP_YYYY} pro ' . self::PERSON, 'Faktura ' . $this->ico . ' {VS}']);
         $this->clientId = (int) $pdo->lastInsertId();
         $pdo->prepare('INSERT INTO client_bank_accounts (supplier_id, client_id, account_number, bank_code, account_key, bank_key) VALUES (?, ?, ?, ?, ?, ?)')
             ->execute([$this->supplierId, $this->clientId, self::ACCOUNT, '0100', self::ACCOUNT, '0100']);

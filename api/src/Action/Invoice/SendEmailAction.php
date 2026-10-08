@@ -115,7 +115,7 @@ final class SendEmailAction
         // ne upomínky — tento send flow se použije jen tady).
         $supplierId = (int) ($invoice['supplier_id'] ?? 0);
         $emailAttachments = [
-            ['path' => $pdfPath, 'name' => basename($pdfPath), 'contentType' => 'application/pdf'],
+            $this->varsBuilder->pdfAttachment($invoice, $pdfPath),
         ];
         $extraAttachments = $this->attachments->listForInvoice($id);
         $sentAttachmentIds = [];

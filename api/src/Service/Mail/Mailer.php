@@ -151,6 +151,11 @@ final class Mailer
         if ((bool) $this->config->get('demo.enabled', false)) {
             throw new DemoModeMailBlockedException('Demo režim neodesílá e-maily.');
         }
+        // Prázdný jednorázový předmět (API/MCP posílá `""`) není předmět — jinak by
+        // odešel e-mail s prázdnou hlavičkou Subject místo předmětu šablony či klienta.
+        if ($subjectOverride !== null && trim($subjectOverride) === '') {
+            $subjectOverride = null;
+        }
 
         // ── H-16: brzda odchozí pošty ────────────────────────────────────────
         // Pořadí NENÍ libovolné: nejdřív dělení dávky, teprve pak brzda.
@@ -289,8 +294,19 @@ final class Mailer
         if ($dbTpl !== null) {
             // DB šablona je editovatelná adminem — sandboxujeme proti SSTI
             $sandbox = $this->sandboxedTwig();
-            $subjectTemplate = $subjectOverride ?? $dbTpl['subject'];
-            $vars['subject'] = $sandbox->createTemplate($subjectTemplate)->render($vars);
+            // Předmět podle klienta (InvoiceEmailVarsBuilder, #277) přebíjí předmět
+            // šablony; ustoupí jen explicitnímu předmětu pro jedno odeslání. Je to
+            // hotový text, ne Twig — přes sandbox by se HTML-escapoval a složená
+            // závorka v názvu klienta by šablonu rozbila.
+            $clientSubject = is_string($vars['client_subject'] ?? null) && $vars['client_subject'] !== ''
+                ? $vars['client_subject']
+                : null;
+            if ($subjectOverride === null && $clientSubject !== null) {
+                $vars['subject'] = $clientSubject;
+            } else {
+                $subjectTemplate = $subjectOverride ?? $dbTpl['subject'];
+                $vars['subject'] = $sandbox->createTemplate($subjectTemplate)->render($vars);
+            }
             $html = $sandbox->createTemplate($dbTpl['body_html'])->render($vars);
             $text = $sandbox->createTemplate($dbTpl['body_text'])->render($vars);
         } else {
@@ -300,6 +316,9 @@ final class Mailer
                 $htmlTemplate = "{$code}.cs.html.twig";
                 $textTemplate = "{$code}.cs.txt.twig";
             }
+            // Předmět z vars (faktura: předmět klienta nebo výchozí) má přednost před
+            // jednorázovým předmětem stejně jako dřív. Změna by přepsala předmět
+            // e-mailů API/MCP volajícím, kteří `subject_override` posílají už dnes.
             if (!isset($vars['subject'])) {
                 $vars['subject'] = $subjectOverride ?? $this->defaultSubject($code, $locale);
             }

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service;
 
+use MyInvoice\Service\Mail\ClientEmailFormat;
+
 /**
  * Lehké validační helpery — vrací array chyb (prázdné = OK).
  */
@@ -50,6 +52,12 @@ final class Validation
         }
         if (isset($data['hourly_rate']) && (float) $data['hourly_rate'] < 0) {
             $err['hourly_rate'][] = 'Hodinová sazba nesmí být záporná';
+        }
+        foreach (ClientEmailFormat::errors($data['email_subject_format'] ?? null, ClientEmailFormat::SUBJECT_MAX_LENGTH, false) as $message) {
+            $err['email_subject_format'][] = $message;
+        }
+        foreach (ClientEmailFormat::errors($data['email_attachment_name_format'] ?? null, ClientEmailFormat::ATTACHMENT_NAME_MAX_LENGTH, true) as $message) {
+            $err['email_attachment_name_format'][] = $message;
         }
         return $err;
     }

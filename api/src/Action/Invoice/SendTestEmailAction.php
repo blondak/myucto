@@ -77,7 +77,7 @@ final class SendTestEmailAction
         // Test send — přibalíme i uživatelské přílohy, ať uživatel vidí, co reálně odejde.
         $supplierId = (int) ($invoice['supplier_id'] ?? 0);
         $emailAttachments = [
-            ['path' => $pdfPath, 'name' => basename($pdfPath), 'contentType' => 'application/pdf'],
+            $this->varsBuilder->pdfAttachment($invoice, $pdfPath),
         ];
         foreach ($this->attachments->listForInvoice($id) as $att) {
             $path = $this->attachments->pathFor($supplierId, $id, (string) $att['filename']);

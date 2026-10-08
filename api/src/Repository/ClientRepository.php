@@ -7,6 +7,7 @@ namespace MyInvoice\Repository;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Client\VendorDuplicateFinder;
 use MyInvoice\Service\Invoice\InvoiceNumberFormat;
+use MyInvoice\Service\Mail\ClientEmailFormat;
 use MyInvoice\Service\Oss\OssClientContext;
 use MyInvoice\Support\PaymentMethods;
 use PDO;
@@ -266,8 +267,8 @@ final class ClientRepository
              auto_send_reminders, payment_due_default, payment_due_unit, default_payment_method, hourly_rate, note,
              default_expense_category_id, default_revenue_category_id,
              invoice_number_format, proforma_number_format, credit_note_number_format, invoice_number_period,
-             default_branding_profile_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+             default_branding_profile_id, email_subject_format, email_attachment_name_format)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([
             $supplierId,
@@ -312,6 +313,8 @@ final class ClientRepository
             $this->nullableTemplate($data, 'credit_note_number_format'),
             $this->nullablePeriod($data, 'invoice_number_period'),
             $this->resolveBrandingProfileId($data['default_branding_profile_id'] ?? null, $supplierId),
+            ClientEmailFormat::normalize($data['email_subject_format'] ?? null),
+            ClientEmailFormat::normalize($data['email_attachment_name_format'] ?? null),
         ]);
         return (int) $this->db->pdo()->lastInsertId();
     }
@@ -435,6 +438,7 @@ final class ClientRepository
             'payment_due_default', 'payment_due_unit', 'default_payment_method', 'hourly_rate', 'note',
             'invoice_number_format', 'proforma_number_format', 'credit_note_number_format',
             'invoice_number_period', 'related_party_type', 'related_party_note',
+            'email_subject_format', 'email_attachment_name_format',
         ] as $key) {
             if (!array_key_exists($key, $data) && array_key_exists($key, $current)) {
                 $data[$key] = $current[$key];
@@ -541,6 +545,7 @@ final class ClientRepository
                 hourly_rate = ?, note = ?, default_expense_category_id = ?, default_revenue_category_id = ?,
                 invoice_number_format = ?, proforma_number_format = ?,
                 credit_note_number_format = ?, invoice_number_period = ?, default_branding_profile_id = ?,
+                email_subject_format = ?, email_attachment_name_format = ?,
                 -- § 36a ZDPH / § 23/7 ZDP: COALESCE jako u is_vat_payer — částečný update
                 -- (klient bez těchhle klíčů v payloadu) nesmí příznak spojené osoby shodit.
                 -- Typ a doložení doplňuje mergeWithStored(), explicitní null je smaže.
@@ -588,6 +593,8 @@ final class ClientRepository
             $this->nullableTemplate($data, 'credit_note_number_format'),
             $this->nullablePeriod($data, 'invoice_number_period'),
             $newDefaultBrandingProfileId,
+            ClientEmailFormat::normalize($data['email_subject_format'] ?? null),
+            ClientEmailFormat::normalize($data['email_attachment_name_format'] ?? null),
             array_key_exists('related_party', $data) ? (int) (bool) $data['related_party'] : null,
             $this->nullable($data, 'related_party_type'),
             $this->nullable($data, 'related_party_note'),

@@ -1,0 +1,130 @@
+{
+  "_comment": "Sdílené případy pro api/src/Service/Mail/ClientEmailFormat.php i web/src/utils/clientEmailFormat.ts — obě implementace musí dávat totéž. Čte je ClientEmailFormatTest (PHP) i clientEmailFormat.spec.ts.",
+  "sample": {
+    "varsymbol": "2610001",
+    "issueDate": "2026-10-06",
+    "taxDate": "2026-09-30",
+    "client": "Klient & Syn s.r.o.",
+    "supplier": "Dodavatel / A:B",
+    "typeLabel": "Faktura"
+  },
+  "subject": [
+    {
+      "label": "nevyplněno = výchozí",
+      "format": null,
+      "expected": null
+    },
+    {
+      "label": "jen mezery = výchozí",
+      "format": "   ",
+      "expected": null
+    },
+    {
+      "label": "příklad z #277 s DUZP",
+      "format": "Klient_{DUZP_MM}_{DUZP_YYYY}_Dodavatel",
+      "expected": "Klient_09_2026_Dodavatel"
+    },
+    {
+      "label": "měsíc a rok vystavení",
+      "format": "{TYP} {VS} {MM}/{YY} {YYYY}",
+      "expected": "Faktura 2610001 10/26 2026"
+    },
+    {
+      "label": "ampersand a lomítko se v předmětu neescapují",
+      "format": "{KLIENT} — {DODAVATEL}",
+      "expected": "Klient & Syn s.r.o. — Dodavatel / A:B"
+    },
+    {
+      "label": "vícenásobné mezery se slijí",
+      "format": "  {VS}    {DUZP_YY}  ",
+      "expected": "2610001 26"
+    },
+    {
+      "label": "záloha bez DUZP bere datum vystavení",
+      "format": "{DUZP_MM}.{DUZP_YYYY}",
+      "sample": {
+        "taxDate": null
+      },
+      "expected": "10.2026"
+    },
+    {
+      "label": "po dosazení prázdné = výchozí",
+      "format": "{KLIENT}",
+      "sample": {
+        "client": ""
+      },
+      "expected": null
+    },
+    {
+      "label": "řídicí znaky z dosazených hodnot se v předmětu nahradí mezerou",
+      "format": "{KLIENT} {VS}",
+      "sample": {
+        "client": "Klient\r\nBcc: x@example.test",
+        "varsymbol": "26\t10001"
+      },
+      "expected": "Klient Bcc: x@example.test 26 10001"
+    },
+    {
+      "label": "složená závorka v názvu klienta zůstane textem",
+      "format": "{KLIENT}",
+      "sample": {
+        "client": "Firma {VS}"
+      },
+      "expected": "Firma {VS}"
+    }
+  ],
+  "attachment": [
+    {
+      "label": "nevyplněno = výchozí",
+      "format": null,
+      "expected": null
+    },
+    {
+      "label": "příklad z #277",
+      "format": "Dodavatel_{DUZP_MM}_{DUZP_YYYY}",
+      "expected": "Dodavatel_09_2026.pdf"
+    },
+    {
+      "label": "zakázané znaky z hodnot se nahradí podtržítkem",
+      "format": "{DODAVATEL}-{VS}",
+      "expected": "Dodavatel _ A_B-2610001.pdf"
+    },
+    {
+      "label": "okrajové tečky a mezery se ořežou",
+      "format": " .{VS}. ",
+      "expected": "2610001.pdf"
+    },
+    {
+      "label": "diakritika a mezery zůstanou",
+      "format": "{TYP} {KLIENT}",
+      "sample": {
+        "client": "Žluťoučký kůň"
+      },
+      "expected": "Faktura Žluťoučký kůň.pdf"
+    },
+    {
+      "label": "po dosazení prázdné = výchozí",
+      "format": "{KLIENT}",
+      "sample": {
+        "client": ""
+      },
+      "expected": null
+    },
+    {
+      "label": "řídicí znaky z dosazených hodnot se v názvu nahradí podtržítkem",
+      "format": "{KLIENT}",
+      "sample": {
+        "client": "Klient\r\nSyn"
+      },
+      "expected": "Klient__Syn.pdf"
+    },
+    {
+      "label": "dlouhý název se zkrátí na 120 znaků",
+      "format": "{KLIENT}",
+      "sample": {
+        "client": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "expected": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.pdf"
+    }
+  ]
+}

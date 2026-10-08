@@ -27,6 +27,7 @@ vi.mock('@/api/clients', () => ({
 }))
 
 vi.mock('@/api/invoices', () => ({ PAYMENT_METHODS: [] }))
+vi.mock('@/composables/useFormat', () => ({ formatDate: (d: string | null | undefined) => d ?? '' }))
 
 vi.mock('@/api/codebooks', () => ({
   codebooksApi: {

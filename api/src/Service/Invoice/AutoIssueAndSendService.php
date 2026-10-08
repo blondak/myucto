@@ -152,7 +152,7 @@ final class AutoIssueAndSendService
                 null,
                 $cc,
                 $bcc,
-                [['path' => $pdfPath, 'name' => basename($pdfPath), 'contentType' => 'application/pdf']],
+                [$this->varsBuilder->pdfAttachment($invoice, $pdfPath)],
                 $userId,
             );
         } catch (\Throwable $e) {

@@ -108,6 +108,16 @@ final class InvoiceEmailVarsBuilder
         // escapovaný text. Nikdy nepoužívat `{{ intro|raw }}` v nových šablonách.
         $intro = $intro_plain;
 
+        // Předmět podle klienta (#277) má přednost před výchozím i před předmětem
+        // e-mailové šablony z administrace — Mailer ho bere z `client_subject`.
+        $clientSubject = ClientEmailFormat::subject(
+            $this->clientFormats($invoice)['subject'],
+            $this->formatValues($invoice, $locale),
+        );
+        if ($clientSubject !== null && $isTest) {
+            $clientSubject = '[TEST] ' . $clientSubject;
+        }
+
         return [
             'greeting'       => $greeting,
             'intro'          => $intro,
@@ -118,7 +128,8 @@ final class InvoiceEmailVarsBuilder
             'amount_to_pay'  => $amount,
             'payment_varsymbol' => VariableSymbolNormalizer::forInvoicePayment($invoice),
             'is_test'        => $isTest,
-            'subject'        => $this->buildSubject($invoice, $isTest, $locale),
+            'subject'        => $clientSubject ?? $this->buildSubject($invoice, $isTest, $locale),
+            'client_subject' => $clientSubject,
             'qr_data_uri'    => $this->paymentQrDataUri($invoice),
             'supplier'       => $this->loadSupplierFooter($invoice),
             'is_paid'        => ($invoice['status'] ?? '') === 'paid',
@@ -131,6 +142,24 @@ final class InvoiceEmailVarsBuilder
             // vypnuté web faktuře (InvoicePublicLinkFeature).
             'public_url'     => $this->publicLinks->ensureUrl($invoice),
         ];
+    }
+
+    /**
+     * Příloha s PDF dokladu pro e-mail klientovi. Název podle klienta (#277), jinak
+     * název vygenerovaného souboru (Faktura-{VS}.pdf). Jediné místo, kde se název
+     * přílohy faktury určuje — používají ho všechny e-maily s PDF faktury
+     * (odeslání, test, automatické odeslání, upomínky, poděkování za úhradu).
+     *
+     * @return array{path: string, name: string, contentType: string}
+     */
+    public function pdfAttachment(array $invoice, string $pdfPath): array
+    {
+        $name = ClientEmailFormat::attachmentName(
+            $this->clientFormats($invoice)['attachment'],
+            $this->formatValues($invoice, (string) ($invoice['language'] ?? 'cs')),
+        );
+
+        return ['path' => $pdfPath, 'name' => $name ?? basename($pdfPath), 'contentType' => 'application/pdf'];
     }
 
     /**
@@ -182,25 +211,79 @@ final class InvoiceEmailVarsBuilder
         $varsymbol = $invoice['varsymbol'] ?? '';
         $supplier = $this->resolveSupplierName($invoice, false);
         $prefix = $isTest ? '[TEST] ' : '';
-        $type = (string) ($invoice['invoice_type'] ?? 'invoice');
+        $label = $this->documentLabel((string) ($invoice['invoice_type'] ?? 'invoice'), $locale);
 
-        // Předmět odpovídá typu dokladu (stejně jako text v těle e-mailu) —
-        // zálohová faktura ani opravný daňový doklad nejsou „Faktura".
+        return "{$prefix}{$label} {$varsymbol}" . ($supplier ? " — {$supplier}" : '');
+    }
+
+    /**
+     * Název typu dokladu pro předmět i pro {TYP} ve formátu klienta — zálohová
+     * faktura ani opravný daňový doklad nejsou „Faktura" (stejně jako text v těle).
+     */
+    private function documentLabel(string $type, string $locale): string
+    {
         if ($locale === 'en') {
-            $label = match ($type) {
+            return match ($type) {
                 'proforma'    => 'Proforma invoice',
                 'credit_note' => 'Credit note',
                 default       => 'Invoice',
             };
-        } else {
-            $label = match ($type) {
-                'proforma'    => 'Zálohová faktura',
-                'credit_note' => 'Opravný daňový doklad',
-                default       => 'Faktura',
-            };
         }
+        return match ($type) {
+            'proforma'    => 'Zálohová faktura',
+            'credit_note' => 'Opravný daňový doklad',
+            default       => 'Faktura',
+        };
+    }
 
-        return "{$prefix}{$label} {$varsymbol}" . ($supplier ? " — {$supplier}" : '');
+    /** @return array<string,string> */
+    private function formatValues(array $invoice, string $locale): array
+    {
+        return ClientEmailFormat::values(
+            $invoice,
+            (string) ($invoice['client_company_name'] ?? ''),
+            $this->resolveSupplierName($invoice, false),
+            $this->formatTypeLabel((string) ($invoice['invoice_type'] ?? 'invoice'), $locale),
+        );
+    }
+
+    /**
+     * {TYP} ve formátu klienta pojmenuje doklad jako PDF a tělo e-mailu. Výchozí předmět
+     * (documentLabel) vede daňový doklad k platbě i platební kalendář jako „Faktura" —
+     * ten se měnit nesmí, změna by se dotkla předmětu všech instalací. Formát klienta
+     * je nový, tak pro něj platí správný název od začátku.
+     */
+    private function formatTypeLabel(string $type, string $locale): string
+    {
+        return match ($type) {
+            'tax_document'     => $locale === 'en' ? 'Tax document for payment received' : 'Daňový doklad k přijaté platbě',
+            'payment_calendar' => $locale === 'en' ? 'Payment calendar' : 'Platební kalendář',
+            default            => $this->documentLabel($type, $locale),
+        };
+    }
+
+    /**
+     * Formáty předmětu a názvu přílohy z karty klienta — živá hodnota, ne snapshot:
+     * jde o pokyn příjemce, jak doklady doručovat, ne o obsah dokladu.
+     *
+     * @return array{subject: ?string, attachment: ?string}
+     */
+    private function clientFormats(array $invoice): array
+    {
+        $clientId = (int) ($invoice['client_id'] ?? 0);
+        if ($clientId <= 0) {
+            return ['subject' => null, 'attachment' => null];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT email_subject_format, email_attachment_name_format FROM clients WHERE id = ?'
+        );
+        $stmt->execute([$clientId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+
+        return [
+            'subject'    => ClientEmailFormat::normalize($row['email_subject_format'] ?? null),
+            'attachment' => ClientEmailFormat::normalize($row['email_attachment_name_format'] ?? null),
+        ];
     }
 
     /**
