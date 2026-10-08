@@ -268,9 +268,10 @@ Technické struktury a rozhraní popisuje
 
 Postup:
 
-1. Otevři **Certifikáty EPO**, nahraj P12/PFX, zadej jeho heslo a potvrď se —
-   buď přístupovým klíčem, nebo heslem do MyÚčta a případným TOTP.
-   Zkontroluj vlastníka, vydavatele a platnost certifikátu.
+1. V **Systém → Elektronické podpisy → Certifikáty** nahraj P12/PFX, zadej
+   jeho heslo a potvrď se, buď přístupovým klíčem, nebo heslem do MyÚčta
+   a případným TOTP. V **Certifikáty EPO** zkontroluj vlastníka, vydavatele
+   a platnost certifikátu a povol ho pro firmu.
 2. Pokud certifikát používáš pro další spravovanou firmu, přepni se na ni a
    certifikát pro ni výslovně povol.
 3. Pro vizuální kontrolu můžeš nejdřív otevřít předvyplněný formulář EPO a

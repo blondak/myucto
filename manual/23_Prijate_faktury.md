@@ -176,6 +176,14 @@ Doklady, které pro akci nemají vhodný stav, se přeskočí a výsledek je uve
 dimenzí přepíše u dokladů jen zvolené typy, ostatní dimenze zůstanou; zvolené hodnoty
 se při vytěžení propíšou do hlavičky dokladu stejně jako dimenze zadané při nahrání.
 
+**Doklad, který už v systému je.** Nahrajete-li nebo vytěžíte doklad, ke kterému
+už existuje přijatá faktura (stejný dodavatel, číslo a datum vystavení), nová
+faktura nevznikne. Fronta to ohlásí hláškou s číslem existující přijaté faktury a
+doklad ve frontě zůstane vybraný, takže ho můžete ověřit nebo odmítnout. Hromadné
+vytěžení na konci uvede, kolik takových dokladů bylo. Nahrání souboru, který už byl
+zpracován, ukáže číslo faktury, ze které vznikl. Stejná faktura v jiném PDF
+existující faktuře nepřepíše PDF a znovu na ni nespustí automatiku.
+
 Po zpracování se originál přesune do složky **Příchozí doklady / Archiv / rok / měsíc**,
 takže v příchozích zůstává jen to, co na zpracování čeká. Originál se nemaže, je
 auditní stopou toho, co klient předal. Je-li to tentýž soubor jako PDF výsledné

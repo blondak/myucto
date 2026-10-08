@@ -8,7 +8,7 @@ Agenda připravuje vybraná mzdová hlášení, provádí formální kontroly a 
 
 Je nutné oprávnění `payroll.submissions`, způsobilý uzavřený běh nebo schválená revize, úplné identifikátory a správně oddělené TEST/produkční prostředí. Pro ČSSZ TEST použijte pouze testovací profil a certifikát v určeném bezpečném úložišti. ISDS musí být nastaveno pro správnou firmu a prostředí.
 
-**Prostředí podání.** Podání ČSSZ, zdravotním pojišťovnám i datovou schránkou jdou vždy do ostrého provozu úřadu; výchozí volba je všude **Ostrý provoz**. Výběr testovacího prostředí se nabízí jen ve vývojové instalaci (v `cfg.php` `app.env = development`), jinde se místo přepínače zobrazí jen štítek ostrého provozu a server požadavek na test odmítne. Zvolený test je na obrazovce zvýrazněný varovnou barvou. Výjimkou je daňové podání na EPO: akce **Zkontrolovat na EPO** pošle výkaz jen ke kontrole chyb a je dostupná vždy.
+**Prostředí podání.** Podání ČSSZ, zdravotním pojišťovnám i datovou schránkou jdou vždy do ostrého provozu úřadu; výchozí volba je všude **Ostrý provoz**. Výběr testovacího prostředí se nabízí jen ve vývojové instalaci (v `cfg.php` `app.env = development`), jinde se místo přepínače zobrazí jen štítek ostrého provozu a server požadavek na test odmítne. Zvolený test je na obrazovce zvýrazněný varovnou barvou. Podání do testovacího prostředí ČSSZ ve všech agendách (JMHZ, PREZEC, REGZEC, NEMPRI, HZUPN, OZUSPOJ) nesou **Testovací VS ČSSZ** účtárny, pokud je vyplněný (viz [Nastavení mezd](90_Nastaveni_mezd.md)); bez něj zůstává ostrý variabilní symbol, který testovací prostředí zamítne. Výjimkou je daňové podání na EPO: akce **Zkontrolovat na EPO** pošle výkaz jen ke kontrole chyb a je dostupná vždy.
 
 ### 85.2.1 Podání přes VREP: zmocnění a registrace certifikátu
 
@@ -21,7 +21,7 @@ Odeslání JMHZ a registrací zaměstnanců přes VREP podepisuje osobní kvalif
 
 Nastavení v MyÚčtu:
 
-1. V **Daně → EPO podání a archív → Certifikáty EPO** nahrajte certifikát P12/PFX (jednou, patří přihlášenému uživateli) a v každé zastupované firmě ho tlačítkem **Povolit pro tuto firmu** povolte. Mzdy i EPO používají stejný trezor, nic se nenahrává dvakrát.
+1. V **Systém → Elektronické podpisy → Certifikáty** nahrajte certifikát P12/PFX (jednou, patří přihlášenému uživateli) a v každé zastupované firmě ho v **Daně → EPO podání a archív → Certifikáty EPO** tlačítkem **Povolit pro tuto firmu** povolte. Mzdy i EPO používají stejný trezor, nic se nenahrává dvakrát.
 2. V každé firmě otevřete **Mzdy → Podání a hlášení → Certifikát**, vyberte certifikát a do pole **Sériové číslo registrované u ČSSZ** opište číslo z Oznámení o zmocnění. Aplikace ho porovná se sériovým číslem certifikátu v obou zápisech a při neshodě volbu neuloží. Uložte tlačítkem **Uložit volbu**.
 
 Podání přes datovou schránku registraci certifikátu nevyžaduje, zmocnění ano. Datovou schránku zmocněnce je vhodné uvést na Oznámení o zmocnění, jinak ČSSZ podání dohledává ručně a odpověď přijde se zpožděním.
@@ -382,6 +382,8 @@ hlášení ČSSZ ani u registrací zaměstnanců ho nenajdete — tam protokol d
 sám a aplikace podle něj podání uzavře.
 
 ### 85.7.2 Podáno mimo aplikaci
+
+<!-- TODO-JMHZ-RUCNI -->
 
 Jiný případ je hlášení, které jste vyplnili a odeslali **na portálu úřadu**,
 ne z aplikace — typicky JMHZ přímo na ePortálu ČSSZ. Protokol na ně nikdy
@@ -1444,6 +1446,16 @@ o řádné hlášení za totéž období — typicky z nové přípravy nad pře
 běhu — aplikace odmítne a odkáže na opravné hlášení; ČSSZ by takové podání
 stejně zamítla jako duplicitu. Výjimkou je zamítnuté nebo stornované řádné
 hlášení: to se za dané období nahrazuje novým řádným.
+
+**Hlášení a opravy nad 1500 součástí.** ČSSZ přijme v jedné datové větě nejvýš
+1500 formulářů. Řádné hlášení s více formuláři i opravné hlášení nebo storno
+s více než 1500 opravenými či stornovanými součástmi proto aplikace sestaví jako
+několik **dílčích balíků**. Všechny nesou stejný GUID podání a čas vyplnění,
+souhrn a přehled o pojistném jsou jen v prvním balíku a počet formulářů celkem
+platí za celé hlášení. S každým balíkem se pracuje zvlášť, aby se žádná akce
+neodeslala ani nenavázala jen na část hlášení. Opravuje-li se
+jediný formulář, nevadí, že celé hlášení má víc než 1500 vztahů. Do 1500
+součástí zůstává jediný balík, stejně jako dřív.
 
 Storno JMHZ nevzniká přepsáním původního XML. V **Stavu odeslání** otevřete
 způsobilé předchozí podání a zvolte řízenou akci. **Připravit storno** nabídne

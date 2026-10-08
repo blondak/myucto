@@ -99,13 +99,13 @@ U vlastního profilu jsou dostupné dva zdroje:
 
 | Zdroj | Kdy použít |
 |---|---|
-| **Použít osobní certifikát EPO** | Certifikát už máš uložený v osobním šifrovaném trezoru v **Daně → EPO podání a archív**. PFX ani heslo se neukládají podruhé. |
+| **Použít osobní certifikát EPO** | Certifikát už máš uložený v osobním šifrovaném trezoru (**Systém → Elektronické podpisy → Certifikáty**). PFX ani heslo se neukládají podruhé. |
 | **Nahrát samostatný certifikát** | Profil dodavatele, profil jiného uživatele nebo certifikát, který nechceš používat pro EPO. |
 
 ### 99.4.1 Použití osobního certifikátu EPO
 
-1. V **Daně → EPO podání a archív** otevři **Certifikáty EPO**, nahraj P12/PFX
-   a povol ho pro aktuální firmu.
+1. V **Systém → Elektronické podpisy → Certifikáty** nahraj P12/PFX a v
+   **Daně → EPO podání a archív → Certifikáty EPO** ho povol pro aktuální firmu.
 2. Založ nebo uprav profil s vlastníkem **Můj profil**.
 3. V části **Certifikát profilu** zvol **Použít osobní certifikát EPO** a vyber
    certifikát z trezoru.
@@ -165,6 +165,29 @@ Při nahrání lze zaškrtnout dvě volby:
 U každého platného certifikátu v trezoru je navíc tlačítko **Povolit v dalších
 firmách**, které udělá totéž pro certifikát nahraný dříve. Obě akce vyžadují
 stejné ověření jako nahrání certifikátu.
+
+**Dvě různá hesla.** Při nahrání se zadává **Heslo k certifikátu**, kterým je
+chráněný samotný soubor P12/PFX, a zvlášť ověření uživatele (passkey, nebo
+**Heslo do MyÚčta** případně **Kód z autentikátoru**). Obě se posílají odděleně
+a nezávisle; ověření platí jen pro toto jedno nahrání a nikam se neukládá.
+Heslo do MyÚčta tedy nikdy nepatří do pole s heslem k certifikátu. Nahrání se
+potvrzuje tlačítkem **Uložit certifikát**.
+
+**Soubor se zastaralým šifrováním (RC2).** Starší exporty certifikátů, zejména
+z Windows a od některých autorit, jsou chráněné zastaralou šifrou RC2, kterou
+server nepodporuje. Aplikace to ohlásí výslovnou hláškou, že soubor používá
+zastaralé šifrování (RC2) a že za tím není heslo. Řešení jsou dvě:
+
+- certifikát znovu vyexportujte s moderním šifrováním (ve Windows při exportu
+  vyberte šifrování **AES256-SHA256**),
+- nebo soubor převeďte nástrojem OpenSSL na své pracovní stanici. Starý soubor
+  nejdřív rozbalte do dočasného souboru PEM pomocí `openssl pkcs12 -in stary.pfx
+  -legacy -nodes -out docasny.pem`, z něj vytvořte nový soubor příkazem
+  `openssl pkcs12 -export -in docasny.pem -out novy.pfx` (OpenSSL se zeptá na
+  nové heslo a použije moderní šifrování) a dočasný soubor PEM hned smažte,
+  protože obsahuje soukromý klíč bez ochrany heslem.
+
+Nový soubor PFX pak nahrajte do trezoru stejným postupem.
 
 Po dokončení se zobrazí přehled po firmách: **Povoleno**, **Už bylo povoleno**,
 **Přeskočeno, má platný certifikát** a **Přeskočeno, chybí oprávnění**. Firmy,

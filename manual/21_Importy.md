@@ -485,6 +485,16 @@ za vybrané roky.
 
 **Idempotence přes `fakturoid_id`** stejně jako u iDokladu.
 
+**Napojení na existující karty.** Import subjektů z Fakturoidu i z iDokladu
+nejdřív hledá kartu, kterou už ve firmě máte: podle IČO, u subjektu bez IČO podle
+DIČ. Najde-li ji, subjekt na ni jen napojí (karta dostane externí ID a případně
+chybějící roli klient nebo dodavatel) a novou nezakládá. Stejná přijatá faktura,
+která přišla jinou cestou (ruční zadání, AI vytěžení, převod z jiného programu),
+se tak nezaeviduje podruhé. Existující karta se nepřepisuje. Má-li karta už jiné
+externí ID téhož zdroje, založí se karta nová.
+
+<!-- TODO-FAKTUROID -->
+
 ## 21.12 Dry-run mód
 
 Společný pro iDoklad i Fakturoid. Po zaškrtnutí **Jen náhled (dry-run)** se import
