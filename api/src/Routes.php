@@ -3267,6 +3267,7 @@ final class Routes
 
         // Multi-supplier (M7)
         $app->get    ('/api/suppliers',                     [SettingsAction::class, 'listSuppliers']);
+        $app->get    ('/api/suppliers/directory',           [SettingsAction::class, 'supplierDirectory']);
         $app->post   ('/api/suppliers',                     [SettingsAction::class, 'createSupplier']);
         $app->get    ('/api/suppliers/{id:[0-9]+}',         [SettingsAction::class, 'getSupplierById']);
         $app->put    ('/api/suppliers/{id:[0-9]+}',         [SettingsAction::class, 'updateSupplierById']);

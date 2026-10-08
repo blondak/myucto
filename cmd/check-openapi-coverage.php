@@ -228,6 +228,8 @@ $sessionActions = [
     'MyInvoice\\Action\\PurchaseInvoice\\Approval\\PurchaseInvoiceApprovalAction::forInvoice',
     'MyInvoice\\Action\\PurchaseInvoice\\Approval\\PurchaseInvoiceApprovalAction::request',
     'MyInvoice\\Action\\PurchaseInvoice\\Approval\\PurchaseInvoiceApprovalAction::cancel',
+    // Přehled firem ve správě firem - interní, akce odmítá bearer token.
+    'MyInvoice\\Action\\Settings\\SettingsAction::supplierDirectory',
 ];
 $isSessionAction = static fn (array $route): bool => in_array($route['action'], $sessionActions, true);
 

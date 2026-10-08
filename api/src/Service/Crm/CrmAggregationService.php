@@ -1163,12 +1163,7 @@ final class CrmAggregationService
         $stmt = $pdo->prepare(
             "SELECT i.id FROM invoices i
               WHERE i.supplier_id = ?
-                AND i.status IN ('issued', 'sent', 'reminded')
-                AND i.due_date {$overdueOperator} CURDATE()
-                AND (i.invoice_type != 'proforma'
-                     OR NOT EXISTS (SELECT 1 FROM invoices ch
-                                     WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice'))
-                AND (i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0)"
+                AND " . \MyInvoice\Support\Sql\ReceivablePredicate::overdueOpen('i', $overdueOperator)
         );
         $stmt->execute([$supplierId]);
         $overdueIds = array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));

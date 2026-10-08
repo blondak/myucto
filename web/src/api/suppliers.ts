@@ -14,6 +14,31 @@ export interface SupplierListItem {
   invoices_count: number
 }
 
+export type SupplierDirectorySort = 'urgency' | 'name' | 'last_invoice' | 'last_activity' | 'overdue'
+
+export interface SupplierDirectoryParams {
+  sort?: SupplierDirectorySort
+  dir?: 'asc' | 'desc'
+  q?: string
+  vat?: 'payer' | 'non_payer'
+  mode?: 'double_entry' | 'tax_evidence'
+  urgency?: 'with' | 'without'
+}
+
+export interface SupplierDirectoryItem extends SupplierListItem {
+  last_invoice_date: string | null
+  last_activity_at: string | null
+  urgency: {
+    score: number
+    level: 'high' | 'medium' | 'low' | 'none'
+    vat: { status: 'overdue' | 'due_soon' | 'ok'; deadline: string; days: number; period: string } | null
+    overdue_receivables: number
+    overdue_payables: number
+    unmatched_bank_transactions: number
+    purchase_drafts: number
+  }
+}
+
 export interface Supplier {
   id: number
   company_name: string
@@ -71,6 +96,8 @@ export interface SupplierCreatePayload {
 
 export const suppliersApi = {
   list: () => api.get<SupplierListItem[]>('/suppliers').then(r => r.data),
+  directory: (params: SupplierDirectoryParams) =>
+    api.get<SupplierDirectoryItem[]>('/suppliers/directory', { params }).then(r => r.data),
   get: (id: number) => api.get<Supplier>(`/suppliers/${id}`).then(r => r.data),
   create: (payload: SupplierCreatePayload) =>
     api.post<{ id: number }>('/suppliers', payload).then(r => r.data),

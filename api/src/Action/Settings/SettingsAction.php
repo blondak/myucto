@@ -26,6 +26,8 @@ use MyInvoice\Service\Mail\SafeLogoPath;
 use MyInvoice\Service\Payroll\PayrollEmployerLegacyIdentifierCarryOver;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Supplier\SupplierCreator;
+use MyInvoice\Service\Supplier\SupplierDirectory;
+use MyInvoice\Service\Supplier\SupplierDirectoryQuery;
 use MyInvoice\Service\Supplier\SupplierInitializer;
 use MyInvoice\Service\Tax\Return\TaxpayerTypeCodebook;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -82,6 +84,7 @@ final class SettingsAction
         private readonly \MyInvoice\Service\Tax\Return\TaxRepresentationService $taxRepresentation,
         private readonly SupplierPaymentQrSettingsRepository $paymentQrSettings,
         private readonly SupplierCreator $supplierCreator,
+        private readonly SupplierDirectory $supplierDirectory,
     ) {}
 
     /**
@@ -175,18 +178,8 @@ final class SettingsAction
     /** GET /api/suppliers — list pro switcher. Epic F0: uživatel s membership vidí jen přiřazené firmy. */
     public function listSuppliers(Request $request, Response $response): Response
     {
-        $user    = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        $boundSupplierId = $this->boundSupplierId($request);
-        // Bound PAT je autoritativní i pro globálního admina. Bez omezení zde by
-        // token vydaný pro jedinou firmu přes switcher vypsal všechny tenanty.
-        $allowed = $boundSupplierId !== null
-            ? [$boundSupplierId]
-            : (RequestAuthorization::isSuperadmin($request)
-                ? []
-                : $this->userSuppliers->allowedSupplierIds((int) ($user['id'] ?? 0)));
-        // Epic F6 (H3): client bez membershipu = prázdný seznam (fail-closed),
-        // ne fail-open "bez omezení" jako u legacy rolí.
-        if (RequestAuthorization::isClientType($request) && $allowed === []) {
+        $allowed = $this->listableSupplierIds($request);
+        if ($allowed === null) {
             return Json::ok($response, []);
         }
         $where   = '';
@@ -214,6 +207,53 @@ final class SettingsAction
             $r['invoices_count'] = (int) $r['invoices_count'];
         }
         return Json::ok($response, $rows);
+    }
+
+    /**
+     * GET /api/suppliers/directory — seznam firem pro správu firem s řazením, filtry
+     * a urgencí ({@see SupplierDirectory}). Rozsah firem je tentýž jako u přepínače
+     * ({@see listableSupplierIds()}). Interní endpoint pro UI, ne veřejné API.
+     */
+    public function supplierDirectory(Request $request, Response $response): Response
+    {
+        if (RequestAuthorization::isBearerAuth($request) || RequestAuthorization::isClientType($request)) {
+            return Json::error($response, 'forbidden', 'Přehled firem není dostupný.', 403);
+        }
+        $allowed = $this->listableSupplierIds($request);
+        if ($allowed === null) {
+            return Json::ok($response, []);
+        }
+
+        return Json::ok($response, $this->supplierDirectory->list(
+            $allowed === [] ? null : $allowed,
+            SupplierDirectoryQuery::fromArray($request->getQueryParams()),
+            new \DateTimeImmutable(),
+        ));
+    }
+
+    /**
+     * Firmy, které smí volající vypsat: [] = bez omezení, null = nic (fail-closed).
+     *
+     * @return list<int>|null
+     */
+    private function listableSupplierIds(Request $request): ?array
+    {
+        $user    = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $boundSupplierId = $this->boundSupplierId($request);
+        // Bound PAT je autoritativní i pro globálního admina. Bez omezení zde by
+        // token vydaný pro jedinou firmu přes switcher vypsal všechny tenanty.
+        $allowed = $boundSupplierId !== null
+            ? [$boundSupplierId]
+            : (RequestAuthorization::isSuperadmin($request)
+                ? []
+                : $this->userSuppliers->allowedSupplierIds((int) ($user['id'] ?? 0)));
+        // Epic F6 (H3): client bez membershipu = prázdný seznam (fail-closed),
+        // ne fail-open "bez omezení" jako u legacy rolí.
+        if (RequestAuthorization::isClientType($request) && $allowed === []) {
+            return null;
+        }
+
+        return $allowed;
     }
 
     /**

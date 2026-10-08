@@ -126,6 +126,18 @@ final class VatStatusService
     }
 
     /**
+     * SQL varianta {@see payerDuring()}: plátce k prvnímu dni intervalu, nebo se jím
+     * stal kdykoli během něj. Argumenty jsou SQL fragmenty jako u {@see payerAtExpr()}.
+     */
+    public static function payerDuringExpr(string $supplierIdSql, string $fromSql, string $toSql, string $fallbackSql): string
+    {
+        return '(' . self::payerAtExpr($supplierIdSql, $fromSql, $fallbackSql) . " = 1
+                OR EXISTS (SELECT 1 FROM supplier_vat_status_history hd
+                            WHERE hd.supplier_id = {$supplierIdSql} AND hd.effective_from > {$fromSql}
+                              AND hd.effective_from <= {$toSql} AND hd.is_vat_payer = 1))";
+    }
+
+    /**
      * Baseline řádek historie pro nově založenou firmu (effective_from 1900-01-01).
      *
      * Statická, aby ji mohly volat i bin skripty bez DI kontejneru; idempotentní
