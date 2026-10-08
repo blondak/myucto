@@ -578,7 +578,7 @@ historie podání předchozím programem: období, druh, GUID podání a formul�
 stav odeslání, časy odeslání a přijetí, vazba formulářů na vztahy a úplný
 obsah po údajích. Opakovaný převod záznamy aktualizuje, nezdvojí. Přehled je
 v `Mzdy → Podání → JMHZ`, oddíl *Podání předchozím programem*
-([§ 85.7.5](85_Podani_a_hlaseni.md#8575-podani-predchozim-programem)); za měsíc,
+([§ 85.14.14](85_Podani_a_hlaseni.md#851414-podani-predchozim-programem)); za měsíc,
 za který řádné hlášení odešlo, MyÚčto řádné hlášení znovu nepřipraví.
 
 Prohlášení poplatníka, slevy na dani a sleva pracujícího důchodce se z hlášení

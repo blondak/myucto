@@ -101,7 +101,7 @@ Oba režimy nekombinuj, jinak by se některé úlohy spouštěly dvakrát.
 | `cron-ai-rule-miner` | 1× denně 04:00; vytváří návrhová pravidla z korekcí |
 | `cron-shoptet-orders` | každých 15 min; jen firmy se zapnutým automatickým stahováním objednávek ze Shoptetu, interval určuje firma ([§ 37.5](39_Shoptet.md)) |
 | `cron-payroll-post` | 1× měsíčně 1. dne 04:00; zaúčtuje mzdy za předchozí měsíc |
-| `cron-payroll-registration-changes` | 1× denně 05:00; jen firmy se zapnutými mzdami. Hledá změny hlásitelné do registru pojištěnců (ČSSZ) a zakládá návrh povinnosti s termínem — nic neodesílá. Denní běh stačí: lhůta je osm dnů ([§ 73.3](85_Podani_a_hlaseni.md)). Bez ní se změna zjistí jen tehdy, když někdo otevře kartu zaměstnance, a lhůta uteče |
+| `cron-payroll-registration-changes` | 1× denně 05:00; jen firmy se zapnutými mzdami. Hledá změny hlásitelné do registru pojištěnců (ČSSZ) a zakládá návrh povinnosti s termínem — nic neodesílá. Denní běh stačí: lhůta je osm dnů ([§ 85.14.4](85_Podani_a_hlaseni.md#85144-fronta-k-odeslani)). Bez ní se změna zjistí jen tehdy, když někdo otevře kartu zaměstnance, a lhůta uteče |
 | `cron-vat-clearing` | 1× měsíčně 1. dne 04:30; interní doklad zúčtování DPH za skončené období ([§ 84.3.3](66_Ucetni_osnova.md#6633-mesicni-zuctovani-dph)) |
 | `cron-vat-status-apply` | 1× denně 00:30; aplikuje plánované změny plátcovství DPH v den účinnosti |
 | `cron-journal-integrity-check` | 1× denně 02:30; čtecí kontrola integrity deníku |

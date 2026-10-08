@@ -40,7 +40,7 @@ Osobní a vztahové údaje jsou v [kapitole 58k](86_Zamestnanci.md), účinná p
 Vyplacený **doplatek na daňovém bonusu** z ročního zúčtování se do rozpočtu
 firmy nevrátí sám: pokud vyplacené bonusy převýšily sražené zálohy, požádej
 o rozdíl finanční úřad, viz
-[Žádost o poukázání chybějící částky na daňovém bonusu](85_Podani_a_hlaseni.md#8517-zadost-o-poukazani-chybejici-castky-na-danovem-bonusu).
+[Žádost o poukázání chybějící částky na daňovém bonusu](85_Podani_a_hlaseni.md#851424-zadost-o-poukazani-chybejici-castky-na-danovem-bonusu).
 Zda zaměstnanec prohlášení k dani vůbec podepsal, se nastavuje jen v zákonné
 evidenci osoby, viz
 [§ 74.8.4](86_Zamestnanci.md#8684-prohlaseni-k-dani-ma-jedine-misto).

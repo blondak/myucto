@@ -410,7 +410,7 @@ Na přelomu roku nebo při roční uzávěrce zejména:
 5. připravte zákonná potvrzení a evidenční výstupy v rozsahu, který aplikace
    označuje jako podporovaný; u ruční kontroly výsledek před vydáním ověřte;
 6. podejte obě roční
-   [vyúčtování daně](85_Podani_a_hlaseni.md#8516-vyuctovani-zalohove-a-srazkove-dane),
+   [vyúčtování daně](85_Podani_a_hlaseni.md#851423-vyuctovani-zalohove-a-srazkove-dane),
    zálohové i srážkové; jsou to dvě samostatná podání s různou lhůtou;
 7. projděte [retenční lhůty](93_Retencni_lhuty.md), zákonná zadržení a žádosti
    o [výmaz osobních údajů](94_Vymaz_osobnich_udaju.md). Samotný konec roku
@@ -437,7 +437,7 @@ JMHZ podporuje řízené storno celého podání i obsahovou opravu vybraných
 formulářů z nové úplné přípravy. Přijatý formulář se opravuje se zachovanou
 identitou, odmítnutý nebo chybějící se doplní jako nový. Podrobnosti jsou v
 kapitole
-[Podání a hlášení](85_Podani_a_hlaseni.md#8512-storno-a-obsahova-oprava-jmhz).
+[Podání a hlášení](85_Podani_a_hlaseni.md#851413-storno-a-obsahova-oprava-jmhz).
 
 ## 75.7 Kapitoly
 
