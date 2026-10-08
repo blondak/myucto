@@ -120,6 +120,26 @@ final class EldpContinuedEmploymentTest extends TestCase
         self::assertSame('2026-04-30', $statement->payload['deadline']['due_on']);
     }
 
+    /**
+     * Rok 2026: list za účast skončenou před 1. 4. 2026 vyhotoví zaměstnavatel
+     * (čl. V bod 8 zák. č. 360/2025 Sb.); navazující vztah jde měsíčním
+     * hlášením, takže se do listu nepřidává.
+     */
+    public function testInTwentyTwentySixTheEndedParticipationHasItsOwnStatement(): void
+    {
+        $revisions = $this->year([
+            ['id' => 101, 'relation' => 'employment', 'code' => '1', 'start' => '2025-06-01', 'end' => '2026-02-28'],
+            ['id' => 103, 'relation' => 'employment', 'code' => '1', 'start' => '2026-04-15', 'end' => null],
+        ], 2026, 5);
+
+        $statement = $this->build(101, $revisions, year: 2026);
+
+        self::assertSame(['2026-01-01'], array_column($statement->sections(), 'valid_from'));
+        self::assertSame(['2026-02-28'], array_column($statement->sections(), 'valid_to'));
+        self::assertSame('02', $statement->payload['form']['eldp_type']);
+        self::assertArrayNotHasKey('continued_employment_ids', $statement->scope());
+    }
+
     /** Nástup později než tři měsíce po skončení na list nenavazuje. */
     public function testRehireAfterThreeMonthsKeepsSeparateStatements(): void
     {
@@ -200,12 +220,12 @@ final class EldpContinuedEmploymentTest extends TestCase
      * @param list<array<string,mixed>> $revisions
      * @param list<int> $separatelyFiled
      */
-    private function build(int $employmentId, array $revisions, array $separatelyFiled = []): EldpAnnualStatement
+    private function build(int $employmentId, array $revisions, array $separatelyFiled = [], int $year = 2025): EldpAnnualStatement
     {
         return (new EldpAnnualStatementBuilder())->build(
             self::SUPPLIER_ID,
             $employmentId,
-            2025,
+            $year,
             $revisions,
             [
                 'excluded_days_confirmed' => true,

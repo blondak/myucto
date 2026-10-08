@@ -2600,6 +2600,15 @@ final class EldpAnnualStatementBuilder
      */
     private static function continues(array $earlier, string $laterStart, int $year): bool
     {
+        /*
+         * Pravidlo „list se neuzavírá" patří k roční povinnosti zaměstnavatele,
+         * tedy k rokům do 2025. Od roku 2026 jde navazující doba měsíčním
+         * hlášením a samostatný list vzniká jen za skončenou účast (čl. V bod 8
+         * zák. č. 360/2025 Sb.) nebo na výzvu — každý vztah zvlášť.
+         */
+        if ($year > EldpDeadlinePolicy::LAST_ANNUAL_YEAR) {
+            return false;
+        }
         $end = $earlier['end'];
 
         return $end !== null
