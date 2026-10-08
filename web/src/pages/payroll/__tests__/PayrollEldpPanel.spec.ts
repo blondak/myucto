@@ -10,6 +10,8 @@ const m = vi.hoisted(() => ({
   submissionDetail: vi.fn(),
   downloadSubmissionArtifact: vi.fn(),
   searchDocuments: vi.fn(),
+  pensionRequests: vi.fn(),
+  downloadEldpCopy: vi.fn(),
   canWrite: true,
   canRead: true,
 }))
@@ -23,6 +25,8 @@ vi.mock('@/api/payroll', () => ({
     completeEldp: m.completeEldp,
     submissionDetail: m.submissionDetail,
     downloadSubmissionArtifact: m.downloadSubmissionArtifact,
+    pensionRequests: m.pensionRequests,
+    downloadEldpCopy: m.downloadEldpCopy,
   },
 }))
 
@@ -67,12 +71,18 @@ vi.mock('@/components/payroll/PayrollPersonSearchSelect.vue', () => ({
   },
 }))
 
-vi.mock('vue-router', () => ({ RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' } }))
+const routeQuery = vi.hoisted(() => ({ value: {} as Record<string, string> }))
+vi.mock('vue-router', () => ({
+  RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' },
+  useRoute: () => ({ query: routeQuery.value }),
+}))
 
 import PayrollEldpPanel from '../PayrollEldpPanel.vue'
 
 function setup(): void {
   vi.clearAllMocks()
+  routeQuery.value = {}
+  m.pensionRequests.mockResolvedValue([])
   m.canWrite = true
   m.canRead = true
   m.peoplePage.mockResolvedValue({ items: [], total: 0, limit: 25, offset: 0 })
@@ -154,6 +164,61 @@ function setup(): void {
 describe('PayrollEldpPanel', () => {
   beforeEach(setup)
 
+  /**
+   * ELDP na výzvu z evidence výzev: proklik z karty osoby předvyplní vztah,
+   * rok a údaje výzvy a příprava pošle odkaz na výzvu, aby ji server navázal
+   * na list a vzal termín z výzvy.
+   */
+  it('převezme výzvu z evidence výzev a pošle její odkaz', async () => {
+    routeQuery.value = { person: '11', employment: '101', year: '2025', pension_request: '44' }
+    m.pensionRequests.mockResolvedValue([{
+      id: 44,
+      employee_id: 11,
+      employment_id: 101,
+      request_kind: 'eldp',
+      legacy_kind: null,
+      requester: 'ossz',
+      requester_reference: 'SYN-OSSZ-1',
+      received_on: '2026-08-20',
+      period_year: 2025,
+      period_from: null,
+      period_to: null,
+      death_on: null,
+      stated_due_on: null,
+      due_on: '2026-08-28',
+      deadline_rule: 'cz-eldp-deadlines.authority-request.pre-2026.v1',
+      deadline_source: 'syntetický zdroj',
+      eldp_statement_id: null,
+      eldp_environment: null,
+      status: 'open',
+      completed_on: null,
+      completion_kind: null,
+      completion_reference: null,
+      copy_delivered_on: null,
+      note: null,
+      row_version: 1,
+    }])
+    const wrapper = mount(PayrollEldpPanel)
+    await flushPromises()
+
+    expect(m.pensionRequests).toHaveBeenCalledWith(11)
+    expect(wrapper.get('[data-test="eldp-pension-request"]').text()).toContain('payroll.eldp.fromRequest.title')
+    expect((wrapper.get('[data-test="eldp-authority-request"]').element as HTMLInputElement).checked).toBe(true)
+
+    await wrapper.get('[data-test="eldp-excluded-confirm"]').setValue(true)
+    await wrapper.get('[data-test="eldp-pension-confirm"]').setValue(true)
+    await flushPromises()
+    await wrapper.get('[data-test="eldp-prepare"]').trigger('click')
+    await flushPromises()
+
+    expect(m.prepareEldp).toHaveBeenCalledWith(expect.objectContaining({
+      employment_id: 101,
+      year: 2025,
+      requested_by_authority: true,
+      authority_request_received_on: '2026-08-20',
+      pension_request_id: 44,
+    }))
+  })
   it('používá dark-mode tokeny místo natvrdo bílých ploch formuláře', async () => {
     const wrapper = mount(PayrollEldpPanel)
     await flushPromises()
@@ -463,6 +528,11 @@ describe('PayrollEldpPanel', () => {
     expect(rows).toHaveLength(2)
     expect(rows[0]!.findAll('td')[4]!.text()).toBe('6')
     expect(rows[1]!.text()).toContain('payroll.eldp.formSheet.postTermination')
+
+    // Stejnopis pro zaměstnance se tiskne ze zmrazeného listu téhož rozsahu.
+    await wrapper.get('[data-test="eldp-copy"]').trigger('click')
+    await flushPromises()
+    expect(m.downloadEldpCopy).toHaveBeenCalledWith({ employment_id: 101, year: 2025, environment: 'production' })
 
     await wrapper.get('[data-test="eldp-correction"]').setValue(true)
     await wrapper.get('[data-test="eldp-prepared-on"]').setValue('2025-10-05')

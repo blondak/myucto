@@ -6025,6 +6025,82 @@
         "issue": "Issue certificate",
         "complete": "Completed outside the app"
       },
+      "pension_requests": {
+        "title": "Pension insurance requests",
+        "subtitle": "Record sheet on request or after death, report correction on request, confirmation of the insurance period and other confirmations. The deadline runs from delivery.",
+        "open_count": "{count} open | {count} open | {count} open",
+        "empty": "No request has been recorded.",
+        "row": "{requester} · delivered {received} · due {due}",
+        "copy_delivered": "Copy handed over on {date}",
+        "completed_on": "Completed on {date}",
+        "prepare_eldp": "Prepare the record sheet",
+        "open_eldp": "Open the record sheet",
+        "download_certificate": "Download the confirmation (PDF)",
+        "record_copy": "Copy handed to the employee",
+        "record_copy_cssz": "Copy submitted to ČSSZ",
+        "completion_reference": "Proof of completion (optional)",
+        "complete": "Completed",
+        "save": "Record the request",
+        "saved": "The request is recorded and its deadline is in the deadline overview.",
+        "save_failed": "The request could not be saved.",
+        "load_failed": "Requests could not be loaded.",
+        "certificate_failed": "The confirmation could not be prepared.",
+        "kind": {
+          "eldp": "Pension insurance record sheet",
+          "jmh_correction": "Reporting or correcting data in the monthly report (§ 38a(1))",
+          "insurance_period_confirmation": "Confirmation of the pension insurance period (§ 42)",
+          "compensation_confirmation": "Confirmation of compensation for loss of earnings (§ 37(2))",
+          "legacy_confirmation": "Confirmation under the wording until 31 Dec 2025"
+        },
+        "legacy": {
+          "excluded_periods": "Confirmation of excluded periods with accounted income (§ 37(2)(c) until 2025)",
+          "deep_mining": "Confirmation of deep-mining employment (§ 37(3) until 2025)",
+          "risky_work": "Confirmation of shifts in risky work (§ 37(4) until 2025)",
+          "rescuer": "Confirmation of rescuer or company firefighter shifts (§ 37a until 2025)"
+        },
+        "requester": {
+          "cssz": "ČSSZ request",
+          "ossz": "District social security office request",
+          "employee": "Employee request",
+          "former_employee": "Former employee request",
+          "survivor": "Death notice from a survivor"
+        },
+        "status": {
+          "open": "Waiting",
+          "statement_prepared": "Record sheet prepared",
+          "statement_submitted": "Record sheet submitted",
+          "statement_fulfilled": "Record sheet accepted",
+          "completed": "Completed"
+        },
+        "fields": {
+          "kind": "Kind",
+          "legacy_kind": "Confirmation kind",
+          "requester": "Requested by",
+          "received_on": "Delivery date",
+          "employment": "Employment",
+          "employment_choose": "Choose the employment",
+          "period_year": "Year",
+          "period_month": "Report month",
+          "death_on": "Date of death",
+          "stated_due_on": "Deadline stated in the request",
+          "requester_reference": "Reference number",
+          "note": "Note"
+        },
+        "hint": {
+          "eldp": "A record sheet requested by ČSSZ is submitted within 8 days of delivery (for years from 2027 within the deadline stated in the request), after death within 3 months. Prepare it on the ELDP screen using the button at the request; from then on the deadline is carried by the submission.",
+          "jmh_correction": "Report or correct missing or wrong data in the monthly report within 8 days of delivery. If the report deadline has passed, use the ČSSZ form or a record sheet on request.",
+          "insurance_period_confirmation": "Issue the confirmation of the employment period in the year during which the employee was pension-insured within 8 days. The application builds it from approved payroll.",
+          "compensation_confirmation": "Issue the confirmation of the period, reason and amount of compensation for loss of earnings within 30 days. Payroll does not calculate this compensation; issue it from your own records and mark the request completed.",
+          "legacy_confirmation": "Confirmations under the wording until 31 Dec 2025 (Art. V of Act 360/2025) are issued for periods before 2026 on prescribed forms within 30 days. Payroll does not keep shift records."
+        },
+        "missing": {
+          "received_on": "Enter the delivery date.",
+          "employment": "Choose the employment.",
+          "period_month": "Enter the report month.",
+          "death_on": "Enter the date of death.",
+          "stated_due_on": "For years from 2027 enter the deadline stated in the request."
+        }
+      },
       "foreign_permits": {
         "title": "Residence and work permits",
         "subtitle": "Effective history of foreign-national permits with verified company evidence in Documents.",
@@ -8327,6 +8403,16 @@
       "deductedDerivedHint": "Periods deducted after reaching retirement age (code D) are derived from absences: unpaid leave, unexcused absence, sickness, care and months without insurance participation.",
       "deathOn": "Date of the employee's death",
       "deathOnHint": "Fill in only for a pension record issued in connection with death (type 03). It is submitted within 3 months of death.",
+      "copy": {
+        "download": "Copy for the employee (PDF)",
+        "hint": "The copy is printed from the frozen sheet; record the hand-over at the request on the person card.",
+        "failed": "The copy could not be prepared."
+      },
+      "fromRequest": {
+        "title": "Record sheet for a recorded request",
+        "body": "{requester} delivered on {received}, submit by {due}.",
+        "hint": "The request data are taken from the recorded request; the prepared sheet is linked to it and the submission then carries the deadline."
+      },
       "requestedByAuthority": "The record sheet is being prepared at the request of the authority.",
       "authorityRequestReceivedOn": "Request received on",
       "authorityRequestReceivedOnHint": "The eight-day deadline starts on this date. For a request made during the year, the sheet ends with the last month whose payroll has already been approved; future months are not required.",
@@ -9115,6 +9201,14 @@
           "foreign_permit_residence": "Residence permit expires",
           "foreign_permit_work": "Work permit expires",
           "taxable_income_request": "Issue the certificate of taxable income on request (§ 38j)",
+          "pension_request_eldp": "Submit the record sheet on request",
+          "pension_request_jmh_correction": "Correct data in the monthly report on request (§ 38a)",
+          "pension_request_insurance_period_confirmation": "Issue the confirmation of the insurance period (§ 42)",
+          "pension_request_compensation_confirmation": "Issue the confirmation of compensation for loss of earnings (§ 37)",
+          "pension_request_excluded_periods": "Issue the confirmation of excluded periods (until 2025)",
+          "pension_request_deep_mining": "Issue the deep-mining confirmation (until 2025)",
+          "pension_request_risky_work": "Issue the risky-work shift confirmation (until 2025)",
+          "pension_request_rescuer": "Issue the rescuer shift confirmation (until 2025)",
           "business_trip_documents": "Business trip settlement documents (§ 183 Labour Code)",
           "business_trip_settlement": "Settle the business trip (§ 183 Labour Code)"
         },
@@ -11287,7 +11381,7 @@
         "eldp_takeover_excluded_days_mismatch": "The taken-over month has a different number of excluded days than the recorded absences give. Correct the absences or the taken-over month in the payroll takeover check.",
         "eldp_deducted_days_unknown": "For a month with code D (after reaching retirement age) the taken-over payroll cannot document the deducted periods. Submit the pension record outside the application.",
         "eldp_section_15a_history_unavailable": "Whether a period in a month without insurance is excluded depends on participation in months before the reported year (Section 15a of the Sickness Insurance Act). Submit the pension record outside the application.",
-        "eldp_rehire_within_three_months": "The employee started again within three months in the same year; the pension record is not closed and continues with further rows. The application does not merge both employments into one record, submit it outside the application.",
+        "eldp_statement_continues_previous_employment": "The employment follows within three months an employment of the same person that ended in the same year. Its period belongs to further rows of the earlier employment's pension record sheet; prepare the sheet there.",
         "eldp_prepared_on_future": "The pension record preparation date is in the future. Enter a preparation date between the \"To\" date and today.",
         "eldp_excluded_days_exceed_deducted": "Excluded periods of a section with code D exceed the deducted periods; support must review this technical inconsistency.",
         "eldp_base_with_fully_excluded_section": "All days of the section are excluded periods yet it carries an assessment base; ČSSZ would reject it. Check the section's absences and income.",
@@ -12153,6 +12247,7 @@
           "takeover_revision": "MyÚčto calculates payroll for the indicated month but has no approved revision; data taken over from the previous program must not replace it.",
           "prepared_on": "The date of preparation precedes the \"To\" date of a row; ČSSZ rejects such a record sheet with error 251.",
           "correction": "A record sheet for this year and employment is already frozen, or the corrective sheet has nothing to correct.",
+          "previous_employment": "The employment follows an earlier employment of the same person within three months in the same year, so it has no record sheet of its own.",
           "confirmation": "A confirmation in the pension record form is missing or invalid (excluded periods, days without insurance, date of the authority request or the note).",
           "confirmation_document": "The supporting document for settling the pension record is missing, or the selected document cannot be read.",
           "no_insurance": "No pension insurance period arose for the employment in the selected year, so no pension record is prepared.",
@@ -12180,6 +12275,7 @@
           "takeover_revision": "Open payroll for the indicated month, finish the calculation and approve the current revision, or discard the draft run. Only then prepare the evidence sheet again. Taken-over data will not substitute the month so that a draft calculation with different figures cannot stay hidden.",
           "prepared_on": "In Date of preparation enter a day no earlier than the last \"To\" date (on termination, the end date or later), or clear the field to use the end of the last accounted month.",
           "correction": "If the source data changed after freezing, tick Corrective record sheet and prepare it again. If nothing changed, no corrective sheet is needed; if no sheet exists yet, prepare the regular one first.",
+          "previous_employment": "Open the record sheet of the earlier employment (link below) and prepare it; the following employment is added as further rows. If the earlier sheet is already frozen, the following employment gets a sheet of its own.",
           "confirmation": "In the form above, tick the confirmations of excluded periods and days without insurance, fill in the date the authority request was delivered when preparing on request, and shorten the note to 500 characters. Then prepare the record again.",
           "confirmation_document": "In the Settle pension record section, select or upload the supporting document (for example the ePortál filing confirmation) and save again.",
           "no_insurance": "Check that the correct year and employment are selected. If there really was no insurance period in the year, no pension record is filed and nothing else is needed.",

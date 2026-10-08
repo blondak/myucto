@@ -108,6 +108,34 @@ final readonly class EldpStatementService
     }
 
     /**
+     * Vztahy téže osoby s vlastním zmrazeným listem roku, na který tenhle vztah
+     * nenavazuje. Navazující zaměstnání pokračuje v listu dřívějšího vztahu
+     * jen tehdy, dokud ten list nevznikl bez něj — odeslaný list se nedoplňuje.
+     *
+     * @return list<int>
+     */
+    private function separatelyFiledEmployments(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        int $year,
+    ): array {
+        $separate = [];
+        foreach ($this->repository->frozenEmploymentsOfEmployee(
+            $supplierId,
+            $environment,
+            $employmentId,
+            $year,
+        ) as $otherId => $continued) {
+            if (!in_array($employmentId, $continued, true)) {
+                $separate[] = $otherId;
+            }
+        }
+
+        return $separate;
+    }
+
+    /**
      * @param array<string,mixed> $confirmation
      * @return array{
      *   statement_id:int,created:bool,statement_kind:string,
@@ -260,6 +288,8 @@ final readonly class EldpStatementService
                 $this->repository->revisionsForYear($supplierId, $year),
                 $buildConfirmation,
                 $this->takeover->forEmployment($supplierId, $employmentId, $year),
+                $this->separatelyFiledEmployments($supplierId, $environment, $employmentId, $year),
+                fn (int $continuedId) => $this->takeover->forEmployment($supplierId, $continuedId, $year),
             );
             $xml = $this->serializer->serialize($statement);
             $schema = $this->validator->validate($statement, $xml);

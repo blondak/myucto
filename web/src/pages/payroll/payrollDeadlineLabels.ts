@@ -82,7 +82,8 @@ export function usePayrollDeadlineLabels() {
         : source === 'tax_statement'
           ? `payroll.dashboard.deadlines.tax_statement.form.${title}`
           : source === 'annual_settlement' || source === 'foreign_permit'
-            || source === 'taxable_income_request' || source === 'business_trip'
+            || source === 'taxable_income_request' || source === 'pension_request'
+            || source === 'business_trip'
             ? `payroll.dashboard.deadlines.kind.${title}`
             : `payroll.people.checklist.${title}`
     return te(path) ? t(path) : title
@@ -111,7 +112,7 @@ export function usePayrollDeadlineLabels() {
     if (item.source === 'business_trip' && item.trip_label) {
       return `${item.subject} · ${item.trip_label}`
     }
-    if (item.source === 'taxable_income_request' && item.period) {
+    if ((item.source === 'taxable_income_request' || item.source === 'pension_request') && item.period) {
       return `${item.subject} · ${item.period}`
     }
     return item.subject
@@ -132,10 +133,12 @@ export function usePayrollDeadlineLabels() {
     if (item.source === 'foreign_permit' && item.employee_id !== undefined) {
       return { name: 'payroll-people', query: { person: String(item.employee_id) } }
     }
-    if (item.source === 'taxable_income_request' && item.employee_id !== undefined) {
+    if ((item.source === 'taxable_income_request' || item.source === 'pension_request')
+      && item.employee_id !== undefined
+    ) {
       const query: Record<string, string> = {
         person: String(item.employee_id),
-        panel: 'taxable_income_requests',
+        panel: item.source === 'pension_request' ? 'pension_requests' : 'taxable_income_requests',
       }
       if (item.employment_id !== undefined && item.employment_id !== null) {
         query.employment = String(item.employment_id)

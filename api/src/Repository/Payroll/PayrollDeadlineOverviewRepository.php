@@ -737,6 +737,18 @@ final readonly class PayrollDeadlineOverviewRepository
     }
 
     /**
+     * Nevyřízené výzvy a žádosti v důchodovém pojištění s termínem v okně.
+     * Pravidlo vyřízení drží {@see PayrollPensionRequestRepository}.
+     *
+     * @return list<array{request_id:int,employee_id:int,employment_id:?int,full_name:string,request_kind:string,legacy_kind:?string,requester:string,received_on:string,period_year:?int,period_from:?string,due_on:string,deadline_rule:string,legal_basis:string}>
+     */
+    public function pensionRequestDeadlines(int $supplierId, string $from, string $to): array
+    {
+        return (new PayrollPensionRequestRepository($this->db))
+            ->openDeadlines($supplierId, $from, $to);
+    }
+
+    /**
      * Rozpracované (nevyúčtované) pracovní cesty, které skončily nejdřív
      * `$arrivedFrom` — podklad lhůt § 183 odst. 1 ZP. Termín se dopočítá
      * v pracovních dnech, proto se okno zužuje až v PHP; dolní mez je jen

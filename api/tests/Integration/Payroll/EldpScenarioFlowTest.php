@@ -4,12 +4,17 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
+use MyInvoice\Action\Payroll\PayrollEldpAction;
+use MyInvoice\Action\Payroll\PayrollPensionRequestAction;
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
+use MyInvoice\Repository\Payroll\PayrollPensionRequestRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpStatementService;
+use MyInvoice\Service\Payroll\Submission\Eldp\PensionInsuranceCertificateService;
 use MyInvoice\Tests\Support\PayrollFullFlowTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Slim\Psr7\Response;
 
 /**
  * Evidenční list cestou účetní: založení osoby s hlavním pracovním poměrem
@@ -50,6 +55,152 @@ final class EldpScenarioFlowTest extends TestCase
     }
 
     public function testAgreementToCompleteAJobReachesAStatementOnAuthorityRequest(): void
+    {
+        [, $agreement] = $this->approvedJuly();
+
+        $service = $this->container->get(EldpStatementService::class);
+        self::assertInstanceOf(EldpStatementService::class, $service);
+        $prepared = $service->prepare(
+            $this->supplierId,
+            $agreement['employment_id'],
+            2026,
+            'test',
+            [
+                'excluded_days_confirmed' => true,
+                'deducted_days_none' => true,
+                'pension_status' => ['pension_age_reached_on' => null, 'early_pension_from' => null, 'full_pension_paid_from' => null, 'foreign_insurance' => false],
+                'requested_by_authority' => true,
+                'authority_request_received_on' => '2026-08-20',
+                'note' => 'Syntetická výzva ČSSZ.',
+            ],
+            'eldp-flow-dpc',
+            $this->actors[0],
+        );
+
+        self::assertTrue($prepared['created']);
+        self::assertSame('01', $prepared['eldp_type']);
+        self::assertSame(31, $prepared['insurance_days']);
+
+        $statement = $service->statement($this->supplierId, 'test', $agreement['employment_id'], 2026);
+        self::assertIsArray($statement);
+        $section = $statement['payload']['eldp_sections'][0];
+        self::assertSame('A++', $section['code']);
+        self::assertSame('2026-07-01', $section['valid_from']);
+        self::assertSame('2026-07-31', $section['valid_to']);
+        self::assertSame(10_000, $section['assessment_base_czk']);
+        self::assertSame('2026-07-01', $statement['payload']['form']['employed_from']);
+        self::assertSame('2026-07-31', $statement['payload']['form']['prepared_on']);
+    }
+
+    /**
+     * ELDP na výzvu z evidence výzev: zapsaná výzva hlídá lhůtu v přehledu
+     * termínů, list se připraví s údaji výzvy (týž termín), výzva se na list
+     * naváže a termín pak nese povinnost listu. Stejnopis předaný zaměstnanci
+     * se zapíše k výzvě. Potvrzení podle § 42 za týž rok skládá týž sestavovač.
+     */
+    public function testAuthorityRequestFromTheRegisterIsTrackedAndPreparedTheSameWay(): void
+    {
+        [$person, $agreement] = $this->approvedJuly();
+        $actions = $this->container->get(PayrollPensionRequestAction::class);
+        self::assertInstanceOf(PayrollPensionRequestAction::class, $actions);
+        $employeeId = (int) $agreement['employee_id'];
+        $uri = "/api/payroll/people/{$employeeId}/pension-requests";
+
+        $created = $this->json($actions->save(
+            $this->request('POST', $uri)->withParsedBody([
+                'request_kind' => 'eldp',
+                'requester' => 'ossz',
+                'requester_reference' => 'SYN-OSSZ-1/2026',
+                'received_on' => '2026-08-20',
+                'employment_id' => $agreement['employment_id'],
+                'period_year' => 2026,
+            ]),
+            new Response(),
+            ['id' => (string) $employeeId],
+        ));
+        $request = $created['requests'][0];
+        self::assertSame('2026-08-28', $request['due_on']);
+        self::assertSame('open', $request['status']);
+        $repository = new PayrollPensionRequestRepository($this->db);
+        self::assertSame(
+            [$request['id']],
+            array_column($repository->openDeadlines($this->supplierId, '2026-08-01', '2026-09-30'), 'request_id'),
+        );
+
+        $eldp = $this->container->get(PayrollEldpAction::class);
+        self::assertInstanceOf(PayrollEldpAction::class, $eldp);
+        $prepared = $this->json($eldp->prepare(
+            $this->request('POST', '/api/payroll/submissions/eldp')->withParsedBody([
+                'employment_id' => $agreement['employment_id'],
+                'year' => 2026,
+                'environment' => 'test',
+                'excluded_days_confirmed' => true,
+                'death_on' => null,
+                // Údaje výzvy převezme server ze zapsané výzvy.
+                'requested_by_authority' => false,
+                'authority_request_received_on' => null,
+                'pension_status' => ['pension_age_reached_on' => null, 'early_pension_from' => null, 'full_pension_paid_from' => null, 'foreign_insurance' => false],
+                'note' => '',
+                'idempotency_key' => 'eldp-request-flow',
+                'pension_request_id' => $request['id'],
+            ]),
+            new Response(),
+        ));
+        self::assertSame('2026-08-28', $prepared['statement']['due_on']);
+
+        $listed = $repository->list($this->supplierId, $employeeId)[0];
+        self::assertSame('statement_prepared', $listed['status']);
+        self::assertSame($prepared['statement']['statement_id'], $listed['eldp_statement_id']);
+        self::assertSame([], $repository->openDeadlines($this->supplierId, '2026-08-01', '2026-09-30'));
+
+        $copied = $this->json($actions->save(
+            $this->request('POST', $uri)->withParsedBody([
+                'id' => $request['id'],
+                'copy_delivered' => true,
+                'copy_delivered_on' => '2026-08-27',
+            ]),
+            new Response(),
+            ['id' => (string) $employeeId],
+        ));
+        self::assertSame('2026-08-27', $copied['requests'][0]['copy_delivered_on']);
+        $copy = $eldp->copy(
+            $this->request('GET', '/api/payroll/submissions/eldp/copy')->withQueryParams([
+                'employment_id' => (string) $agreement['employment_id'],
+                'year' => '2026',
+                'environment' => 'test',
+            ]),
+            new Response(),
+        );
+        self::assertSame(200, $copy->getStatusCode(), (string) $copy->getBody());
+        $copy->getBody()->rewind();
+        self::assertStringStartsWith('%PDF-', (string) $copy->getBody());
+
+        $confirmation = $this->json($actions->save(
+            $this->request('POST', $uri)->withParsedBody([
+                'request_kind' => 'insurance_period_confirmation',
+                'requester' => 'employee',
+                'received_on' => '2026-09-01',
+                'employment_id' => $person['employment_id'],
+                'period_year' => 2026,
+            ]),
+            new Response(),
+            ['id' => (string) $employeeId],
+        ))['requests'][0];
+        self::assertSame('2026-09-09', $confirmation['due_on']);
+        $certificates = $this->container->get(PensionInsuranceCertificateService::class);
+        self::assertInstanceOf(PensionInsuranceCertificateService::class, $certificates);
+        $data = $certificates->data($this->supplierId, $employeeId, $confirmation['id']);
+        self::assertSame([['from' => '2026-07-01', 'to' => '2026-07-31', 'days' => 31, 'months_without_insurance' => []]], $data['periods']);
+        $pdf = $certificates->render($this->supplierId, $employeeId, $confirmation['id']);
+        self::assertStringStartsWith('%PDF-', $pdf['pdf']);
+    }
+
+    /**
+     * Osoba s pracovním poměrem a DPČ od 1. 7. 2026, schválená mzda za červenec.
+     *
+     * @return array{0:array<string,mixed>,1:array<string,mixed>}
+     */
+    private function approvedJuly(): array
     {
         $person = $this->createEmployment(
             $this->officeId,
@@ -107,38 +258,7 @@ final class EldpScenarioFlowTest extends TestCase
         self::assertSame([], $run['warnings'], 'Zaseknutí: varování. ' . CanonicalJson::encode($run['warnings']));
         self::assertNotNull($run['approved']);
 
-        $service = $this->container->get(EldpStatementService::class);
-        self::assertInstanceOf(EldpStatementService::class, $service);
-        $prepared = $service->prepare(
-            $this->supplierId,
-            $agreement['employment_id'],
-            2026,
-            'test',
-            [
-                'excluded_days_confirmed' => true,
-                'deducted_days_none' => true,
-                'pension_status' => ['pension_age_reached_on' => null, 'early_pension_from' => null, 'full_pension_paid_from' => null, 'foreign_insurance' => false],
-                'requested_by_authority' => true,
-                'authority_request_received_on' => '2026-08-20',
-                'note' => 'Syntetická výzva ČSSZ.',
-            ],
-            'eldp-flow-dpc',
-            $this->actors[0],
-        );
-
-        self::assertTrue($prepared['created']);
-        self::assertSame('01', $prepared['eldp_type']);
-        self::assertSame(31, $prepared['insurance_days']);
-
-        $statement = $service->statement($this->supplierId, 'test', $agreement['employment_id'], 2026);
-        self::assertIsArray($statement);
-        $section = $statement['payload']['eldp_sections'][0];
-        self::assertSame('A++', $section['code']);
-        self::assertSame('2026-07-01', $section['valid_from']);
-        self::assertSame('2026-07-31', $section['valid_to']);
-        self::assertSame(10_000, $section['assessment_base_czk']);
-        self::assertSame('2026-07-01', $statement['payload']['form']['employed_from']);
-        self::assertSame('2026-07-31', $statement['payload']['form']['prepared_on']);
+        return [$person, $agreement];
     }
 
     /** Vztah i jeho podmínky začínají až vykazovaným měsícem. */

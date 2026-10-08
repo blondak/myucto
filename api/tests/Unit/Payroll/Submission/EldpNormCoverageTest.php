@@ -242,27 +242,6 @@ final class EldpNormCoverageTest extends TestCase
     }
 
     /**
-     * Všeobecné zásady, Hlavní zásady: nástup u téhož zaměstnavatele do tří
-     * měsíců ve stejném roce — list se neuzavírá. Modul vztahy nespojí, takže
-     * zastaví uzavření listu prvního vztahu.
-     */
-    public function testRehireWithinThreeMonthsBlocksClosingTheStatement(): void
-    {
-        $revisions = [
-            ...$this->months(2025, 1, 3, end: '2025-03-31'),
-            $this->revision(2025, 5, end: '2025-03-31', baseMinor: 0, rehire: ['id' => 103, 'start' => '2025-05-15']),
-        ];
-
-        try {
-            $this->build($revisions);
-            self::fail('Opětovný nástup do tří měsíců musí list zastavit.');
-        } catch (EldpValidationException $exception) {
-            self::assertSame(['eldp_rehire_within_three_months'], array_column($exception->blockers, 'code'));
-            self::assertSame(103, $exception->blockers[0]['detail']['rehire_employment_id']);
-        }
-    }
-
-    /**
      * § 15a zákona č. 187/2006 Sb., př. 31 a 38: nemoc v měsíci bez účasti
      * po třech měsících účasti je vyloučenou dobou, započte se do dnů a měsíc
      * zůstane „X". Př. 32: bez tří měsíců účasti se nevykazuje.
@@ -290,6 +269,66 @@ final class EldpNormCoverageTest extends TestCase
         self::assertContains(4, $withClaim['months_without_insurance']);
         self::assertSame(0, $withoutClaim['excluded_days_total']);
         self::assertSame(28 + 31 + 31 + 30, $withoutClaim['insurance_days']);
+    }
+
+    /**
+     * Všeobecné zásady, údaj „Od" u zaměstnání malého rozsahu a DPP, a Metodická
+     * pomůcka př. 33: vznikne-li účast až v některém z dalších měsíců po nástupu,
+     * „Od" je první den toho měsíce. Měsíce před vznikem účasti nejsou v intervalu
+     * řádku, takže se ani nevyznačují „X". Pozdější měsíce bez účasti uvnitř
+     * intervalu „X" zůstávají a „Výdělečná činnost od" nese skutečný nástup.
+     */
+    public function testSmallScaleEmploymentStartsTheRowWhenParticipationArises(): void
+    {
+        $revisions = [];
+        foreach ([1 => false, 2 => false, 3 => true, 4 => false, 5 => false] as $month => $participates) {
+            $revisions[] = $this->revision(
+                2025,
+                $month,
+                start: '2025-01-04',
+                end: '2025-05-31',
+                baseMinor: $participates ? 450_000 : 140_000,
+                relation: 'small_scale_employment',
+                participates: $participates,
+            );
+        }
+
+        $statement = $this->build($revisions);
+        $section = $statement->sections()[0];
+
+        self::assertCount(1, $statement->sections());
+        self::assertSame('2025-03-01', $section['valid_from']);
+        self::assertSame('2025-05-31', $section['valid_to']);
+        self::assertSame([4, 5], $section['months_without_insurance']);
+        self::assertSame(31, $section['insurance_days']);
+        self::assertSame(4_500, $section['assessment_base_czk']);
+        self::assertSame('2025-03-01', $statement->scope()['period_from']);
+        self::assertSame('2025-01-04', $statement->payload['form']['employed_from']);
+        $xml = (new EldpXmlSerializer())->serialize($statement);
+        (new EldpXmlValidator())->validate($statement, $xml);
+    }
+
+    /** Vznikne-li účast už v měsíci nástupu, „Od" je den nástupu. */
+    public function testSmallScaleEmploymentParticipatingInTheStartMonthStartsOnTheStartDay(): void
+    {
+        $revisions = [];
+        foreach ([2 => true, 3 => false] as $month => $participates) {
+            $revisions[] = $this->revision(
+                2025,
+                $month,
+                start: '2025-02-10',
+                end: '2025-03-31',
+                baseMinor: $participates ? 450_000 : 140_000,
+                relation: 'small_scale_employment',
+                participates: $participates,
+            );
+        }
+
+        $section = $this->build($revisions)->sections()[0];
+
+        self::assertSame('2025-02-10', $section['valid_from']);
+        self::assertSame([3], $section['months_without_insurance']);
+        self::assertSame(19, $section['insurance_days']);
     }
 
     /**

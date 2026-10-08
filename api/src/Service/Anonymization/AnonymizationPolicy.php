@@ -479,6 +479,7 @@ final class AnonymizationPolicy
         'payroll_surcharge_input_materializations' => ['evidence_hash' => 'keep', 'source_snapshot_hash' => 'keep', 'source_snapshot_json' => 'json'],
         'payroll_takeover_payment_evidence' => ['currency_code' => 'keep', 'external_person_ref' => 'text'],
         'payroll_taxable_income_confirmation_requests' => ['note' => 'text'],
+        'payroll_pension_requests' => ['deadline_rule' => 'keep', 'requester_reference' => 'text', 'completion_reference' => 'text', 'note' => 'text'],
         'payroll_takeover_runs' => ['input_snapshot_hash' => 'keep', 'input_snapshot_json' => 'json', 'result_snapshot_hash' => 'keep', 'result_snapshot_json' => 'json', 'takeover_sources' => 'keep'],
         'payroll_time_entries' => ['series_key' => 'keep', 'source_hash' => 'keep', 'source_reference' => 'text', 'timezone_name' => 'keep'],
         'payroll_time_import_errors' => ['error_code' => 'keep', 'error_message' => 'text', 'field_name' => 'keep', 'row_hash' => 'keep'],

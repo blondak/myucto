@@ -3467,7 +3467,7 @@ export type PayrollDeadlinePhase = 'overdue' | 'due_today' | 'due_soon' | 'open'
 export type PayrollDeadlineSource = 'submission' | 'levy' | 'checklist'
   | 'registration_change' | 'tax_statement' | 'sickness_case'
   | 'annual_settlement' | 'foreign_permit'
-  | 'taxable_income_request' | 'business_trip'
+  | 'taxable_income_request' | 'pension_request' | 'business_trip'
 
 export interface PayrollDeadlineItem {
   source: PayrollDeadlineSource
@@ -3543,6 +3543,60 @@ export interface PayrollTaxableIncomeRequestPayload {
   requested_on: string
   income_year: number
   employment_id?: number | null
+  note?: string | null
+}
+
+export type PayrollPensionRequestKind = 'eldp' | 'jmh_correction' | 'insurance_period_confirmation'
+  | 'compensation_confirmation' | 'legacy_confirmation'
+export type PayrollPensionRequestLegacyKind = 'excluded_periods' | 'deep_mining' | 'risky_work' | 'rescuer'
+export type PayrollPensionRequester = 'cssz' | 'ossz' | 'employee' | 'former_employee' | 'survivor'
+
+/**
+ * Výzva nebo žádost v důchodovém pojištění: evidenční list na výzvu nebo po
+ * úmrtí, oprava hlášení na výzvu (§ 38a odst. 1), potvrzení podle § 42
+ * a § 37 odst. 2 a podle znění do 31. 12. 2025. Lhůtu počítá server.
+ */
+export interface PayrollPensionRequest {
+  id: number
+  employee_id: number
+  employment_id: number | null
+  request_kind: PayrollPensionRequestKind
+  legacy_kind: PayrollPensionRequestLegacyKind | null
+  requester: PayrollPensionRequester
+  requester_reference: string | null
+  received_on: string
+  period_year: number | null
+  period_from: string | null
+  period_to: string | null
+  death_on: string | null
+  stated_due_on: string | null
+  due_on: string
+  deadline_rule: string
+  deadline_source: string
+  eldp_statement_id: number | null
+  eldp_environment: PayrollRegzelEnvironment | null
+  /** `statement_*` = výzva navázaná na připravený evidenční list a stav jeho povinnosti. */
+  status: 'open' | 'statement_prepared' | 'statement_submitted' | 'statement_fulfilled' | 'completed'
+  completed_on: string | null
+  completion_kind: 'eldp_statement' | 'document' | 'manual' | null
+  completion_reference: string | null
+  copy_delivered_on: string | null
+  note: string | null
+  row_version: number
+}
+
+export interface PayrollPensionRequestPayload {
+  request_kind: PayrollPensionRequestKind
+  legacy_kind?: PayrollPensionRequestLegacyKind | null
+  requester: PayrollPensionRequester
+  requester_reference?: string | null
+  received_on: string
+  employment_id?: number | null
+  period_year?: number | null
+  period_from?: string | null
+  period_to?: string | null
+  death_on?: string | null
+  stated_due_on?: string | null
   note?: string | null
 }
 
@@ -7806,6 +7860,49 @@ export const payrollApi = {
       `/payroll/people/${employeeId}/taxable-income-requests`,
       { id: requestId, delete: true },
     ).then(response => response.data.requests),
+  /** Výzvy a žádosti v důchodovém pojištění u osoby. */
+  pensionRequests: (employeeId: number) =>
+    api.get<{ requests: PayrollPensionRequest[] }>(
+      `/payroll/people/${employeeId}/pension-requests`,
+    ).then(response => response.data.requests),
+  createPensionRequest: (employeeId: number, payload: PayrollPensionRequestPayload) =>
+    api.post<{ requests: PayrollPensionRequest[] }>(
+      `/payroll/people/${employeeId}/pension-requests`,
+      payload,
+    ).then(response => response.data.requests),
+  completePensionRequest: (employeeId: number, requestId: number, completedOn: string, reference: string | null) =>
+    api.post<{ requests: PayrollPensionRequest[] }>(
+      `/payroll/people/${employeeId}/pension-requests`,
+      { id: requestId, complete: true, completed_on: completedOn, completion_reference: reference },
+    ).then(response => response.data.requests),
+  recordPensionRequestCopy: (employeeId: number, requestId: number, deliveredOn: string) =>
+    api.post<{ requests: PayrollPensionRequest[] }>(
+      `/payroll/people/${employeeId}/pension-requests`,
+      { id: requestId, copy_delivered: true, copy_delivered_on: deliveredOn },
+    ).then(response => response.data.requests),
+  deletePensionRequest: (employeeId: number, requestId: number) =>
+    api.post<{ requests: PayrollPensionRequest[] }>(
+      `/payroll/people/${employeeId}/pension-requests`,
+      { id: requestId, delete: true },
+    ).then(response => response.data.requests),
+  /** Potvrzení o době důchodového pojištění v roce (§ 42) jako PDF ke stažení. */
+  downloadPensionInsuranceCertificate: async (employeeId: number, requestId: number): Promise<void> => {
+    const response = await api.get<Blob>(
+      `/payroll/people/${employeeId}/pension-requests/${requestId}/certificate`,
+      { responseType: 'blob' },
+    )
+    const objectUrl = URL.createObjectURL(response.data)
+    try {
+      const anchor = document.createElement('a')
+      anchor.href = objectUrl
+      anchor.download = `potvrzeni-doba-duchodoveho-pojisteni-${requestId}.pdf`
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+    } finally {
+      URL.revokeObjectURL(objectUrl)
+    }
+  },
     /** Počáteční stavy zákonných kumulací za rok — úhrny z předchozího zpracování. */
   statutoryOpenings: (employeeId: number, year: number) =>
     api.get<{ openings: PayrollOpeningBalances }>(
@@ -8930,9 +9027,33 @@ export const payrollApi = {
     correction?: boolean
     /** Datum vyhotovení; bez něj server vezme konec posledního zúčtovaného měsíce. */
     prepared_on?: string | null
+    /** Výzva z evidence výzev; údaje výzvy (doručení, lhůta, úmrtí) převezme server z ní. */
+    pension_request_id?: number | null
   }) =>
     api.post<{ statement: PayrollEldpPrepared }>('/payroll/submissions/eldp', payload)
       .then(response => response.data.statement),
+  /** Stejnopis zmrazeného evidenčního listu pro zaměstnance (PDF). */
+  downloadEldpCopy: async (params: {
+    employment_id: number
+    year: number
+    environment: PayrollRegzelEnvironment
+  }): Promise<void> => {
+    const response = await api.get<Blob>('/payroll/submissions/eldp/copy', {
+      params,
+      responseType: 'blob',
+    })
+    const objectUrl = URL.createObjectURL(response.data)
+    try {
+      const anchor = document.createElement('a')
+      anchor.href = objectUrl
+      anchor.download = `stejnopis-eldp-${params.year}-${params.employment_id}.pdf`
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+    } finally {
+      URL.revokeObjectURL(objectUrl)
+    }
+  },
   completeEldp: (statementId: number, payload: {
     environment: PayrollRegzelEnvironment
     expected_obligation_row_version: number

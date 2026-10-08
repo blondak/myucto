@@ -192,6 +192,9 @@ final class PayrollEmployeeDeletionRepository
             'payroll_taxable_income_confirmation_requests',
         ],
         'insurance' => [
+            // Výzvy a žádosti v důchodovém pojištění jsou pracovní záznam lhůty;
+            // vyhotovený evidenční list mazání osoby blokuje sám.
+            'payroll_pension_requests',
             'payroll_person_health_coverage_history',
             'payroll_person_health_minimum_reductions',
             'payroll_person_health_month_evidence',

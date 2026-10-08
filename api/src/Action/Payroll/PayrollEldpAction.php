@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Payroll;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\Payroll\PayrollPensionRequestRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionConflictException;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
@@ -15,6 +16,7 @@ use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpManualCompletionException;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpManualCompletionService;
+use MyInvoice\Service\Payroll\Submission\Eldp\EldpStatementCopyService;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpStatementService;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpValidationException;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -37,6 +39,8 @@ final class PayrollEldpAction
         private readonly PayrollModuleAccess $access,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly PayrollPensionRequestRepository $pensionRequests,
+        private readonly EldpStatementCopyService $copies,
     ) {}
 
     public function get(Request $request, Response $response): Response
@@ -114,21 +118,69 @@ final class PayrollEldpAction
         ]);
     }
 
+    /**
+     * Stejnopis zmrazeného evidenčního listu pro zaměstnance (PDF).
+     */
+    public function copy(Request $request, Response $response): Response
+    {
+        if (!$this->guard($request, $response, AccessLevel::READ, $error)) {
+            return $this->guardFailure($error);
+        }
+        try {
+            $query = $request->getQueryParams();
+            $artifact = $this->copies->render(
+                $this->currentSupplierId($request),
+                $this->queryEnvironment($request),
+                $this->queryPositiveInt($query, 'employment_id'),
+                $this->queryPositiveInt($query, 'year'),
+            );
+        } catch (EldpValidationException $exception) {
+            return $this->failure($response, $exception);
+        } catch (\OutOfBoundsException $exception) {
+            return Json::error($response, 'not_found', $exception->getMessage(), 404);
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
+        }
+        $response->getBody()->write($artifact['pdf']);
+
+        return $response
+            ->withHeader('Content-Type', 'application/pdf')
+            ->withHeader('Content-Disposition', 'attachment; filename="' . $artifact['filename'] . '"')
+            ->withHeader('Cache-Control', 'private, no-store');
+    }
+
     public function prepare(Request $request, Response $response): Response
     {
         if (!$this->guard($request, $response, AccessLevel::WRITE, $error)) {
             return $this->guardFailure($error);
         }
         $employmentId = 0;
+        $pensionRequestId = null;
         try {
             $body = $this->body($request);
             $employmentId = $this->positiveInt($body, 'employment_id');
+            $year = $this->positiveInt($body, 'year');
+            /*
+             * Evidenční list na výzvu z evidence výzev: údaje výzvy (žadatel,
+             * doručení, lhůta, úmrtí) se berou ze zapsané výzvy, aby list
+             * a výzva měly tentýž termín.
+             */
+            $fromRequest = [];
+            if (($body['pension_request_id'] ?? null) !== null) {
+                $pensionRequestId = $this->positiveInt($body, 'pension_request_id');
+                $fromRequest = $this->pensionRequests->eldpConfirmation(
+                    $this->currentSupplierId($request),
+                    $pensionRequestId,
+                    $employmentId,
+                    $year,
+                );
+            }
             $result = $this->service->prepare(
                 $this->currentSupplierId($request),
                 $employmentId,
-                $this->positiveInt($body, 'year'),
+                $year,
                 $this->environment($body),
-                [
+                $fromRequest + [
                     'excluded_days_confirmed' =>
                         $this->bool($body, 'excluded_days_confirmed'),
                     // Odečtené doby sestavovač odvozuje z nepřítomností;
@@ -158,12 +210,22 @@ final class PayrollEldpAction
             );
         } catch (EldpValidationException $exception) {
             return $this->failure($response, $exception);
+        } catch (\OutOfBoundsException $exception) {
+            return Json::error($response, 'not_found', $exception->getMessage(), 404);
         } catch (\InvalidArgumentException $exception) {
             return Json::error(
                 $response,
                 'validation_failed',
                 $exception->getMessage(),
                 422,
+            );
+        }
+        if ($pensionRequestId !== null) {
+            $this->pensionRequests->linkEldpStatement(
+                $this->currentSupplierId($request),
+                $pensionRequestId,
+                $result['statement_id'],
+                $result['environment'],
             );
         }
 
@@ -182,6 +244,7 @@ final class PayrollEldpAction
                 'submission_status' => $result['submission_status'],
                 'created' => $result['created'],
                 'environment' => $result['environment'],
+                'pension_request_id' => $pensionRequestId,
             ],
         );
 

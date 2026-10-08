@@ -218,6 +218,50 @@ final class EldpStatementRepository
         return $row === false ? null : self::normalize($row);
     }
 
+    /**
+     * Ostatní vztahy téže osoby, za které je list roku už zmrazený, a které
+     * vztahy jejich poslední list zahrnul jako navazující zaměstnání
+     * (`scope.continued_employment_ids` v manifestu).
+     *
+     * @return array<int,list<int>> vztah => navazující vztahy v jeho listu
+     */
+    public function frozenEmploymentsOfEmployee(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        int $year,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'WITH latest AS (
+                SELECT statement.employment_id, statement.source_manifest_json,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY statement.employment_id
+                           ORDER BY statement.statement_sequence DESC
+                       ) AS position
+                  FROM payroll_eldp_statements statement
+                  JOIN payroll_employments employment
+                    ON employment.supplier_id = statement.supplier_id
+                   AND employment.employee_id = statement.employee_id
+                 WHERE statement.supplier_id = ? AND statement.environment = ?
+                   AND statement.statement_year = ?
+                   AND employment.id = ?
+                   AND statement.employment_id <> ?
+             )
+             SELECT employment_id, source_manifest_json FROM latest WHERE position = 1'
+        );
+        $statement->execute([$supplierId, $environment, $year, $employmentId, $employmentId]);
+        $frozen = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $manifest = json_decode((string) $row['source_manifest_json'], true);
+            $continued = is_array($manifest) ? ($manifest['scope']['continued_employment_ids'] ?? []) : [];
+            $frozen[(int) $row['employment_id']] = is_array($continued)
+                ? array_values(array_map(intval(...), $continued))
+                : [];
+        }
+
+        return $frozen;
+    }
+
     /** @return array<string,mixed>|null */
     public function find(int $supplierId, string $environment, int $id): ?array
     {
