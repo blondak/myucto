@@ -26,7 +26,7 @@ final class PremierPayrollSubmissions
     public const TYPES = ['REGZEC25', 'PREZEC26'];
 
     /**
-     * @param list<array{name:string,content:string,type:string,vrep_id:string,sqnr:int,sent_at:string,date:?string}> $sentences
+     * @param list<array{name:string,content:string,type:string,vrep_id:string,key:string,sqnr:int,sent_at:string,date:?string}> $sentences
      * @param array{files:int,files_rejected:int,files_unreadable:int,sentences_rejected:int} $stats
      */
     private function __construct(
@@ -60,7 +60,8 @@ final class PremierPayrollSubmissions
                 continue;
             }
             $type = trim((string) $row['TYP_ZPRAVY']);
-            $id = strtolower(substr((string) preg_replace('/[^0-9A-Za-z]/', '', (string) ($row['ID'] ?? '')), 0, 8));
+            $fullId = strtolower((string) preg_replace('/[^0-9A-Za-z-]/', '', (string) ($row['ID'] ?? '')));
+            $id = substr(str_replace('-', '', $fullId), 0, 8);
             $employees = self::employees($document);
             foreach ($employees as $index => $employee) {
                 $sqnr = (int) ($employee->getAttribute('sqnr') !== '' ? $employee->getAttribute('sqnr') : $index + 1);
@@ -80,6 +81,7 @@ final class PremierPayrollSubmissions
                     'content' => $content,
                     'type' => $type,
                     'vrep_id' => $id,
+                    'key' => $fullId . ':' . $sqnr,
                     'sqnr' => $sqnr,
                     'sent_at' => (string) ($row['DAT_ZPRAVY'] ?? ''),
                     'date' => preg_match('/^\d{4}-\d{2}-\d{2}$/D', $date) === 1 ? $date : null,

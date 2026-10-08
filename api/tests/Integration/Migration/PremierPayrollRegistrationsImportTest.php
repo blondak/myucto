@@ -91,16 +91,18 @@ final class PremierPayrollRegistrationsImportTest extends TestCase
         $early = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
         self::assertFalse($early->hasErrors(), $this->explain($early));
         $counts = self::stepCounts($early, 'payroll');
-        self::assertSame([3, 1, 1, 2, 0], [$counts['registrations_files'] ?? 0, $counts['registrations_files_rejected'] ?? 0, $counts['registrations_sentences_rejected'] ?? 0,
+        self::assertSame([3, 1, 1, 3, 0], [$counts['registrations_files'] ?? 0, $counts['registrations_files_rejected'] ?? 0, $counts['registrations_sentences_rejected'] ?? 0,
             $counts['registrations_later'] ?? 0, $counts['registrations_applied'] ?? 0], $this->explain($early));
         self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM payroll_employment_external_ids WHERE supplier_id = ?', $supplierId));
 
         $first = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR2, false);
         self::assertFalse($first->hasErrors(), $this->explain($first));
         $counts = self::stepCounts($first, 'payroll');
-        // Soubory: přijatý se dvěma větami (jedna ČSSZ odmítla), odmítnutý celý a přijatý s dohlášením z roku 2027.
-        self::assertSame([3, 1, 1, 2, 1, 1], [$counts['registrations_files'] ?? 0, $counts['registrations_files_rejected'] ?? 0, $counts['registrations_sentences_rejected'] ?? 0,
-            $counts['registrations_sentences'] ?? 0, $counts['registrations_applied'] ?? 0, $counts['registrations_later'] ?? 0], $this->explain($first));
+        // Soubory: přijatý se třemi větami (jednu ČSSZ odmítla, jedna je osoba, kterou převod nezná), odmítnutý celý
+        // a přijatý s dohlášením z roku 2027.
+        self::assertSame([3, 1, 1, 3, 1, 1, 1], [$counts['registrations_files'] ?? 0, $counts['registrations_files_rejected'] ?? 0, $counts['registrations_sentences_rejected'] ?? 0,
+            $counts['registrations_sentences'] ?? 0, $counts['registrations_applied'] ?? 0, $counts['registrations_later'] ?? 0, $counts['registrations_unmatched'] ?? 0],
+            $this->explain($first));
         self::assertArrayNotHasKey('registrations_failed', $counts, $this->explain($first));
         self::assertArrayNotHasKey('registrations_blocked', $counts, $this->explain($first));
         self::assertContains('registrations_imported', $this->messageCodes($first));
@@ -111,11 +113,17 @@ final class PremierPayrollRegistrationsImportTest extends TestCase
         self::assertSame(0, $this->scalar("SELECT COUNT(*) FROM payroll_employees WHERE supplier_id = ? AND full_name LIKE 'Odmítnutá%'", $supplierId),
             'Věta, kterou ČSSZ odmítla, ani věta v odmítnutém podání osobu nezaloží.');
         self::assertSame(0, $this->scalar("SELECT COUNT(*) FROM payroll_employees WHERE supplier_id = ? AND full_name LIKE 'Zamítnutá%'", $supplierId));
+        self::assertSame(0, $this->scalar("SELECT COUNT(*) FROM payroll_employees WHERE supplier_id = ? AND full_name LIKE 'Neznámá%'", $supplierId),
+            'Věta, ke které převod nezná vztah, osobu ani vztah nezaloží.');
+        self::assertContains('registration_unmatched', $this->messageCodes($first));
 
         $again = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR2, false);
         self::assertFalse($again->hasErrors(), $this->explain($again));
         $counts = self::stepCounts($again, 'payroll');
-        self::assertSame([0, 1], [$counts['registrations_applied'] ?? 0, $counts['registrations_unchanged'] ?? 0], $this->explain($again));
+        // Zapsaná věta je v mapě převodu a znovu se nepřepisuje; věta bez vztahu se zkusí znovu.
+        self::assertSame([0, 1, 1, 0], [$counts['registrations_applied'] ?? 0, $counts['registrations_done'] ?? 0, $counts['registrations_unmatched'] ?? 0,
+            $counts['registrations_unchanged'] ?? 0], $this->explain($again));
+        self::assertSame(1, $this->scalar("SELECT COUNT(*) FROM premier_import_map WHERE supplier_id = ? AND kind = 'payroll_registration'", $supplierId));
         self::assertSame(1, $this->scalar('SELECT COUNT(*) FROM payroll_employment_external_ids WHERE supplier_id = ?', $supplierId));
         self::assertSame(1, $this->scalar('SELECT COUNT(*) FROM payroll_registration_a1_profiles WHERE supplier_id = ?', $supplierId));
     }
@@ -142,6 +150,9 @@ final class PremierPayrollRegistrationsImportTest extends TestCase
         // Osoby, které by věty založily, kdyby je převod přijal: nesmí vzniknout.
         $rejectedSentence = ['bno' => RegistrationXmlFixtures::birthNumber('1991-02-03', 'male', 3), 'first' => 'Petr', 'last' => 'Odmítnutá', 'birth_date' => '1991-02-03',
             'sex' => 'M', 'start' => '2026-03-01', 'oid' => '2000000000322'];
+        // Přijatá věta osoby, kterou převod nezná (PREMIER ji eviduje jinak): vztah ani osoba nevzniknou.
+        $unknown = ['bno' => RegistrationXmlFixtures::birthNumber('1990-06-07', 'female', 5), 'first' => 'Alena', 'last' => 'Neznámá', 'birth_date' => '1990-06-07',
+            'start' => '2026-03-15'];
         $rejectedFile = ['bno' => RegistrationXmlFixtures::birthNumber('1993-04-05', 'female', 4), 'first' => 'Eva', 'last' => 'Zamítnutá', 'birth_date' => '1993-04-05',
             'start' => '2026-03-01', 'oid' => '2000000000323'];
 
@@ -155,6 +166,8 @@ final class PremierPayrollRegistrationsImportTest extends TestCase
         $second = RegistrationXmlFixtures::regzecA1($rejectedSentence);
         self::assertSame(1, preg_match('#<employee\b.*?</employee>#s', $second, $employee));
         $twoSentences = str_replace('</employees>', str_replace('sqnr="1"', 'sqnr="2"', $employee[0]) . '</employees>', $oneFile);
+        self::assertSame(1, preg_match('#<employee\b.*?</employee>#s', RegistrationXmlFixtures::regzecA1($unknown), $third));
+        $threeSentences = str_replace('</employees>', str_replace('sqnr="1"', 'sqnr="3"', $third[0]) . '</employees>', $twoSentences);
         // Dohlášení z roku 2027: pozdější než převáděné období 2026.
         $later = str_replace('dat="2026-09-02"', 'dat="2027-01-05"', RegistrationXmlFixtures::regzecA3($karel['bno'], '2027-01-05', ['insurer' => '111']));
 
@@ -165,7 +178,7 @@ final class PremierPayrollRegistrationsImportTest extends TestCase
             ['ID' => 'AAAA0003-0000-0000-0000-000000000003', 'TYP_ZPRAVY' => 'REGZEC25', 'DAT_ZPRAVY' => '2027-01-05 10:00:00', 'STAV' => 6,
                 'POZNAMKA' => '?' . $later, 'POZNAMKA2' => $accepted($item(1, 'OK'))],
             ['ID' => 'AAAA0001-0000-0000-0000-000000000001', 'TYP_ZPRAVY' => 'REGZEC25', 'DAT_ZPRAVY' => '2026-07-02 09:00:00', 'STAV' => 6,
-                'POZNAMKA' => '?' . $twoSentences, 'POZNAMKA2' => $accepted($item(1, 'OK') . $item(2, 'ERROR'))],
+                'POZNAMKA' => '?' . $threeSentences, 'POZNAMKA2' => $accepted($item(1, 'OK') . $item(2, 'ERROR') . $item(3, 'OK'))],
             ['ID' => 'AAAA0002-0000-0000-0000-000000000002', 'TYP_ZPRAVY' => 'REGZEC25', 'DAT_ZPRAVY' => '2026-07-03 09:00:00', 'STAV' => 7,
                 'POZNAMKA' => '?' . RegistrationXmlFixtures::regzecA1($rejectedFile), 'POZNAMKA2' => $rejected],
             // Jiný druh podání se nepřebírá.

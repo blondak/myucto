@@ -264,11 +264,14 @@ final class PayrollImporter
             return;
         }
         $p->info(self::STEP, 'registrations_imported', sprintf(
-            'Registrace ČSSZ odeslané z PREMIER (MZ_VREP): přijatých vět %d, zapsáno %d, beze změny %d, nezapsáno %d (zablokováno %d, selhalo %d), '
-            . 'pozdějších než převáděné období %d. ČSSZ odmítla %d podání a %d vět v přijatých podáních, ty se nepřebírají%s.',
+            'Registrace ČSSZ odeslané z PREMIER (MZ_VREP): přijatých vět %d, už dříve převzatých %d, zapsáno %d, beze změny %d, bez odpovídajícího vztahu %d, '
+            . 'nezapsáno %d (zablokováno %d, selhalo %d), pozdějších než převáděné období %d. ČSSZ odmítla %d podání a %d vět '
+            . 'v přijatých podáních, ty se nepřebírají%s.',
             $counts['registrations_sentences'],
+            $counts['registrations_done'],
             $counts['registrations_applied'],
             $counts['registrations_unchanged'],
+            $counts['registrations_unmatched'],
             $counts['registrations_blocked'] + $counts['registrations_failed'],
             $counts['registrations_blocked'],
             $counts['registrations_failed'],
