@@ -488,13 +488,14 @@ final class SyntheticPremierBackup
         $tables['PER_MAIN'] = [
             [['ID', 'C', 36], ['RC_1', 'C', 6], ['RC_2', 'C', 4], ['PRIJMENI', 'C', 40], ['JMENO', 'C', 40], ['TITUL_PR', 'C', 10], ['TITUL_ZA', 'C', 10],
                 ['NAROZENI', 'D'], ['MISTO_N', 'C', 70], ['ULICE', 'C', 28], ['CISLOP', 'C', 12], ['PSC', 'C', 6], ['MESTO', 'C', 40], ['STAT', 'C', 28],
-                ['E_MAIL', 'C', 64], ['MOBIL', 'C', 20], ['NREZIDEN', 'L'], ['STAT_N', 'C', 3], ['RODNE_P', 'C', 40]],
+                ['E_MAIL', 'C', 64], ['MOBIL', 'C', 20], ['NREZIDEN', 'L'], ['STAT_N', 'C', 3], ['STOBC', 'C', 3], ['RODNE_P', 'C', 40]],
             [
                 ['ID' => 'OS-A', 'RC_1' => '855101', 'RC_2' => '0105', 'PRIJMENI' => 'Fiktivní', 'JMENO' => 'Jana', 'TITUL_PR' => 'Ing.', 'NAROZENI' => '1985-01-01',
                     'MISTO_N' => 'Brno', 'ULICE' => 'Zkušební', 'CISLOP' => '1', 'PSC' => '602 00', 'MESTO' => 'Brno', 'STAT' => 'CZ',
-                    'E_MAIL' => 'jednatelka@example.invalid', 'STAT_N' => 'CZ', 'RODNE_P' => 'Vzorová'],
+                    'E_MAIL' => 'jednatelka@example.invalid', 'STAT_N' => 'CZ', 'STOBC' => 'CZ', 'RODNE_P' => 'Vzorová'],
                 ['ID' => 'OS-C', 'RC_1' => '920620', 'RC_2' => '0102', 'PRIJMENI' => 'Vzorový', 'JMENO' => 'Karel', 'NAROZENI' => '1992-06-20',
-                    'ULICE' => 'Pokusná', 'CISLOP' => '7', 'PSC' => '70200', 'MESTO' => 'Ostrava', 'STAT' => 'CZ', 'STAT_N' => 'CZ'],
+                    'ULICE' => 'Pokusná', 'CISLOP' => '7', 'PSC' => '70200', 'MESTO' => 'Ostrava', 'STAT' => 'CZ', 'STAT_N' => 'CZ', 'STOBC' => 'CZ',
+                    'RODNE_P' => 'Vzorový'],
             ],
         ];
         // Historické snímky osoby: platí poslední podle TS.
@@ -629,7 +630,7 @@ final class SyntheticPremierBackup
             ['ID' => 'OS-E', 'SUP_INTER' => 105, 'RC_1' => '880312', 'RC_2' => '0106', 'PRIJMENI' => 'Syntetický', 'JMENO' => 'Tomáš', 'NAROZENI' => '1988-03-12',
                 'ULICE' => 'Vymyšlená', 'CISLOP' => '12', 'PSC' => '60200', 'MESTO' => 'Brno', 'STAT' => 'Česká republika', 'STAT_N' => 'CZ'],
             ['ID' => 'OS-F', 'IK_MPSV' => '9876543204', 'RC_1' => '870202', 'RC_2' => '0107', 'PRIJMENI' => 'Pokusný', 'JMENO' => 'Marek', 'NAROZENI' => '1987-02-02',
-                'ULICE' => 'Hlavná', 'CISLOP' => '5', 'PSC' => '81101', 'MESTO' => 'Bratislava', 'STAT' => 'Slovenská republika', 'STAT_N' => 'SK'],
+                'ULICE' => 'Hlavná', 'CISLOP' => '5', 'PSC' => '81101', 'MESTO' => 'Bratislava', 'STAT' => 'Slovenská republika', 'STAT_N' => 'SK', 'STOBC' => 'CZ'],
         );
         $tables['PER_MAIN'][0][] = ['SUP_INTER', 'N', 10];
         $tables['PER_MAIN'][0][] = ['IK_MPSV', 'C', 36];

@@ -115,6 +115,58 @@ final class PremierPayrollTest extends TestCase
             array_map(static fn (array $run): array => [$run['code'], $run['from'], $run['to']], $employee['insurer_history']));
     }
 
+    /**
+     * `STAT_N` je stát narození, státní občanství nese `STOBC`. Osoba narozená na Slovensku
+     * s českým občanstvím dřív dostala občanství SK a stát narození se nepřevzal vůbec.
+     */
+    public function testBirthCountryAndCitizenshipComeFromSeparateColumns(): void
+    {
+        $relations = array_column(PremierPayroll::fromBackup($this->backup(['payroll' => true, 'payroll_detail' => true]))->relations, null, 'key');
+
+        self::assertSame(['birth_country_code' => 'SK', 'citizenship_country_code' => 'CZ'],
+            array_intersect_key($relations['6']['identity'], ['birth_country_code' => 1, 'citizenship_country_code' => 1]));
+        self::assertSame(['birth_country_code' => 'CZ', 'citizenship_country_code' => 'CZ'],
+            array_intersect_key($relations['1']['identity'], ['birth_country_code' => 1, 'citizenship_country_code' => 1]));
+        self::assertSame(['birth_country_code' => 'CZ', 'citizenship_country_code' => null],
+            array_intersect_key($relations['4']['identity'], ['birth_country_code' => 1, 'citizenship_country_code' => 1]),
+            'Bez STOBC se občanství nehádá ze státu narození.');
+    }
+
+    /**
+     * Zdravotní pojišťovna měsíce se zpracovanou mzdou je ta, které se pojistné platilo.
+     * Evidenční zápis kódu pojišťovny bez odeslání (`PRIJATO` prázdné) dřív přebil pojišťovnu
+     * měsíců se mzdou a osoba dostala pojišťovnu 111 i za měsíce, kdy měla 201.
+     */
+    public function testInsurerHistoryFollowsPayrollMonthsOverEvidenceOnlyNotice(): void
+    {
+        $this->backup(['payroll' => true]);
+        [$fields, $rows] = SyntheticPremierBackup::tables(false, ['payroll' => true])['MZDY'];
+        $template = array_values(array_filter($rows, static fn (array $r): bool => $r['INTER'] === 3))[0];
+        foreach ([[3, '201'], [4, '201'], [5, '111']] as [$month, $insurer]) {
+            $rows[] = ['MESIC' => $month, 'ZKR_POJ' => $insurer, 'ID' => "M3-2026-{$month}"] + $template;
+        }
+        DbfWriter::write($this->tmp . DIRECTORY_SEPARATOR . 'MZDY.DBF', $fields, $rows);
+        [$prizpFields, $prizpRows] = SyntheticPremierBackup::tables(false, ['payroll' => true])['MZ_PRIZP'];
+        $prizpFields[] = ['PRIJATO', 'L'];
+        DbfWriter::write($this->tmp . DIRECTORY_SEPARATOR . 'MZ_PRIZP.DBF', $prizpFields, [
+            ['INTER' => 3, 'HLAS_OD' => '2026-02-01', 'ZKRATKA_P' => '111', 'KOD' => 'P', 'PRIJATO' => false, 'ID' => 'ZP3-E'],
+            ['INTER' => 3, 'HLAS_OD' => '2026-05-31', 'ZKRATKA_P' => '111', 'KOD' => 'O', 'PRIJATO' => true, 'ID' => 'ZP3-O'],
+        ]);
+
+        $employee = array_column(PremierPayroll::fromBackup(PremierBackup::open($this->tmp))->relations, null, 'key')['3'];
+        self::assertSame([['201', '2026-02-01', '2026-04-30'], ['111', '2026-05-01', null]],
+            array_map(static fn (array $run): array => [$run['code'], $run['from'], $run['to']], $employee['insurer_history']));
+        self::assertSame('111', $employee['insurer_code'], 'Poslední pojišťovna osoby je z poslední historie.');
+
+        // Měsíce bez mzdy platí z oznámení, po posledním měsíci se mzdou se oznámení vrací.
+        self::assertSame([['201', '2026-01-01', '2026-02-28'], ['111', '2026-03-01', '2026-03-31'], ['205', '2026-04-01', null]],
+            array_map(static fn (array $run): array => [$run['code'], $run['from'], $run['to']], PremierPayroll::insurerHistory(
+                [['date' => '2026-01-10', 'code' => '201', 'kind' => 'P'], ['date' => '2026-04-05', 'code' => '205', 'kind' => 'Q']],
+                '2026-01-10',
+                ['2026-03' => '111'],
+            )));
+    }
+
     /** Srážky měsíce ze složek mezd v `DNY`, včetně zálohy na mzdu, kterou `SR_*` nenese. */
     public function testDeductionsFromPayrollItems(): void
     {

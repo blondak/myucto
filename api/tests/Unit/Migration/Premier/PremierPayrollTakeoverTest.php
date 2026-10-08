@@ -58,6 +58,19 @@ final class PremierPayrollTakeoverTest extends TestCase
         self::assertNull($ended->person->healthCoverage);
     }
 
+    /**
+     * Přihláška ČSSZ vyžaduje rodné příjmení vždy (`birth/@nam`) a PREMIER ho vede i u osob
+     * bez změny jména; shodné s příjmením se proto bere stejně jako jiné.
+     */
+    public function testBirthSurnameEqualToCurrentSurnameIsTakenOver(): void
+    {
+        $relations = array_column($this->relations(), null, 'key');
+        $same = PremierPayrollTakeover::record($relations['3'], '2026-12-31')->person;
+        self::assertSame('Vzorový', $same->birthSurname);
+        self::assertSame(['CZ', 'CZ'], [$same->identity['birth_country_code'], $same->identity['citizenship_country_code']]);
+        self::assertNull(PremierPayrollTakeover::record($relations['2'], '2026-12-31')->person->birthSurname, 'Osoba bez RODNE_P zůstává bez rodného příjmení.');
+    }
+
     /** Stát adresy je v PREMIER volný text; na kód ho převede číselník zemí. */
     public function testResidenceCountryFromNameViaCountryCodebook(): void
     {

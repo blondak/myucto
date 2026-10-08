@@ -74,8 +74,9 @@ final class PremierPayrollTakeover
         $person = new PayrollTakeoverPerson(
             key: (string) $relation['person_key'],
             identity: ['birth_date' => $relation['birth_date']] + (array) $relation['identity'],
-            // Rodné příjmení shodné s příjmením PREMIER vyplňuje i u osob bez změny jména.
-            birthSurname: is_string($surname) && mb_strtolower($surname) !== mb_strtolower((string) $relation['last_name']) ? $surname : null,
+            // PREMIER rodné příjmení vyplňuje i u osob bez změny jména a přihláška ČSSZ ho vyžaduje vždy
+            // (`birth/@nam`), takže se bere tak, jak je, i když je shodné s příjmením.
+            birthSurname: is_string($surname) ? $surname : null,
             residence: self::address(is_array($relation['residence']) ? $relation['residence'] : null, $countries),
             mailing: self::address(is_array($relation['mailing'] ?? null) ? $relation['mailing'] : null, $countries),
             email: is_string($relation['email']) ? $relation['email'] : null,
