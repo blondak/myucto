@@ -92,6 +92,11 @@ isdoc-2026-04.zip
 └── manifest.xml         (volitelný — seznam dokumentů)
 ```
 
+Máte-li zapnutý elektronický podpis výstupu **Vydaná faktura**, je každý
+`.isdoc` v exportu podepsaný vaším certifikátem (XML podpis podle standardu
+ISDOC). POHODA a další programy podpis při importu ověřují. Nastavení a
+podrobnosti najdete v [99.11.1 Podpis ISDOC](99_Elektronicke_podpisy.md#99111-podpis-isdoc).
+
 ### 20.3.2 DocumentType
 
 Mapování v ISDOC:

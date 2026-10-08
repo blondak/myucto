@@ -28,6 +28,11 @@ Sloučený export se podepisuje až jako hotový celek a používá stejnou konf
 profilu jako výstup **Vydaná faktura**. Podpis se provede jen po zaškrtnutí
 volby v exportu; bez ní zůstane sloučené PDF nepodepsané.
 
+Když máte zapnutý podpis výstupu **Vydaná faktura**, podepíše se stejným
+profilem i **ISDOC** faktury: soubor `invoice.isdoc` vložený do PDF, ISDOC
+stažený z detailu faktury i ISDOC v exportech. Podrobnosti najdete v oddílu
+[99.11.1 Podpis ISDOC](#99111-podpis-isdoc).
+
 S/MIME e-mailové výstupy:
 
 - e-mail s fakturou,
@@ -447,6 +452,55 @@ vydavatel certifikátu je neznámý, znamená to obvykle chybějící důvěryho
 certifikační řetězec v prostředí ověřovatele. Samotný kryptografický podpis
 může být přesto validní.
 
+### 99.11.1 Podpis ISDOC
+
+**Proč se podepisuje i ISDOC.** POHODA a další účetní programy při importu
+faktury z PDF čtou vložený soubor `invoice.isdoc` a ověřují podpis přímo v něm.
+Podpis PDF se na vložený ISDOC nevztahuje, takže bez vlastního podpisu ISDOC
+by POHODA hlásila „Chybí podpis dokumentu“, i když je PDF podepsané. Proto
+aplikace při zapnutém podpisu výstupu **Vydaná faktura** podepíše nejdřív
+ISDOC a teprve potom celé PDF. Podpis PDF tak kryje už podepsaný ISDOC.
+
+Co pro to musíte udělat:
+
+1. Otevřete **Systém -> E-maily -> Elektronické podpisy**.
+2. V **Konfiguraci podpisů** zapněte u výstupu **Vydaná faktura** volbu
+   **Podepisovat** a vyberte profil s certifikátem.
+3. Klikněte na **Uložit konfiguraci podpisů**.
+4. V detailu faktury vygenerujte PDF znovu (starší PDF zůstávají tak, jak byla
+   vydána).
+
+Samostatné nastavení pro ISDOC neexistuje. Platí stejný profil, stejný výběr
+profilu i stejná volba **Při chybě** jako u PDF faktury:
+
+- při **Vrátit nepodepsané** se ISDOC vydá bez podpisu a v logu uvidíte
+  událost `signing.isdoc_failed`,
+- při **Zastavit s chybou** se PDF ani ISDOC nevydá a zobrazí se chyba
+  „Podpis ISDOC selhal.“
+
+Podepisuje se:
+
+| Kde | Co se podepíše |
+|---|---|
+| PDF faktury | Vložený soubor `invoice.isdoc` (a potom celé PDF). |
+| Detail faktury -> stažení ISDOC, REST API `/api/v1/invoices/{id}/isdoc` | Stažený soubor `.isdoc`. |
+| **Exporty -> ISDOC** | Každý `.isdoc` v exportu. |
+| **Hromadný export** (část Vystavené faktury -> ISDOC) | Každý `.isdoc` v ZIPu. |
+
+**Jak poznáte, že je hotovo:** otevřete stažený `.isdoc` v textovém editoru.
+Na konci souboru, těsně před `</Invoice>`, je element `<Signature …
+Id="Signature-1">` s vaším certifikátem v `X509Certificate`. V POHODĚ se po
+importu faktury z PDF hláška o chybějícím podpisu neobjeví. Jestli POHODA
+podpisu důvěřuje, závisí na tom, zda jde o kvalifikovaný certifikát vydaný
+důvěryhodnou autoritou (například PostSignum, I.CA, eIdentity).
+
+Podpis odpovídá standardu ISDOC 6.0.2, kapitole 5 „Digitální podpisy“: XML
+Signature s transformací Enveloped Signature a filtrem XPath
+`not(ancestor-or-self::dsig:Signature)` (příjemce může připojit vlastní
+podpis), kanonizace Canonical XML 1.0, otisk SHA-256 a podpis RSA-SHA256.
+Podepsat lze certifikátem s klíčem RSA, což jsou běžné kvalifikované
+certifikáty českých autorit.
+
 ## 99.12 Audit a řešení problémů
 
 Správa i použití podpisů se zapisuje do activity logu. Typické události:
@@ -461,6 +515,8 @@ Správa i použití podpisů se zapisuje do activity logu. Typické události:
 | `signing.pdf_signed` | PDF bylo úspěšně podepsáno. |
 | `signing.failed` | Podepisování selhalo. Podle politiky se buď vrátilo nepodepsané PDF, nebo operace skončila chybou. |
 | `signing.skipped` | Podepisování bylo přeskočeno, například kvůli vypnutému výstupu nebo chybějící konfiguraci. |
+| `signing.isdoc_signed` | ISDOC faktury bylo podepsáno (samostatně, v exportu nebo před vložením do PDF). |
+| `signing.isdoc_failed` | Podpis ISDOC selhal. Podle politiky se vydalo nepodepsané ISDOC, nebo operace skončila chybou. |
 | `signing.email_signed` | Odchozí e-mail byl úspěšně podepsán S/MIME. |
 | `signing.email_identity_warning` | S/MIME podpis proběhl v režimu varování, přestože e-mail v certifikátu neodpovídá hlavičce From. |
 | `signing.email_failed` | S/MIME podpis e-mailu selhal. |
@@ -472,6 +528,7 @@ Správa i použití podpisů se zapisuje do activity logu. Typické události:
 |---|---|
 | PDF se vygenerovalo bez podpisu | Zkontroluj **Konfiguraci podpisů**, aktivní profil, nahraný certifikát a politiku **Při chybě**. Při `fallback_unsigned` se nepodepsané PDF vydá záměrně. |
 | Export skončil chybou `PDF podpis není nakonfigurovaný` | Výstup je nastavený na tvrdé selhání a chybí použitelný profil nebo certifikát. |
+| POHODA hlásí u importu z PDF „Chybí podpis dokumentu“ | PDF bylo vygenerované dřív, než byl podpis zapnutý, nebo podpis ISDOC selhal. Vygenerujte PDF znovu a v logu hledejte `signing.isdoc_failed`. Viz [99.11.1 Podpis ISDOC](#99111-podpis-isdoc). |
 | Certifikát nejde nahrát | Ověř P12/PFX, heslo, privátní klíč a expiraci certifikátu. |
 | Background job nepodepisuje uživatelským profilem | Background job nemá přihlášeného uživatele. Pro tyto scénáře použij fallback na profil dodavatele nebo passphrase file. |
 | Po změně konfigurace se stále vrací staré PDF | Zkontroluj PDF historii a cache. Změna konfigurace podpisů faktury cache invaliduje, ale starší archivované verze zůstávají jako auditní záznam. |

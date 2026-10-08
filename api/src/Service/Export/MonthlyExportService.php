@@ -17,6 +17,7 @@ use MyInvoice\Service\Pdf\PurchaseInvoicePdfRenderer;
 use MyInvoice\Service\Report\DphBookBuilder;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Service\Report\VatLedgerService;
+use MyInvoice\Service\Signing\Pdf\PdfSigningService;
 use ZipArchive;
 
 /**
@@ -62,6 +63,7 @@ final class MonthlyExportService
         private readonly DphBookPdfRenderer $dphBookRenderer,
         private readonly KontrolniHlaseniBuilder $vatControlStatement,
         private readonly ExportPeriodResolver $periodResolver,
+        private readonly PdfSigningService $pdfSigning,
     ) {}
 
     /** Absolutní základ úložiště ZIPů (pod data_dir, jinak repo root). */
@@ -227,7 +229,10 @@ final class MonthlyExportService
                     }
                     if (in_array('sales_isdoc', $parts, true)) {
                         try {
-                            $zip->addFromString("Vystavene-faktury/ISDOC/{$base}.isdoc", $this->isdoc->buildXml($inv));
+                            $zip->addFromString(
+                                "Vystavene-faktury/ISDOC/{$base}.isdoc",
+                                $this->pdfSigning->signIsdocIfEnabled($this->isdoc->buildXml($inv), ['id' => $supplierId], $id, $userId),
+                            );
                             $added++; $summary['sales_isdoc'] = ($summary['sales_isdoc'] ?? 0) + 1;
                         } catch (\Throwable $e) { $warnings[] = "VF {$base} ISDOC: " . $e->getMessage(); }
                         $bump('Vystavené faktury — ISDOC');

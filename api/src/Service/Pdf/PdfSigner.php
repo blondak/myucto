@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Pdf;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Http\OutboundRequestException;
 use MyInvoice\Service\Http\TsaUrlPolicy;
+use MyInvoice\Service\Signing\SigningCredentialUnlocker;
 
 /**
  * Elektronický podpis PDF — PAdES-B (volitelně PAdES-T s RFC 3161 časovým razítkem),
@@ -84,15 +85,7 @@ final class PdfSigner
         $this->assertClassicXref($pdf);
 
         // 1) Načti cert + privátní klíč z P12 (heslo dešifruj až tady).
-        $password = $this->secrets->decrypt($cfg->passwordEnc);
-        $p12 = $cfg->certBytes ?? @file_get_contents($cfg->certPath);
-        if (!is_string($p12) || $p12 === '') {
-            throw new \RuntimeException('Certifikát nelze načíst: ' . $cfg->certPath);
-        }
-        $certs = [];
-        if (!openssl_pkcs12_read($p12, $certs, $password)) {
-            throw new \RuntimeException('P12 nelze otevřít (špatné heslo nebo poškozený soubor).');
-        }
+        $certs = (new SigningCredentialUnlocker($this->secrets))->unlock($cfg);
         $this->lastCertificateCommonName = $this->certificateCommonName((string) ($certs['cert'] ?? ''));
 
         // 2) Sestav incremental update s placeholdery (/ByteRange, /Contents).

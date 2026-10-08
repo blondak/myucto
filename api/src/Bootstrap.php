@@ -596,6 +596,10 @@ final class Bootstrap
                 $c->get(\MyInvoice\Repository\SigningProfileRepository::class),
                 $c->get(\MyInvoice\Service\Signing\SigningPassphraseProviderInterface::class),
                 $c->get(\MyInvoice\Service\Signing\PersonalCertificateVaultService::class),
+                new \MyInvoice\Service\Signing\SigningCredentialUnlocker(
+                    $c->get(\MyInvoice\Service\Auth\SecretEncryption::class),
+                ),
+                $c->get(\MyInvoice\Service\Signing\Xml\XmlDsigEnvelopedSigner::class),
             ),
             \MyInvoice\Service\Signing\Email\EmailSigningService::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Signing\Email\EmailSigningService(
                 $c->get(Config::class),
