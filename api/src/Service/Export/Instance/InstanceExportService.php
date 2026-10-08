@@ -83,7 +83,8 @@ final class InstanceExportService
     ];
 
     /** Verze formátu archivu — čtečky se podle ní mají rozhodovat. */
-    private const FORMAT_VERSION = 6;
+    public const FORMAT_VERSION = 6;
+    public const FORMAT = 'myucto-instance-export';
 
     public const SHARED_TABLES = [
         'countries', 'vat_rates', 'units', 'email_templates', 'tax_constants', 'exchange_rates',
@@ -476,7 +477,7 @@ final class InstanceExportService
             }
             $this->step($jobId, $progress, 'Manifest a kontrolní součty');
             $manifest = [
-                'format' => 'myucto-instance-export',
+                'format' => self::FORMAT,
                 'version' => self::FORMAT_VERSION,
                 'app_version' => $this->appVersion(),
                 'schema_version' => $this->schemaVersion(),
@@ -492,7 +493,7 @@ final class InstanceExportService
                     'vat_period' => $supplier['vat_period'] ?? null,
                 ],
                 'restore' => [
-                    'format' => 'myucto-instance-export',
+                    'format' => self::FORMAT,
                     'compatibility' => 'Obnova do čisté, předem migrované databáze stejné nebo novější verze MyÚčto.',
                     'available' => in_array(self::PART_RESTORE, $parts, true),
                     'files' => $restoreAssets['files'],

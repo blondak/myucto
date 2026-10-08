@@ -12,9 +12,8 @@ use ZipArchive;
 /** Obnova jediného kompletního exportu do čisté, předem migrované databáze. */
 final class CompleteInstanceRestoreService
 {
-    private const FORMAT = 'myucto-instance-export';
-    private const VERSION = 6;
-    private const SUPPORTED_VERSIONS = [3, 4, 5, self::VERSION];
+    /** Verze archivu, které obnova i převod firmy ({@see \MyInvoice\Service\Migration\Myucto\MyuctoExportReader}) umí číst. */
+    public const SUPPORTED_VERSIONS = [3, 4, 5, InstanceExportService::FORMAT_VERSION];
     private const DISABLED_PASSWORD_HASH = '$2y$10$K6q6A1qORRMi5gzg1me.bO4w0NqJGb9jY36Tv1azcLYtKpIwZxjua';
     private const RESTORED_RULESET_REASON = 'Obnoveno z úplného exportu firmy bez globální správcovské provenance.';
 
@@ -288,7 +287,7 @@ final class CompleteInstanceRestoreService
     {
         $path = $dir . DIRECTORY_SEPARATOR . 'manifest.json';
         $manifest = is_file($path) ? json_decode((string) file_get_contents($path), true) : null;
-        if (!is_array($manifest) || ($manifest['format'] ?? null) !== self::FORMAT
+        if (!is_array($manifest) || ($manifest['format'] ?? null) !== InstanceExportService::FORMAT
             || !in_array((int) ($manifest['version'] ?? 0), self::SUPPORTED_VERSIONS, true)) {
             throw new InstanceExportException('restore_format_invalid', 'Archiv není kompletní obnovitelný export podporovaného formátu.');
         }

@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\Myucto;
 
+use MyInvoice\Service\Export\Instance\CompleteInstanceRestoreService;
 use MyInvoice\Service\Export\Instance\InstanceExportBinaryCodec;
+use MyInvoice\Service\Export\Instance\InstanceExportService;
 use RuntimeException;
 use ZipArchive;
 
@@ -31,8 +33,8 @@ final class MyuctoExportReader
             $raw = $zip->getFromName('manifest.json', 2_097_153);
             if ($raw === false || strlen($raw) > 2_097_152) throw new RuntimeException('Chybí manifest nebo je příliš velký; ověřte heslo ZIPu.');
             $manifest = json_decode($raw, true, 64, JSON_THROW_ON_ERROR);
-            if (!is_array($manifest) || ($manifest['format'] ?? null) !== 'myucto-instance-export'
-                || !in_array($manifest['version'] ?? null, [3, 4, 5, 6], true)
+            if (!is_array($manifest) || ($manifest['format'] ?? null) !== InstanceExportService::FORMAT
+                || !in_array($manifest['version'] ?? null, CompleteInstanceRestoreService::SUPPORTED_VERSIONS, true)
                 || ($manifest['restore']['available'] ?? null) !== true
                 || !is_array($manifest['sections']['data']['tables'] ?? null)
                 || !is_array($manifest['checksums'] ?? null)) {
