@@ -26,6 +26,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzTransportException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzVrepClient;
 use MyInvoice\Service\Payroll\Submission\PayrollDispatchGate;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Vrep\CsszFormReceiptRecorder;
 use MyInvoice\Service\Signing\PersonalCertificateVaultService;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -1247,6 +1248,115 @@ final class JmhzDispatchServiceTest extends TestCase
         }
     }
 
+    /**
+     * Zkušební podání ČSSZ TEST (8. 10. 2026, kolo 2): protokol k NEMPRI má
+     * doložený tvar. Ověřený se uloží k podání a výsledek jde do případu
+     * dávky; k ručnímu vyřízení už nic nejde.
+     */
+    public function testTrustedSicknessProtocolIsRecordedOnTheCase(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->method('find')->willReturn(self::sentRow());
+        $attempts->expects(self::once())->method('markCompleted')
+            ->willReturn(self::sentRow(['status' => 'completed', 'row_version' => 2]));
+        $submissions = $this->createMock(PayrollSubmissionService::class);
+        $submissions->method('get')->willReturn([
+            'id' => self::SUBMISSION,
+            'status' => 'submitted',
+            'row_version' => 7,
+        ]);
+        $submissions->expects(self::once())->method('importReceipt')->with(
+            self::SUPPLIER,
+            self::SUBMISSION,
+            7,
+            null,
+            self::anything(),
+            self::CORRELATION,
+            self::CORRELATION,
+            'CSSZ_NEM_PRI',
+            'accepted',
+            JmhzDispatchService::CHANNEL,
+            self::anything(),
+            null,
+            self::isInstanceOf(JmhzReceiptVerifier::class),
+        )->willReturn(['submission_status' => 'accepted', 'submission_row_version' => 8, 'trusted' => true]);
+        $submissions->expects(self::never())->method('recordIssue');
+        $recorder = $this->createMock(CsszFormReceiptRecorder::class);
+        $recorder->expects(self::once())->method('record')->with(
+            self::SUPPLIER,
+            'test',
+            self::SUBMISSION,
+            self::callback(static fn ($report): bool => $report->submissionClass === 'CSSZ_NEM_PRI'
+                && $report->payrollRemoteStatus() === 'accepted'),
+        )->willReturn('recorded');
+
+        $outcome = $this->service($attempts, [
+            new Response(200, ['Content-Type' => 'text/xml'], str_replace(
+                CsszFormProtocolSample::CORRELATION,
+                self::CORRELATION,
+                CsszFormProtocolSample::accepted('CSSZ_NEM_PRI', 'NEMPRI25'),
+            )),
+        ], null, $submissions, null, $recorder)->poll(
+            self::SUPPLIER,
+            'test',
+            self::ATTEMPT,
+            JmhzTransportSample::VARIABLE_SYMBOL,
+            1,
+            'CSSZ_NEM_PRI',
+            'NEMPRI25',
+        );
+
+        self::assertFalse($outcome->manualReview);
+        self::assertSame(JmhzSubmissionStatus::ProcessedAndComplete, $outcome->report?->status);
+        self::assertSame('completed', $outcome->attempt['status']);
+    }
+
+    /** Protokol, jehož podpis neprošel, do případu ani záměru nic nezapíše. */
+    public function testUntrustedSicknessProtocolIsNotRecordedOnTheCase(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->method('find')->willReturn(self::sentRow());
+        $attempts->expects(self::once())->method('markCompleted')
+            ->willReturn(self::sentRow(['status' => 'completed', 'row_version' => 2]));
+        $submissions = $this->createMock(PayrollSubmissionService::class);
+        $submissions->method('get')->willReturn([
+            'id' => self::SUBMISSION,
+            'status' => 'submitted',
+            'row_version' => 7,
+        ]);
+        $submissions->expects(self::exactly(2))->method('importReceipt')->willReturnCallback(
+            static function (...$arguments): array {
+                if ($arguments[12] !== null) {
+                    throw new JmhzTransportException(
+                        'jmhz_protocol_signature_invalid',
+                        'Podpis protokolu ČSSZ neplatí.',
+                    );
+                }
+
+                return ['submission_status' => 'submitted', 'submission_row_version' => 8, 'trusted' => false];
+            },
+        );
+        $submissions->expects(self::once())->method('recordIssue');
+        $recorder = $this->createMock(CsszFormReceiptRecorder::class);
+        $recorder->expects(self::never())->method('record');
+
+        $this->service($attempts, [
+            new Response(200, ['Content-Type' => 'text/xml'], str_replace(
+                CsszFormProtocolSample::CORRELATION,
+                self::CORRELATION,
+                CsszFormProtocolSample::serviceAuthorizationMissing('CSSZ_NEM_PRI'),
+            )),
+        ], null, $submissions, null, $recorder)->poll(
+            self::SUPPLIER,
+            'test',
+            self::ATTEMPT,
+            JmhzTransportSample::VARIABLE_SYMBOL,
+            1,
+            'CSSZ_NEM_PRI',
+            'HZUPN20',
+        );
+    }
+
     private static function csszAnswer(string $class, string $qualifier, string $processingResult): string
     {
         return '<?xml version="1.0" encoding="utf-8"?>'
@@ -1378,6 +1488,7 @@ final class JmhzDispatchServiceTest extends TestCase
         ?PayrollSigningProfileRepository $profiles = null,
         ?PayrollSubmissionService $submissions = null,
         ?JmhzFrozenPayloadReader $frozen = null,
+        ?CsszFormReceiptRecorder $formReceipts = null,
     ): JmhzDispatchService {
         $material = self::certificate();
 
@@ -1414,6 +1525,7 @@ final class JmhzDispatchServiceTest extends TestCase
             $this->vrep($queue),
             frozen: $frozen,
             submissions: $submissions,
+            formReceipts: $formReceipts,
         );
     }
 

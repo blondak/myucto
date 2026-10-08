@@ -520,6 +520,8 @@ final class Bootstrap
                     // Bez něj by dotažený protokol skončil jako nedůvěryhodná
                     // příloha a podání by navždy zůstalo ve stavu `submitted`.
                     new \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifier(),
+                    // Výsledek NEMPRI, HZUPN a OZUSPOJ do případu dávky a záměru slevy.
+                    $c->get(\MyInvoice\Service\Payroll\Submission\Vrep\CsszFormReceiptRecorder::class),
                 ),
             // § 33a — zřetězení auditní stopy hashem. Druhý argument loggeru je volitelný
             // kvůli testovacím dvojníkům; bez explicitního bindu by se v produkci nic
