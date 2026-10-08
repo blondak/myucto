@@ -460,6 +460,16 @@ final readonly class SicknessXmlValidator
                     'U převzetí dítěte do péče musí žádost uvést převzaté dítě.',
                 );
             }
+        } elseif ($kind === SicknessBenefitKind::Ppm && $application->person !== null) {
+            // Postupy zaměstnavatelů (Elektronizace dávek NP, bod 2) a Všeobecné
+            // zásady NEMPRI: při běžném nástupu na PPM se vyplňuje jen den
+            // nástupu, identifikace dítěte patří jen k převzetí dítěte do péče.
+            $this->invalid(
+                'nempri_maternity_child_without_care_reason',
+                'Při běžném nástupu na peněžitou pomoc v mateřství se dítě neuvádí. Údaje '
+                . 'o dítěti patří jen k převzetí dítěte do péče: vyplňte důvod převzetí, '
+                . 'nebo dítě u případu smažte.',
+            );
         }
         if ($application->childOrder !== null
             && ($application->childOrder < 1 || $application->childOrder > 10)

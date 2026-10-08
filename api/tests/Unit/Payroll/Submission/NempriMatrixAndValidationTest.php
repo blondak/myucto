@@ -869,7 +869,7 @@ final class NempriMatrixAndValidationTest extends TestCase
 
     public function testDecisionNumberPerBenefitKind(): void
     {
-        $partial = new NempriBenefitApplication(fromDate: '2026-09-01', person: new NempriPerson('Dítě', 'Testovací', null, '2026-08-20'));
+        $partial = new NempriBenefitApplication(fromDate: '2026-09-01');
         $this->expectRejected('nempri_decision_number_missing', $this->payload(SicknessBenefitKind::Ppm, $partial, ['decisionNumber' => null]));
         $this->expectRejected('nempri_decision_number_forbidden', $this->payload(SicknessBenefitKind::Vpm, null, ['decisionNumber' => 'A1234567']));
         $this->expectRejected('nempri_decision_number_format_invalid', $this->payload(

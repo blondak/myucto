@@ -1430,6 +1430,9 @@ onMounted(() => void load())
             <p class="mt-1 text-xs text-neutral-500">
               {{ t('payroll.sicknessCases.form.caredPersonHint') }}
             </p>
+            <p v-if="draftKind === 'PPM'" class="mt-1 text-xs text-neutral-500" data-test="sickness-case-maternity-child-hint">
+              {{ t('payroll.sicknessCases.form.maternityChildHint') }}
+            </p>
             <div v-if="!draft.cared_dependant_id" class="mt-2 grid gap-3 md:grid-cols-3" data-test="sickness-case-cared-manual">
               <label class="block text-sm">
                 <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.caredFirstName') }}</span>

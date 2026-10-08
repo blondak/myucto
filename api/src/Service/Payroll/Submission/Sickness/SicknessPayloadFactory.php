@@ -134,6 +134,13 @@ final readonly class SicknessPayloadFactory
         // = true (DV NEMPRI25, jinak zakázané); DLO a otcovská je vážou
         // na návrat do práce.
         $lastDayHours = $kind !== SicknessBenefitKind::Ose || $workedLastDay === true;
+        $maternityCareReason = self::code($row['maternity_care_reason'] ?? null);
+        // Při běžném nástupu na PPM se dítě neuvádí, jen při převzetí dítěte do
+        // péče (Všeobecné zásady NEMPRI, Postupy zaměstnavatelů bod 2). Dítě
+        // vyplněné u případu se proto bez důvodu převzetí do věty nedostane.
+        if ($kind === SicknessBenefitKind::Ppm && $maternityCareReason === null) {
+            $person = null;
+        }
 
         return new NempriBenefitApplication(
             actionStart: (bool) ($row['action_start'] ?? true),
@@ -164,7 +171,7 @@ final readonly class SicknessPayloadFactory
             relationshipCode: self::code($row['relationship_code'] ?? null),
             alternation: $declared('alternation', ($start && $kind === SicknessBenefitKind::Dlo) || !$care),
             paternityReason: self::code($row['paternity_reason'] ?? null),
-            maternityCareReason: self::code($row['maternity_care_reason'] ?? null),
+            maternityCareReason: $maternityCareReason,
             childOrder: $order === null || $order === '' ? null : (int) $order,
             workedLastDay: $workedLastDay,
             shiftHoursLastDay: $lastDayHours ? self::decimal($row['shift_hours_last_day'] ?? null) : null,
