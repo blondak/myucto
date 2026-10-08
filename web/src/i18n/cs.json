@@ -11934,6 +11934,7 @@
       "sickness_ossz_code_missing": "Firma nemá vyplněný třímístný kód OSSZ podle číselníku pracovišť ČSSZ. Doplňte ho v Nastavení mezd, sekce Zaměstnavatel, nebo ho zadejte přímo u případu.",
       "sickness_receipt_outcome_invalid": "Výsledek podání musí být přijato, odmítnuto, podáno předchozím programem nebo zrušeno.",
       "sickness_submission_not_prepared": "Podání ještě není připravené, takže není co odeslat. Nejdřív u případu zvolte Připravit.",
+      "sickness_submission_sent_via_vrep": "Podání už odešlo (nebo možná odešlo) přes VREP. Datovou schránkou se znovu neodesílá, u ČSSZ by vzniklo dvakrát.",
       "sickness_supplier_missing": "Firma případu dávky nebyla nalezena.",
       "sickness_variable_symbol_missing": "Mzdová účtárna pracovního vztahu nemá vyplněný variabilní symbol ČSSZ. Doplňte ho v Nastavení mezd, Zaměstnavatel, u účtárny vztahu a podání připravte znovu.",
       "zp_artifact_mismatch": "Otisk uloženého souboru neodpovídá zmrazené datové větě. Zkuste přípravu podání zopakovat.",

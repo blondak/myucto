@@ -10,6 +10,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Regzel\RegzelSubmissionBridgeService;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessSubmissionService;
 
 /**
  * Zařazení agendy do skupiny, kterou ukazuje jeden panel přehledu podání.
@@ -65,6 +66,9 @@ final class PayrollAgendaGroupCatalog
             PayrollRegistrationSubmissionService::AGENDA_PREZEC,
             PayrollRegistrationSubmissionService::AGENDA_REGZEC,
             PayrollRegistrationSubmissionService::AGENDA_EMPLOYER_REGISTRATION,
+            // NEMPRI a HZUPN jsou povinnosti vůči ČSSZ jako ostatní; bez
+            // zařazení padaly do záchytné záložky „Ostatní".
+            ...SicknessSubmissionService::DISPATCHABLE_AGENDA_CODES,
         ],
         self::GROUP_HEALTH => [
             HealthInsuranceSubmissionService::AGENDA_BULK_NOTIFICATION,

@@ -222,6 +222,7 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Service/Payroll/Submission/PayrollSubmissionService.php',
     '*/api/src/Service/Payroll/Submission/Registration/Change/PayrollRegistrationChangeDetectionService.php',
     '*/api/src/Service/Payroll/Submission/Registration/PayrollRegistrationTransportService.php',
+    '*/api/src/Service/Payroll/Submission/Vrep/CsszFormVrepTransportService.php',
     '*/api/src/Service/Submission/Channel/Isds/Gateway/IsdsGatewayRegistrationService.php',
     '*/api/src/Service/Submission/Channel/Isds/IsdsTransportAvailabilityResolver.php',
     '*/api/src/Service/Submission/Channel/Isds/MobileKeyIsdsAuthenticator.php',

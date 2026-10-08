@@ -636,7 +636,8 @@ ISDS nebo VREP a stav **Přijato** získá teprve z ověřeného protokolu ČSSZ
 
 Záložka **JMHZ** ukazuje všechny povinnosti vůči ČSSZ, tedy vedle měsíčního
 hlášení i registrace zaměstnance a zaměstnavatele, evidenční list důchodového
-pojištění a oznámení o zaměstnání osoby pobírající starobní důchod.
+pojištění, oznámení o zaměstnání osoby pobírající starobní důchod a hlášení
+k dávkám nemocenského pojištění (NEMPRI, HZUPN).
 
 ### 85.11.1 Registrace zaměstnance PREZEC a REGZEC
 
@@ -1084,6 +1085,12 @@ nezapíše, protože takovou slevu by ČSSZ mohla doměřit. Nezná-li den podá
 přihlášky, záměr na to v záložce záměrů slevy upozorní; byla-li přihláška
 podána až po lhůtě oznámení, záměr od zvoleného dne oznámit nelze a hláška
 vyzve ke zvolení pozdějšího dne.
+
+**Odeslání OZUSPOJ.** Připravené oznámení jde v testovacím prostředí ČSSZ
+odeslat z fronty podání přes VREP (podepsané certifikátem jako JMHZ). Do
+ostrého prostředí ho aplikace zatím neodešle; fronta to u řádku napíše
+a připravené XML podáte ze své datové schránky. Odpověď ČSSZ se uloží k podání
+jako protokol k ruční kontrole a přijetí záměru zapíšete podle něj.
 
 **Co aplikace u záměru hlídá.**
 
@@ -1860,9 +1867,13 @@ upozorní. Podal-li ho předchozí program, zapište to u případu tlačítkem
 Případ evidujte na záložce **Dávky nemocenského**. Z případu si můžete
 zobrazit náhled datové věty a tlačítkem **Připravit NEMPRI** nebo **Připravit
 HZUPN** ji zmrazit; MyÚčto ji ověří proti připnutému XSD. Odesílá se rovnou
-odsud tlačítkem **Odeslat NEMPRI/HZUPN datovou schránkou** — kanál VREP/APEP
-pro tyhle dvě agendy otevřený není, takže na záložce **Odesláno**, která
-patří jemu, tahle podání nenajdete. U připraveného podání je vždy napsané, co
+odsud tlačítkem **Odeslat NEMPRI/HZUPN datovou schránkou**; stejně je odešle
+i fronta podání. Druhým kanálem je VREP (podepsané certifikátem jako JMHZ),
+zatím jen do testovacího prostředí ČSSZ. Podání, které odešlo jedním kanálem,
+druhým už aplikace neodešle. Odpověď ČSSZ přes VREP se uloží k podání jako
+protokol k ruční kontrole a výsledek zapíšete u případu stejně jako u datové
+schránky. Na záložce **Odesláno** (měsíční hlášení) tahle podání
+nenajdete. U připraveného podání je vždy napsané, co
 se s ním stane: buď ho MyÚčto vloží do datové schránky jako koncept a odeslání
 schválíte v ISDS, nebo ho odešle po potvrzení Mobilním klíčem, nebo si přílohu
 stáhnete z fronty podání a odešlete ji ze své schránky. Doručenku nahrajete

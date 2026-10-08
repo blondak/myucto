@@ -11934,6 +11934,7 @@
       "sickness_ossz_code_missing": "The company is missing the three-digit OSSZ workplace code from the ČSSZ code list. Fill it in under Payroll settings, Employer section, or enter it directly on the case.",
       "sickness_receipt_outcome_invalid": "The submission outcome must be accepted, rejected, filed by the previous program or cancelled.",
       "sickness_submission_not_prepared": "The submission has not been prepared yet, so there is nothing to send. First choose Prepare on the case.",
+      "sickness_submission_sent_via_vrep": "The submission has already been sent (or possibly sent) via VREP. It is not sent again through the data box, as ČSSZ would receive it twice.",
       "sickness_supplier_missing": "The company for this benefit case was not found.",
       "sickness_variable_symbol_missing": "The payroll office of the employment is missing its ČSSZ variable symbol. Fill it in under Payroll settings, Employer, at the employment's office and prepare the submission again.",
       "zp_artifact_mismatch": "The stored file's fingerprint does not match the frozen data record. Try preparing the submission again.",

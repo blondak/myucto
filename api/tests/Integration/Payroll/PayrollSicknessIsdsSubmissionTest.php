@@ -322,6 +322,61 @@ final class PayrollSicknessIsdsSubmissionTest extends TestCase
     }
 
     /**
+     * NEMPRI jde i přes VREP. Podání, které už tudy odešlo, se z karty případu
+     * do datové schránky znovu nezařadí — u ČSSZ by vzniklo podruhé.
+     */
+    public function testDispatchFromTheCaseCardIsRefusedAfterAVrepSend(): void
+    {
+        $submissionId = $this->frozenSubmission('NEMPRI', 'case-v');
+        $caseId = $this->sicknessCase($submissionId);
+        // Totéž, co dělá adaptér VREP před odesláním.
+        $this->submissions->adoptDispatchChannel($this->supplierId, $submissionId, 'vrep_apep');
+        $attempt = $this->attempts->open(
+            $this->supplierId,
+            'test',
+            $submissionId,
+            'vrep_apep',
+            1,
+            'nempri-vrep-click',
+            str_repeat('b', 64),
+            null,
+        );
+        $this->attempts->markSent(
+            (int) $attempt['id'],
+            'D0000000000000000000000000000001',
+            200,
+            (int) $attempt['row_version'],
+            null,
+        );
+
+        $service = $this->container->get(SicknessSubmissionService::class);
+        self::assertInstanceOf(SicknessSubmissionService::class, $service);
+
+        try {
+            $service->enqueueDataBox($this->supplierId, 'test', $caseId, SicknessDocumentKind::Nempri, null);
+            self::fail('Podání odeslané přes VREP se nesmí zařadit do datové schránky.');
+        } catch (SicknessException $exception) {
+            self::assertSame('sickness_submission_sent_via_vrep', $exception->validationCode);
+        }
+        self::assertFalse(
+            (new PayrollSubmissionRepository($this->db))
+                ->hasActiveIsdsOutbox($this->supplierId, 'test', $submissionId),
+        );
+    }
+
+    /** Opačný směr: podání zařazené do datové schránky hlídá adaptér VREP. */
+    public function testQueuedSubmissionIsSeenAsAnActiveDataBoxOutbox(): void
+    {
+        $submissionId = $this->frozenSubmission('NEMPRI', 'case-w');
+        $repository = new PayrollSubmissionRepository($this->db);
+        self::assertFalse($repository->hasActiveIsdsOutbox($this->supplierId, 'test', $submissionId));
+
+        $this->isds->enqueue($this->supplierId, 'test', $submissionId, ['NEMPRI'], null);
+
+        self::assertTrue($repository->hasActiveIsdsOutbox($this->supplierId, 'test', $submissionId));
+    }
+
+    /**
      * Tiskopis, který se ještě nepřipravil, nemá co odeslat — a musí to říct
      * konkrétně, ne spadnout na „podání nenalezeno".
      */

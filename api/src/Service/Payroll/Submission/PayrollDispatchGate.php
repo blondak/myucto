@@ -68,6 +68,13 @@ final class PayrollDispatchGate
                 . ' odeslat nejde.';
         }
 
+        if ($capability->testEnvironmentOnly && $environment !== 'test') {
+            return 'Odeslání přes VREP je u téhle agendy zatím ověřené jen'
+                . ' v testovacím prostředí ČSSZ, takže ho aplikace do ostrého'
+                . ' prostředí neodešle. Připravené XML stáhněte a podejte ho'
+                . ' obvyklou cestou.';
+        }
+
         // 5. Už se odesílalo.
         $attempt = $row['attempt'] ?? null;
         if (is_array($attempt) && ($possiblyDelivered = self::possiblyDeliveredReason($attempt)) !== null) {

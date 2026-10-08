@@ -1062,6 +1062,203 @@ final class JmhzDispatchServiceTest extends TestCase
         self::fail('Odeslání mělo skončit výjimkou ' . $expected . '.');
     }
 
+    /**
+     * Zkušební podání ČSSZ TEST (8. 10. 2026): protokol k registraci nechal
+     * pokus navždy ve stavu „čeká na protokol", protože ho parser četl jako
+     * JMHZ. Teď ho dotaz dotáhne a pokus uzavře.
+     */
+    public function testRegistrationProtocolCompletesTheAttempt(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->method('find')->willReturn(self::sentRow());
+        $attempts->expects(self::once())->method('markCompleted')
+            ->willReturn(self::sentRow(['status' => 'completed', 'row_version' => 2]));
+
+        $outcome = $this->service($attempts, [
+            new Response(200, ['Content-Type' => 'text/xml'], self::csszAnswer(
+                'CSSZ_REGZEC',
+                'error',
+                '<ProcessingResult type="CSSZ_REGZEC" version="1,0" result="ERROR"'
+                    . ' errMsg="REGZEC25_LT: 103901602 - Osoba nebyla nalezena." errNumber="5"'
+                    . ' count="1" countErr="1" countWar="0"><Details>'
+                    . '<Item sqnr="" identifier="" subtype="REGZEC25" result="OK" errMsg="" errNum="" />'
+                    . '<Item sqnr="1" identifier="7001010001;;" subtype="REGZEC25" result="ERROR"'
+                    . ' errMsg="REGZEC25_LT: 103901602 - Osoba nebyla nalezena." errNum="602" />'
+                    . '</Details></ProcessingResult>',
+            )),
+        ])->poll(self::SUPPLIER, 'test', self::ATTEMPT, '1234567890', 1, 'CSSZ_REGZEC');
+
+        self::assertTrue($outcome->isSettled());
+        self::assertSame(JmhzSubmissionStatus::Rejected, $outcome->report?->status);
+        self::assertSame('completed', $outcome->attempt['status']);
+    }
+
+    /**
+     * NEMPRI/HZUPN odchází s třídou CSSZ_NEM_PRI a eType podle formuláře —
+     * obě agendy třídu sdílí, takže bez formuláře by se obálka nepostavila.
+     */
+    public function testSicknessFormIsSentWithTheSharedClassAndItsOwnEnvelopeType(): void
+    {
+        $payload = '<?xml version="1.0" encoding="UTF-8"?>'
+            . '<PodaniHZUPN xmlns="http://schemas.cssz.cz/nem/HZUPN20" version="1.2">'
+            . '<FormularHZUPN poradoveCislo="1"><zamestnani><variabilniSymbol>'
+            . JmhzTransportSample::VARIABLE_SYMBOL
+            . '</variabilniSymbol></zamestnani></FormularHZUPN></PodaniHZUPN>';
+        $attempts = $this->openedAttempts();
+        $attempts->expects(self::once())->method('markSent')->willReturn(self::sentRow());
+
+        $this->service($attempts, [
+            new Response(200, ['Content-Type' => 'text/xml'], str_replace(
+                '<Class>CSSZ_JMHZ</Class>',
+                '<Class>CSSZ_NEM_PRI</Class>',
+                self::acknowledgement(),
+            )),
+        ])->send(
+            self::SUPPLIER,
+            'test',
+            self::SUBMISSION,
+            $payload,
+            JmhzTransportSample::VARIABLE_SYMBOL,
+            'hzupn-click-1',
+            3,
+            'CSSZ_NEM_PRI',
+            'HZUPN20',
+        );
+
+        $sent = (string) $this->history[0]['request']->getBody();
+        self::assertStringContainsString('<Class>CSSZ_NEM_PRI</Class>', $sent);
+        self::assertStringContainsString('eType="HZUPN20"', $sent);
+    }
+
+    public function testSharedClassWithoutFormNeverOpensTheLedger(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->expects(self::never())->method('open');
+
+        try {
+            $this->service($attempts, [])->send(
+                self::SUPPLIER,
+                'test',
+                self::SUBMISSION,
+                JmhzTransportSample::payload(),
+                JmhzTransportSample::VARIABLE_SYMBOL,
+                'nempri-no-form',
+                3,
+                'CSSZ_NEM_PRI',
+            );
+            self::fail('Bez formuláře nejde rozhodnout mezi NEMPRI25 a HZUPN20.');
+        } catch (JmhzTransportException $exception) {
+            self::assertSame('jmhz_govtalk_envelope_type_unknown', $exception->errorCode);
+        }
+        self::assertSame([], $this->history);
+    }
+
+    /**
+     * Konečná odpověď na NEMPRI/HZUPN v nedoloženém tvaru: pokus se uzavře
+     * (transakci jde uzavřít), odpověď se uloží jako neověřený protokol
+     * k ruční kontrole a podání dostane pojmenovaný nález. Nezahodí se a nic
+     * se z ní nevykládá.
+     */
+    public function testUndocumentedSicknessProtocolIsStoredForManualReview(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->method('find')->willReturn(self::sentRow());
+        $attempts->expects(self::once())->method('markCompleted')
+            ->willReturn(self::sentRow(['status' => 'completed', 'row_version' => 2]));
+        $submissions = $this->createMock(PayrollSubmissionService::class);
+        $submissions->method('get')->willReturn([
+            'id' => self::SUBMISSION,
+            'status' => 'submitted',
+            'row_version' => 7,
+        ]);
+        $submissions->expects(self::once())->method('importReceipt')->with(
+            self::SUPPLIER,
+            self::SUBMISSION,
+            7,
+            null,
+            self::anything(),
+            self::CORRELATION,
+            self::CORRELATION,
+            'CSSZ_NEM_PRI',
+            'submitted',
+            JmhzDispatchService::CHANNEL,
+            self::anything(),
+            null,
+            null,
+        )->willReturn(['submission_status' => 'submitted', 'submission_row_version' => 8, 'trusted' => false]);
+        $submissions->expects(self::once())->method('recordIssue')->with(
+            self::SUPPLIER,
+            self::SUBMISSION,
+            7,
+            null,
+            'warning',
+            'remote',
+            'jmhz_protocol_shape_undocumented',
+        );
+
+        $outcome = $this->service($attempts, [
+            new Response(200, ['Content-Type' => 'text/xml'], self::csszAnswer(
+                'CSSZ_NEM_PRI',
+                'response',
+                '<ProcessingResult type="CSSZ_NEM_PRI" result="OK" />',
+            )),
+        ], null, $submissions)->poll(
+            self::SUPPLIER,
+            'test',
+            self::ATTEMPT,
+            JmhzTransportSample::VARIABLE_SYMBOL,
+            1,
+            'CSSZ_NEM_PRI',
+            'HZUPN20',
+        );
+
+        self::assertTrue($outcome->manualReview);
+        self::assertTrue($outcome->isSettled());
+        self::assertNull($outcome->report);
+        self::assertSame('completed', $outcome->attempt['status']);
+    }
+
+    /** Odpověď cizí transakce se k ruční kontrole neuzavírá — pokus zůstává otevřený. */
+    public function testUndocumentedProtocolOfAnotherTransactionKeepsTheAttemptOpen(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->method('find')->willReturn(self::sentRow());
+        $attempts->expects(self::never())->method('markCompleted');
+
+        try {
+            $this->service($attempts, [
+                new Response(200, ['Content-Type' => 'text/xml'], str_replace(
+                    self::CORRELATION,
+                    'FFFF0000FFFF0000FFFF0000FFFF0000',
+                    self::csszAnswer('CSSZ_NEM_PRI', 'response', '<ProcessingResult result="OK" />'),
+                )),
+            ])->poll(
+                self::SUPPLIER,
+                'test',
+                self::ATTEMPT,
+                JmhzTransportSample::VARIABLE_SYMBOL,
+                1,
+                'CSSZ_NEM_PRI',
+                'NEMPRI25',
+            );
+            self::fail('Odpověď cizí transakce nesmí uzavřít náš pokus.');
+        } catch (JmhzTransportException $exception) {
+            self::assertSame('jmhz_protocol_shape_undocumented', $exception->errorCode);
+        }
+    }
+
+    private static function csszAnswer(string $class, string $qualifier, string $processingResult): string
+    {
+        return '<?xml version="1.0" encoding="utf-8"?>'
+            . '<GovTalkMessage xmlns="http://www.govtalk.gov.uk/CM/envelope">'
+            . '<EnvelopeVersion>2.0</EnvelopeVersion><Header><MessageDetails>'
+            . "<Class>{$class}</Class><Qualifier>{$qualifier}</Qualifier><Function>submit</Function>"
+            . '<CorrelationID>' . self::CORRELATION . '</CorrelationID>'
+            . '</MessageDetails></Header><GovTalkDetails><Keys /></GovTalkDetails><Body>'
+            . '<Message xmlns="http://www.cssz.cz/XMLSchema/envelope" version="1.2" eType="response">'
+            . '<Header /><Body>' . $processingResult . '</Body></Message></Body></GovTalkMessage>';
+    }
+
     private function send(JmhzDispatchService $service): JmhzDispatchOutcome
     {
         return $service->send(

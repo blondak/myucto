@@ -266,7 +266,11 @@ function awaitsReceipt(item: PayrollMonthlyChecklistItem): boolean {
 }
 
 function channelLabel(item: PayrollMonthlyChecklistItem): string {
-  if (item.dispatch_mode === 'vrep_jmhz' || item.dispatch_mode === 'vrep_registration') {
+  if (
+    item.dispatch_mode === 'vrep_jmhz'
+    || item.dispatch_mode === 'vrep_registration'
+    || item.dispatch_mode === 'vrep_cssz_form'
+  ) {
     return t('payroll.submissions.monthly_checklist.send.channel_vrep')
   }
   if (item.dispatch_mode === 'isds_health' || item.dispatch_mode === 'isds_payroll') {

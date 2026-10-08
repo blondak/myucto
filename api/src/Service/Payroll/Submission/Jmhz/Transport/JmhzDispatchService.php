@@ -58,6 +58,11 @@ readonly class JmhzDispatchService
         'JMHZ25' => self::SUBMISSION_CLASS,
         'PREZEC26' => 'CSSZ_PREZEC',
         'REGZEC25' => 'CSSZ_REGZEC',
+        // CSSZSubmClasses.pdf: NEMPRI25 i HZUPN20 sdílí CSSZ_NEM_PRI, formulář
+        // (eType) proto volající předává zvlášť ({@see JmhzGovTalkRequestShape::forForm()}).
+        'NEMPRI' => 'CSSZ_NEM_PRI',
+        'HZUPN' => 'CSSZ_NEM_PRI',
+        'OZUSPOJ' => 'CSSZ_OZUSPOJ',
     ];
 
     /**
@@ -110,8 +115,9 @@ readonly class JmhzDispatchService
         string $idempotencyKey,
         ?int $actorUserId,
         string $submissionClass = self::SUBMISSION_CLASS,
+        ?string $form = null,
     ): JmhzDispatchOutcome {
-        $packages = $this->frozen?->packageArtifacts($supplierId, $environment, $submissionId) ?? [];
+        $packages =$this->frozen?->packageArtifacts($supplierId, $environment, $submissionId) ?? [];
         if ($packages !== []) {
             return $this->sendPackages(
                 $supplierId,
@@ -171,7 +177,27 @@ readonly class JmhzDispatchService
             $idempotencyKey,
             $actorUserId,
             $submissionClass,
+            $form,
         );
+    }
+
+    /**
+     * Tvar obálky pro druh podání. Formulář je povinný u třídy, kterou sdílí
+     * víc formulářů (`CSSZ_NEM_PRI`), a když přijde, musí k třídě patřit.
+     */
+    private static function requestShape(string $submissionClass, ?string $form): JmhzGovTalkRequestShape
+    {
+        if ($form === null) {
+            return JmhzGovTalkRequestShape::forSubmissionClass($submissionClass);
+        }
+        if (JmhzGovTalkRequestShape::classForForm($form) !== $submissionClass) {
+            throw new JmhzTransportException(
+                'jmhz_govtalk_envelope_type_mismatch',
+                'Prohlášený `eType` ČSSZ obálky patří jiné agendě než druh podání.',
+            );
+        }
+
+        return JmhzGovTalkRequestShape::forForm($form);
     }
 
     /**
@@ -277,16 +303,14 @@ readonly class JmhzDispatchService
         string $idempotencyKey,
         ?int $actorUserId,
         string $submissionClass,
+        ?string $form = null,
     ): JmhzDispatchOutcome {
-        $signer = $this->signer($supplierId, $environment);
-        $material = $signer->unlock();
-
         // Tvar obálky se odvozuje z druhu podání, ne z JMHZ: `eType` vnořené
         // ČSSZ obálky je pro REGZEC a PREZEC jiné a `documented()` by na ně
-        // nalepilo `JMHZ25`.
-        $envelope = new JmhzGovTalkEnvelope(
-            JmhzGovTalkRequestShape::forSubmissionClass($submissionClass),
-        );
+        // nalepilo `JMHZ25`. U CSSZ_NEM_PRI rozhoduje formulář.
+        $envelope = new JmhzGovTalkEnvelope(self::requestShape($submissionClass, $form));
+        $signer = $this->signer($supplierId, $environment);
+        $material = $signer->unlock();
         $sealed = $envelope->seal(
             $payloadXml,
             $variableSymbol,
@@ -710,6 +734,7 @@ readonly class JmhzDispatchService
         string $variableSymbol,
         int $packageCount = 1,
         string $submissionClass = self::SUBMISSION_CLASS,
+        ?string $form = null,
     ): JmhzDispatchOutcome {
         $attempt = $this->requireAttempt($supplierId, $environment, $attemptId);
         // Uzavřený pokus výsledek už má (nebo ho automatika vzdala) a ledger ho
@@ -742,6 +767,7 @@ readonly class JmhzDispatchService
                 $variableSymbol,
                 false,
                 $submissionClass,
+                $form,
             );
             $acknowledgement = $this->acknowledgements->parse(
                 $response->body,
@@ -768,6 +794,18 @@ readonly class JmhzDispatchService
                 $submissionClass,
             );
         } catch (\Throwable $exception) {
+            if ($exception instanceof JmhzTransportException
+                && $exception->errorCode === JmhzProtocolParser::UNDOCUMENTED_SHAPE_CODE
+                && self::isFinalAnswerOf($response->body, $submissionClass, $correlation)
+            ) {
+                return $this->settleUndocumentedProtocol(
+                    $attempt,
+                    $response->body,
+                    $correlation,
+                    $submissionClass,
+                    $exception,
+                );
+            }
             // Odpověď, která není ani potvrzením, ani čitelným protokolem,
             // NENÍ výsledek. Pokus zůstává otevřený a důvod je v ledgeru —
             // vydávat nesrozumitelnou odpověď za vyřízené podání je přesně ta
@@ -1244,6 +1282,7 @@ readonly class JmhzDispatchService
         int $attemptId,
         string $variableSymbol,
         string $submissionClass = self::SUBMISSION_CLASS,
+        ?string $form = null,
     ): array {
         $attempt = $this->requireAttempt($supplierId, $environment, $attemptId);
         if (($attempt['closed_at'] ?? null) !== null) {
@@ -1265,6 +1304,7 @@ readonly class JmhzDispatchService
                 $variableSymbol,
                 true,
                 $submissionClass,
+                $form,
             );
         } catch (\Throwable $exception) {
             $this->recordCloseFailure($attempt, $exception->getMessage());
@@ -1324,12 +1364,106 @@ readonly class JmhzDispatchService
         string $variableSymbol,
         bool $close,
         string $submissionClass = self::SUBMISSION_CLASS,
+        ?string $form = null,
     ): JmhzVrepPollResult {
         $request = (new JmhzGovTalkEnvelope(
-            JmhzGovTalkRequestShape::forSubmissionClass($submissionClass),
+            self::requestShape($submissionClass, $form),
         ))->pollRequest($correlation, $variableSymbol, $submissionClass, $close);
 
         return $this->client($environment)->poll($correlation, $request);
+    }
+
+    /**
+     * Je odpověď konečná odpověď VREP na NAŠI transakci (`response`/`error`,
+     * naše třída, naše CorrelationID)? Jen takovou smí neznámý tvar protokolu
+     * uzavřít k ručnímu vyřízení; cokoli jiného zůstává otevřené.
+     */
+    private static function isFinalAnswerOf(string $body, string $submissionClass, string $correlation): bool
+    {
+        $dom = new \DOMDocument();
+        $previous = libxml_use_internal_errors(true);
+        $loaded = $dom->loadXML($body, LIBXML_NONET);
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+        if (!$loaded) {
+            return false;
+        }
+        $xpath = new \DOMXPath($dom);
+        $xpath->registerNamespace('g', JmhzGovTalkEnvelope::NS_GOVTALK);
+        $read = static fn (string $name): string => trim(
+            (string) $xpath->evaluate("string(/g:GovTalkMessage/g:Header/g:MessageDetails/g:{$name})"),
+        );
+
+        return hash_equals($submissionClass, $read('Class'))
+            && hash_equals($correlation, $read('CorrelationID'))
+            && in_array($read('Qualifier'), ['response', 'error'], true);
+    }
+
+    /**
+     * Konečná odpověď ČSSZ, jejíž tvar nemáme doložený (NEMPRI, HZUPN,
+     * OZUSPOJ). Nevykládá se, ale ani nezahazuje: pokus se uzavře jako
+     * dotažený (transakci jde uzavřít, jak podací protokol žádá), odpověď se
+     * uloží k podání jako neověřený protokol — povinnost tím přejde do ruční
+     * kontroly — a podání dostane nález s pojmenovaným důvodem. Stav podání se
+     * nemění: přijetí nebo odmítnutí zapíše účetní podle protokolu.
+     *
+     * @param array<string,mixed> $attempt
+     */
+    private function settleUndocumentedProtocol(
+        array $attempt,
+        string $body,
+        string $correlation,
+        string $submissionClass,
+        JmhzTransportException $reason,
+    ): JmhzDispatchOutcome {
+        $wasPossiblyDelivered = ($attempt['status'] ?? null) === PayrollDispatchGate::POSSIBLY_DELIVERED_STATUS;
+        $attempt = $this->recordPoll($attempt, null, null);
+        $attempt = $this->attempts->markCompleted(
+            (int) $attempt['id'],
+            (int) $attempt['row_version'],
+        );
+        $supplierId = (int) $attempt['supplier_id'];
+        $submissionId = (int) $attempt['submission_id'];
+        if ($wasPossiblyDelivered) {
+            $this->markSubmitted($supplierId, $submissionId, $correlation);
+        }
+        $submissions = $this->submissions;
+        if ($submissions !== null) {
+            try {
+                $this->import(
+                    $submissions,
+                    $supplierId,
+                    $submissionId,
+                    $body,
+                    $correlation,
+                    $correlation,
+                    'submitted',
+                    'cssz-protocol-undocumented:' . (int) $attempt['id'] . ':' . hash('sha256', $body),
+                    $submissionClass,
+                    null,
+                );
+                $submissions->recordIssue(
+                    $supplierId,
+                    $submissionId,
+                    (int) $submissions->get($supplierId, $submissionId)['row_version'],
+                    null,
+                    'warning',
+                    'remote',
+                    $reason->errorCode,
+                    'payroll_submission',
+                    (string) $submissionId,
+                    [
+                        'correlation_reference' => $correlation,
+                        'message' => $reason->getMessage(),
+                    ],
+                );
+            } catch (\Throwable) {
+                // Pokus je dotažený a ledger to ví; uložení dokladu je
+                // nadstavba, jejíž selhání nesmí výsledek dotazu přebít.
+            }
+        }
+
+        return new JmhzDispatchOutcome($attempt, null, null, true);
     }
 
     private function signer(int $supplierId, string $environment): JmhzVaultEnvelopeSigner

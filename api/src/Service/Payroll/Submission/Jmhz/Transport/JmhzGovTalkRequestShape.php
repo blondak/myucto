@@ -19,14 +19,22 @@ final readonly class JmhzGovTalkRequestShape
     private const TOKEN = '/^[A-Za-z][A-Za-z0-9._-]{0,63}$/D';
 
     /**
-     * GovTalk `Class` → `Message/@eType` vnořené ČSSZ obálky. Zdroj je
-     * `CSSZSubmClasses.pdf`, sloupec „Envelope 1.2 eType". Viz
-     * {@see forSubmissionClass()}, kde je i důvod, proč to nesmí být konstanta.
+     * Formulář (`Message/@eType` vnořené ČSSZ obálky) → GovTalk `Class`.
+     * Zdroj je `CSSZSubmClasses.pdf` (Přehled obálek ČSSZ, stažen 8. 10. 2026,
+     * shodný s kopií z 15. 8. 2026; `private/normy/zdroje/vrep/`), sloupce
+     * „GOVTALK CLASS" a „Envelope 1.2 eType".
+     *
+     * Klíčem je FORMULÁŘ, ne třída: NEMPRI25 i HZUPN20 sdílejí jedinou třídu
+     * `CSSZ_NEM_PRI` a liší se jen `eType`. Mapa třída → eType by jednu z nich
+     * tiše přepsala a obálka HZUPN by odešla s tělem označeným NEMPRI25.
      */
-    private const ENVELOPE_TYPES = [
-        'CSSZ_JMHZ' => 'JMHZ25',
-        'CSSZ_REGZEC' => 'REGZEC25',
-        'CSSZ_PREZEC' => 'PREZEC26',
+    private const FORM_CLASSES = [
+        'JMHZ25' => 'CSSZ_JMHZ',
+        'REGZEC25' => 'CSSZ_REGZEC',
+        'PREZEC26' => 'CSSZ_PREZEC',
+        'NEMPRI25' => 'CSSZ_NEM_PRI',
+        'HZUPN20' => 'CSSZ_NEM_PRI',
+        'OZUSPOJ23' => 'CSSZ_OZUSPOJ',
     ];
 
     public function __construct(
@@ -107,6 +115,12 @@ final readonly class JmhzGovTalkRequestShape
      * | JMHZ25 | `CSSZ_JMHZ` | `JMHZ25` |
      * | REGZEC25 | `CSSZ_REGZEC` | `REGZEC25` |
      * | PREZEC26 | `CSSZ_PREZEC` | `PREZEC26` |
+     * | NEMPRI25 | `CSSZ_NEM_PRI` | `NEMPRI25` |
+     * | HZUPN20 | `CSSZ_NEM_PRI` | `HZUPN20` |
+     * | OZUSPOJ23 | `CSSZ_OZUSPOJ` | `OZUSPOJ23` |
+     *
+     * NEMPRI25 a HZUPN20 mají tutéž třídu, takže pro ně se tvar staví jen
+     * {@see forForm()}; tady skončí výjimkou.
      *
      * Dokud tenhle výběr nebyl, stavěla se obálka registračního podání pořád
      * přes `documented()`, takže na VREP odcházelo `Class="CSSZ_REGZEC"` s tělem
@@ -116,13 +130,32 @@ final readonly class JmhzGovTalkRequestShape
      */
     public static function forSubmissionClass(string $submissionClass): self
     {
-        $envelopeType = self::ENVELOPE_TYPES[$submissionClass] ?? null;
+        $envelopeType = self::envelopeTypeFor($submissionClass);
         if ($envelopeType === null) {
+            // Neznámá třída, nebo třída sdílená víc formuláři (CSSZ_NEM_PRI):
+            // tam se `eType` z třídy odvodit nedá a musí přijít formulář.
             throw new JmhzTransportException(
                 'jmhz_govtalk_envelope_type_unknown',
                 'Pro tenhle druh podání není doložený `eType` ČSSZ obálky.',
             );
         }
+
+        return self::forForm($envelopeType);
+    }
+
+    /**
+     * Tvar obálky pro konkrétní formulář (`eType`). Jediná cesta pro třídy,
+     * které sdílí víc formulářů (`CSSZ_NEM_PRI` = NEMPRI25 a HZUPN20).
+     */
+    public static function forForm(string $form): self
+    {
+        if (!isset(self::FORM_CLASSES[$form])) {
+            throw new JmhzTransportException(
+                'jmhz_govtalk_envelope_type_unknown',
+                'Pro tenhle druh podání není doložený `eType` ČSSZ obálky.',
+            );
+        }
+        $envelopeType = $form;
 
         return new self(
             submitQualifier: 'request',
@@ -137,15 +170,26 @@ final readonly class JmhzGovTalkRequestShape
         );
     }
 
-    /** Doložený `eType` ČSSZ obálky pro `Class`, viz {@see forSubmissionClass()}. */
+    /**
+     * Doložený `eType` ČSSZ obálky pro `Class`, viz {@see forSubmissionClass()}.
+     * U třídy sdílené víc formuláři vrací `null` — jednoznačná odpověď není.
+     */
     public static function envelopeTypeFor(string $submissionClass): ?string
     {
-        return self::ENVELOPE_TYPES[$submissionClass] ?? null;
+        $forms = array_keys(self::FORM_CLASSES, $submissionClass, true);
+
+        return count($forms) === 1 ? $forms[0] : null;
+    }
+
+    /** Doložená GovTalk `Class` formuláře (`eType`), nebo `null`. */
+    public static function classForForm(string $form): ?string
+    {
+        return self::FORM_CLASSES[$form] ?? null;
     }
 
     /** Je `eType` jedna z doložených agend? Rozhoduje, jestli má smysl hlídat záměnu. */
     public static function isCatalogEnvelopeType(string $envelopeType): bool
     {
-        return in_array($envelopeType, self::ENVELOPE_TYPES, true);
+        return isset(self::FORM_CLASSES[$envelopeType]);
     }
 }

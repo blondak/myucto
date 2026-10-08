@@ -3097,6 +3097,7 @@ export interface PayrollSubmissionOverviewResponse {
 export type PayrollSubmissionDispatchMode =
   | 'vrep_jmhz'
   | 'vrep_registration'
+  | 'vrep_cssz_form'
   | 'isds_payroll'
   | 'isds_health'
   | 'none'
@@ -4830,6 +4831,35 @@ export interface PayrollRegistrationTransportStatus {
   agenda_code: PayrollRegistrationAgenda
   submission_class: 'CSSZ_PREZEC' | 'CSSZ_REGZEC'
   attempt: PayrollJmhzTransportAttempt | null
+}
+
+/** Formuláře ČSSZ odesílané přes VREP mimo JMHZ a registrace. */
+export type PayrollCsszFormAgenda = 'NEMPRI' | 'HZUPN' | 'OZUSPOJ'
+
+export interface PayrollCsszFormTransportResult {
+  agenda_code: PayrollCsszFormAgenda
+  submission_class: 'CSSZ_NEM_PRI' | 'CSSZ_OZUSPOJ'
+  form: 'NEMPRI25' | 'HZUPN20' | 'OZUSPOJ23'
+  payload_sha256: string
+  attempt: PayrollJmhzTransportAttempt
+  acknowledgement: PayrollJmhzTransportAcknowledgement | null
+  settled: boolean
+  /** Protokol ČSSZ je uložený u podání, výsledek se zapisuje ručně. */
+  manual_review: boolean
+}
+
+export interface PayrollCsszFormTransportStatus {
+  agenda_code: PayrollCsszFormAgenda
+  submission_class: 'CSSZ_NEM_PRI' | 'CSSZ_OZUSPOJ'
+  form: 'NEMPRI25' | 'HZUPN20' | 'OZUSPOJ23'
+  attempt: PayrollJmhzTransportAttempt | null
+}
+
+export interface PayrollCsszFormTransportPoll {
+  attempt: PayrollJmhzTransportAttempt
+  acknowledgement: PayrollJmhzTransportAcknowledgement | null
+  settled: boolean
+  manual_review: boolean
 }
 
 export interface PayrollRegzelProfile {
@@ -8658,6 +8688,41 @@ export const payrollApi = {
     attempt: PayrollJmhzTransportAttempt
   }>(
     `/payroll/submissions/registration-transport/${attemptId}/close`,
+    { environment },
+  ).then(response => response.data),
+  /** NEMPRI, HZUPN a OZUSPOJ přes VREP; výsledek se zjišťuje ručně. */
+  sendCsszFormTransport: (
+    submissionId: number,
+    environment: PayrollJmhzTransportEnvironment,
+    idempotencyKey: string,
+  ) => api.post<PayrollCsszFormTransportResult>(
+    `/payroll/submissions/cssz-form-transport/${submissionId}`,
+    { environment },
+    { headers: { 'Idempotency-Key': idempotencyKey } },
+  ).then(response => response.data),
+  csszFormTransportStatus: (
+    submissionId: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.get<PayrollCsszFormTransportStatus>(
+    `/payroll/submissions/cssz-form-transport/${submissionId}`,
+    { params: { environment } },
+  ).then(response => response.data),
+  pollCsszFormTransportAttempt: (
+    attemptId: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.post<PayrollCsszFormTransportPoll>(
+    `/payroll/submissions/cssz-form-transport/${attemptId}/poll`,
+    { environment },
+  ).then(response => response.data),
+  closeCsszFormTransportAttempt: (
+    attemptId: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.post<{
+    closed: boolean
+    already_closed: boolean
+    attempt: PayrollJmhzTransportAttempt
+  }>(
+    `/payroll/submissions/cssz-form-transport/${attemptId}/close`,
     { environment },
   ).then(response => response.data),
   downloadJmhzPvpojPreview: async (
