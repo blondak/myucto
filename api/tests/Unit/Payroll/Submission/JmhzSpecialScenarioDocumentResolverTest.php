@@ -28,7 +28,7 @@ final class JmhzSpecialScenarioDocumentResolverTest extends TestCase
         self::assertSame($first->candidate->canonicalJson(), $second?->candidate?->canonicalJson());
         self::assertSame($first->candidate->sha256(), $second?->candidate?->sha256());
         self::assertSame(
-            ['scenario_3', 'scenario_4', 'scenario_5', 'scenario_6', 'scenario_7'],
+            ['scenario_3', 'scenario_7'],
             $first->candidate->payload['scope']['scenario_keys'],
         );
         self::assertSame(
@@ -39,13 +39,14 @@ final class JmhzSpecialScenarioDocumentResolverTest extends TestCase
 
         $blockers = array_map(static fn ($blocker): array => $blocker->toArray(), $first->blockers);
         self::assertSame(
-            array_fill(0, 5, 'jmhz_special_scenarios_evidence_gap'),
+            array_fill(0, 2, 'jmhz_special_scenarios_evidence_gap'),
             array_column($blockers, 'code'),
         );
+        $formsByEmployment = array_column($first->candidate->payload['forms'], null, 'employment_id');
         foreach ($blockers as $blocker) {
             self::assertSame(
                 $this->requiredAttributeIds(
-                    $first->candidate->payload['forms'][$blocker['entity_id'] - 101]['scenario_evidence']['scenario_key'],
+                    $formsByEmployment[$blocker['entity_id']]['scenario_evidence']['scenario_key'],
                 ),
                 $blocker['attribute_ids'],
             );
@@ -64,16 +65,28 @@ final class JmhzSpecialScenarioDocumentResolverTest extends TestCase
 
         self::assertNotNull($resolution);
         self::assertNotNull($resolution->candidate);
-        self::assertCount(4, $resolution->candidate->payload['forms']);
+        self::assertCount(1, $resolution->candidate->payload['forms']);
         self::assertSame(
             [
-                'jmhz_special_scenarios_evidence_gap',
-                'jmhz_special_scenarios_evidence_gap',
-                'jmhz_special_scenarios_evidence_gap',
                 'jmhz_special_scenarios_evidence_gap',
                 'jmhz_special_scenarios_frozen_resolution_invalid',
             ],
             array_map(static fn ($blocker): string => $blocker->code, $resolution->blockers),
+        );
+    }
+
+    /**
+     * Vězeň, jiný příjem a pronájem síly (scénáře 4 až 6) sestaví běžný
+     * dokument; náhled nesestavitelných scénářů je nesmí vydávat za mezeru.
+     */
+    public function testPreparedSpecialScenariosAreNotPreviewed(): void
+    {
+        $resolution = (new JmhzSpecialScenarioDocumentResolver())->resolve($this->preparation());
+
+        self::assertNotNull($resolution?->candidate);
+        self::assertSame(
+            [101, 105],
+            array_column($resolution->candidate->payload['forms'], 'employment_id'),
         );
     }
 

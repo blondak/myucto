@@ -1077,7 +1077,7 @@ final class PayrollFoundationTest extends TestCase
                  activity_code, jmhz_relationship_detail_code,
                  social_insurance_participation, health_insurance_participation,
                  tax_regime, is_primary)
-             VALUES (?, ?, "2026-01-01", "2026-01-01", "1", "2",
+             VALUES (?, ?, "2026-01-01", "2026-01-01", "1", "3",
                      "automatic", "automatic", "advance", 1)'
         )->execute([$supplierId, $employmentId]);
 

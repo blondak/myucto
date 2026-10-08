@@ -25,6 +25,11 @@ final readonly class HealthInsuranceRelationshipInput
         public ?string $employmentTo,
         public HealthIncomeAttribution $incomeAttribution,
         array $components,
+        /**
+         * Příjem ze závislé činnosti, který u plátce nezakládá postavení
+         * zaměstnance pro zdravotní pojištění (druhy činnosti 11 až 14).
+         */
+        public bool $outsideInsurance = false,
     ) {
         if (preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/D', $relationshipId) !== 1) {
             throw new InvalidArgumentException('Health insurance relationship ID is not canonical.');

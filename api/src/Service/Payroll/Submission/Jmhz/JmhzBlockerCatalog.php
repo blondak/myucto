@@ -549,12 +549,10 @@ final class JmhzBlockerCatalog
         'jmhz_scenario2_resolution_blocked' => 'support',
         'jmhz_scenario2_scope_unsupported' => 'retry',
         'jmhz_scenario2_source_version_unsupported' => 'retry',
-        // Formuláře scénářů 2 až 7 aplikace nevydává; hlášení se podává ručně.
+        // Formuláře scénářů 2, 7 a specifické skupiny scénáře 3 aplikace
+        // nevydává; hlášení se podává ručně.
         'jmhz_scenario_2_preparation_unsupported' => 'manual',
         'jmhz_scenario_3_preparation_unsupported' => 'manual',
-        'jmhz_scenario_4_preparation_unsupported' => 'manual',
-        'jmhz_scenario_5_preparation_unsupported' => 'manual',
-        'jmhz_scenario_6_preparation_unsupported' => 'manual',
         'jmhz_scenario_7_preparation_unsupported' => 'manual',
         'jmhz_scenario_8_activity_10_forbidden' => ['employment_terms', 'activity_code'],
         'jmhz_scenario_activity_code_invalid' => ['employment_terms', 'activity_code'],
@@ -563,6 +561,7 @@ final class JmhzBlockerCatalog
         'jmhz_scenario_not_supported' => 'employment_terms',
         'jmhz_scenario_profile_unsupported' => 'employment_terms',
         'jmhz_scenario_relationship_detail_invalid' => 'employment_terms',
+        'jmhz_scenario_social_insurance_unreportable' => ['employment_terms', 'activity_code'],
         'jmhz_scenario_relationship_detail_missing' => 'employment_terms',
         'jmhz_scenario_relationship_detail_not_applicable' => 'employment_terms',
         'jmhz_schema_integrity_failed' => 'support',
@@ -649,12 +648,15 @@ final class JmhzBlockerCatalog
         'jmhz_xml_exempt_income_exceeds_total' => 'runs',
         'jmhz_xml_form_limit_exceeded' => 'correction',
         'jmhz_xml_identity_name_incomplete' => 'employee_identity',
+        // Údaj, který zúžený formulář scénáře 6 nevede: podává se ručně.
+        'jmhz_xml_international_hire_attribute_unsupported' => 'manual',
         'jmhz_xml_no_valid_form' => 'submission',
         'jmhz_xml_not_byte_stable' => 'support',
         'jmhz_xml_overtime_exceeds_worked_hours' => 'time',
         'jmhz_xml_paid_unworked_hours_below_sickness' => 'absences',
         'jmhz_xml_period_invalid' => 'submission',
         'jmhz_xml_primary_employment_invalid' => ['employment_terms', 'is_primary'],
+        'jmhz_xml_prisoner_excluded_days_unsupported' => 'manual',
         'jmhz_xml_pvpoj_missing' => 'runs',
         'jmhz_xml_resolution_blocked' => 'submission',
         'jmhz_xml_scenario_3_profile_unsupported' => 'manual',

@@ -10,7 +10,6 @@ use MyInvoice\Service\Payroll\Garnishment\EnforcementPersonMonthEvidence;
 use MyInvoice\Service\Payroll\Garnishment\GarnishmentInput;
 use MyInvoice\Service\Payroll\Garnishment\InsolvencyMode;
 use MyInvoice\Service\Payroll\Net\DeductionAgreementTerms;
-use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final class JmhzOrdinaryEvidenceBuilder
@@ -171,17 +170,14 @@ final class JmhzOrdinaryEvidenceBuilder
         $scenarioKey = is_array($scenarioResolution)
             ? ($scenarioResolution['scenario_key'] ?? null)
             : null;
-        $supportedProfile = $scenarioKey === 'scenario_1'
-            || ($scenarioKey === 'scenario_3'
-                && in_array(
-                    $employmentSource['relation_type'] ?? null,
-                    ['partner_dependent', 'statutory_body'],
-                    true,
-                )
-                && PayrollEmploymentJmhzActivityFamily::isCorporateBodyActivity(
-                    $term['activity_code'] ?? null,
-                )
-                && ($term['jmhz_relationship_detail_code'] ?? null) === '1');
+        $relationType = $employmentSource['relation_type'] ?? null;
+        $supportedProfile = is_string($scenarioKey)
+            && JmhzScenarioFormProfile::preparable(
+                $scenarioKey,
+                $selectorActivityCode,
+                $selectorRelationshipDetailCode,
+                is_string($relationType) ? $relationType : '',
+            );
         if ($selection['supported'] !== true || !$supportedProfile) {
             $this->invalid(
                 'jmhz_ordinary_evidence_scenario_unsupported',
@@ -201,16 +197,12 @@ final class JmhzOrdinaryEvidenceBuilder
             ];
         }
         $in36 = $catalog->interaction('IN36');
-        $requirements = [];
-        $expectedRequirementIds = $scenarioKey === 'scenario_1'
-            ? ['10116', '10546']
-            : ['10546'];
-        foreach ($catalog->requirementsForMatrix($scenarioKey) as $requirement) {
-            if (in_array($requirement->attributeId, $expectedRequirementIds, true)) {
-                $requirements[$requirement->attributeId] = $requirement->rowHash;
-            }
-        }
-        if (array_map('strval', array_keys($requirements)) !== $expectedRequirementIds) {
+        $requirements = JmhzOrdinaryEvidenceCompatibility::requirementRowHashes($catalog, $scenarioKey);
+        // Matice scénáře 1 vede oba atributy jako povinné jádro; chybí-li
+        // tam, je připnutý katalog poškozený, ne scénář bez srážek.
+        if ($scenarioKey === 'scenario_1'
+            && array_map('strval', array_keys($requirements)) !== JmhzOrdinaryEvidenceCompatibility::ATTRIBUTE_IDS
+        ) {
             $this->invalid('jmhz_ordinary_evidence_catalog_mismatch', 'Katalog ordinary evidence není úplný.');
         }
         $periodEnd = (new \DateTimeImmutable($periodStart))

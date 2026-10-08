@@ -63,6 +63,17 @@ final class HealthParticipationResolver
         foreach ($facts as $fact) {
             $relationship = $fact->relationship;
             $issues = $fact->issues;
+            if ($relationship->outsideInsurance) {
+                $decisions[$relationship->relationshipId] = new HealthParticipationDecision(
+                    $relationship->relationshipId,
+                    HealthParticipationStatus::DoesNotParticipate,
+                    $fact->participationIncomeMinorUnits,
+                    $fact->participationIncomeMinorUnits,
+                    null,
+                    ['activity_outside_insurance'],
+                );
+                continue;
+            }
             if (!$this->hasAttributableMonth($month, $relationship)) {
                 if ($fact->participationIncomeMinorUnits === 0 && $fact->assessmentBaseMinorUnits === 0) {
                     $decisions[$relationship->relationshipId] = new HealthParticipationDecision(

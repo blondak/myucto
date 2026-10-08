@@ -1271,7 +1271,10 @@ final class JmhzPreparationSnapshotBuilder
         $sourceEvidence = $this->object($payload['source_evidence'] ?? null, 'eldp.source_evidence');
         $scenarioKey = $scope['scenario_key'];
         $scenarioResolution = $sourceEvidence['scenario_resolution'] ?? null;
-        if ($scenarioKey === 'scenario_3') {
+        // Mimo scénář 1 a odložený příjem nese řez zařazení scénáře, které
+        // se musí shodovat s rozsahem; jinak by ELDP zůstal z jiného formuláře.
+        $classifiedScenario = $scenarioKey !== 'scenario_1' && $scenarioKey !== 'scenario_8';
+        if ($classifiedScenario) {
             $scenarioResolution = $this->object(
                 $scenarioResolution,
                 'eldp.source_evidence.scenario_resolution',
@@ -1288,8 +1291,8 @@ final class JmhzPreparationSnapshotBuilder
             || ($scope['employee_id'] ?? null) !== $employeeId
             || ($scope['employment_id'] ?? null) !== $employmentId
             || ($scope['period_start'] ?? null) !== $periodStart
-            || !in_array($scenarioKey, ['scenario_1', 'scenario_3', 'scenario_8'], true)
-            || ($scenarioKey === 'scenario_3'
+            || !JmhzScenarioFormProfile::isOrdinaryDocumentScenario($scenarioKey)
+            || ($classifiedScenario
                 && ($scenarioResolution['scenario_key'] ?? null) !== $scenarioKey)
             || ($sourceRevision['input_snapshot_hash'] ?? null) !== ($revision['input_snapshot_hash'] ?? null)
             || ($sourceRevision['result_snapshot_hash'] ?? null) !== ($revision['result_snapshot_hash'] ?? null)

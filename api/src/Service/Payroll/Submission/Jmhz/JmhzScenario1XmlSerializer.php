@@ -945,6 +945,9 @@ final class JmhzScenario1XmlSerializer
         return match ($selector['scenario_key'] ?? null) {
             'scenario_1' => $this->bezPriznaku($dom, $summary, $employment),
             'scenario_3' => $this->cinnostKs($dom, $summary, $employment),
+            'scenario_4' => $this->vezen($dom, $summary, $employment),
+            'scenario_5' => $this->jinyPrijem($dom, $summary, $employment),
+            'scenario_6' => $this->mezinarodniPronajemSily($dom, $summary, $employment),
             'scenario_8' => $this->odlozenyPrijem($dom, $summary, $employment),
             default => $this->invalid(
                 'jmhz_xml_scenario_unsupported',
@@ -1013,13 +1016,149 @@ final class JmhzScenario1XmlSerializer
         $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:cinnostKS');
         $node->appendChild($this->identification($dom, $employment));
         if ($this->bool($employment['primary'] ?? null, '10495')) {
-            $node->appendChild($this->employeeSummary($dom, $summary, true));
+            $node->appendChild($this->employeeSummary($dom, $summary, 'cinnostKS'));
         }
         $node->appendChild($this->insurance($dom, $summary, $employment, true));
         $node->appendChild($this->position($dom, $employment));
         $node->appendChild($this->income($dom, $summary, $employment));
 
         return $node;
+    }
+
+    /**
+     * Vězeň (scénář 4, `formVezen.xsd`): druh činnosti 1 až 9 s bližším
+     * určením 10502 = výkon trestu odnětí svobody nebo zabezpečovací detence.
+     *
+     * Matice „1 až 9 výkon trestu" (Datové scénáře 1.4.0.2) vede podmnožinu
+     * scénáře 1: souhrn s čistou mzdou, ale bez zdravotního pojištění;
+     * pojištění s trváním, ELDP a slevou zaměstnance, ale bez vyměřovacích
+     * základů a pojistného (ty nese jen pojistná část); z průběhu zaměstnání
+     * odpracované hodiny; ze mzdy jen náhradu při DPN. Pozici, fond pracovní
+     * doby ani rozpad mzdy formulář nemá.
+     *
+     * @param array<string,mixed> $summary
+     * @param array<string,mixed> $employment
+     */
+    private function vezen(
+        DOMDocument $dom,
+        array $summary,
+        array $employment,
+    ): DOMElement {
+        $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:vezen');
+        $node->appendChild($this->identification($dom, $employment));
+        if ($this->bool($employment['primary'] ?? null, '10495')) {
+            $node->appendChild($this->employeeSummary($dom, $summary, 'vezen'));
+        }
+        $insurance = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:pojisteni');
+        $insurance->appendChild($this->insuranceDuration($dom, $employment));
+        $insurance->appendChild($this->eldpList($dom, $employment, true));
+        $insurance->appendChild($this->employeeDiscounts($dom, $employment));
+        $node->appendChild($insurance);
+        $work = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:prubehZamestnani');
+        $work->appendChild($this->workedHours(
+            $dom,
+            $employment,
+            self::reportedWorkedHours(
+                $this->reportedUnworkedHours($this->workSummaryValues($employment)),
+            ),
+        ));
+        $node->appendChild($work);
+        $node->appendChild($this->income($dom, $summary, $employment));
+        $earnings = $this->object($employment['earnings_by_attribute_czk'] ?? null);
+        $wage = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:mzda');
+        $sickness = $this->earning($earnings, '10342');
+        if ($sickness !== null) {
+            $compensation = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:nahrady');
+            $this->text(
+                $dom,
+                $compensation,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:docasnaNeschopnost',
+                (string) $this->int($sickness, '10342'),
+            );
+            $wage->appendChild($compensation);
+        }
+        $node->appendChild($wage);
+
+        return $node;
+    }
+
+    /**
+     * Jiný příjem (scénář 5, `formJinyPrijem.xsd`): druh činnosti 11, 13
+     * nebo 14. Formulář nese identifikaci, souhrn za osobu (na primárním
+     * vztahu) a daňový základ. Pojištění nemá: takový příjem u plátce účast
+     * nezakládá ({@see self::assertWithoutInsurance()}).
+     *
+     * @param array<string,mixed> $summary
+     * @param array<string,mixed> $employment
+     */
+    private function jinyPrijem(
+        DOMDocument $dom,
+        array $summary,
+        array $employment,
+    ): DOMElement {
+        $this->assertWithoutInsurance($employment);
+        $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:jinyPrijem');
+        $node->appendChild($this->identification($dom, $employment));
+        if ($this->bool($employment['primary'] ?? null, '10495')) {
+            $node->appendChild($this->employeeSummary($dom, $summary, 'jinyPrijem'));
+        }
+        $node->appendChild($this->income($dom, $summary, $employment));
+
+        return $node;
+    }
+
+    /**
+     * Mezinárodní pronájem pracovní síly (scénář 6,
+     * `formMezinarodniPronajemSily.xsd`): druh činnosti 12. Souhrn je zúžený
+     * (`souhrnDataZecMpsType`): úhrn příjmu bez osvobozené části, záloha bez
+     * bonusu, ze slev jen základní sleva na poplatníka a z výsledku ročního
+     * zúčtování jen celkový přeplatek (kontroly 78 a 79 pro scénář 12).
+     *
+     * @param array<string,mixed> $summary
+     * @param array<string,mixed> $employment
+     */
+    private function mezinarodniPronajemSily(
+        DOMDocument $dom,
+        array $summary,
+        array $employment,
+    ): DOMElement {
+        $this->assertWithoutInsurance($employment);
+        $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:mezinarodniPronajemSily');
+        $node->appendChild($this->identification($dom, $employment));
+        if ($this->bool($employment['primary'] ?? null, '10495')) {
+            $node->appendChild($this->employeeSummary($dom, $summary, 'mezinarodniPronajemSily'));
+        }
+        $node->appendChild($this->income($dom, $summary, $employment));
+
+        return $node;
+    }
+
+    /**
+     * Formuláře scénářů 5 a 6 blok `pojisteni` nemají. Vztah, za který se
+     * vyměřovací základ nebo pojistné odvádí, by v nich pojistné zamlčel
+     * a pojistná část by se s formuláři rozešla.
+     *
+     * @param array<string,mixed> $employment
+     */
+    private function assertWithoutInsurance(array $employment): void
+    {
+        $social = $this->object($employment['social_base'] ?? null);
+        $contributions = $this->object($employment['social_contributions'] ?? null);
+        foreach ([
+            $social['assessment_base_czk'] ?? null,
+            $contributions['employee_social_czk'] ?? null,
+            $contributions['employer_social_czk'] ?? null,
+        ] as $amount) {
+            if (is_int($amount) && $amount !== 0) {
+                $this->invalid(
+                    'jmhz_scenario_social_insurance_unreportable',
+                    'Formulář jiného příjmu a mezinárodního pronájmu pracovní síly'
+                        . ' nenese pojištění (atributy 10477, 10370, 10481), vztah ale'
+                        . ' vyměřovací základ nebo pojistné má.',
+                );
+            }
+        }
     }
 
     /**
@@ -1146,12 +1285,25 @@ final class JmhzScenario1XmlSerializer
         );
     }
 
-    /** @param array<string,mixed> $summary */
+    /**
+     * Souhrnná data zaměstnance podle typu formuláře součásti.
+     *
+     * Typy se liší jen ubíráním prvků: `bezPriznaku` (a odložený příjem) má
+     * celý souhrn včetně příspěvků zaměstnavatele, čisté mzdy a zdravotního
+     * pojištění; `cinnostKS` nemá čistou mzdu ani zdravotní pojištění
+     * zaměstnavatele; `vezen` má společný souhrn a čistou mzdu; `jinyPrijem`
+     * jen společný souhrn (`souhrnDataZecType`); `mezinarodniPronajemSily`
+     * zúžený souhrn (`souhrnDataZecMpsType`).
+     *
+     * @param array<string,mixed> $summary
+     */
     private function employeeSummary(
         DOMDocument $dom,
         array $summary,
-        bool $cinnostKs = false,
+        string $form = 'bezPriznaku',
     ): DOMElement {
+        $cinnostKs = $form === 'cinnostKS';
+        $international = $form === 'mezinarodniPronajemSily';
         $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:souhrnDataZec');
         $income = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:prijmy');
         $incomeTotal = $this->int($summary['income_total_czk'] ?? null, '10286');
@@ -1174,7 +1326,9 @@ final class JmhzScenario1XmlSerializer
          * Kontrola 283: při nulovém úhrnu 10286 nesmí být 10289 vyplněné ani
          * nulou; měsíc bez příjmu ho proto vynechá stejně jako přijatá hlášení.
          */
-        $exemptIncome = $summary['exempt_income_czk'] ?? null;
+        // Zúžený souhrn pronájmu síly osvobozený příjem nevede (matice
+        // scénáře 12 atribut 10289 nemá), takže se tam neuvádí vůbec.
+        $exemptIncome = $international ? null : ($summary['exempt_income_czk'] ?? null);
         if ($exemptIncome !== null && $incomeTotal !== 0) {
             $exemptIncome = $this->int($exemptIncome, '10289');
             if ($exemptIncome > $incomeTotal) {
@@ -1192,7 +1346,12 @@ final class JmhzScenario1XmlSerializer
                 (string) $exemptIncome,
             );
         }
-        $this->appendEmployerContributions($dom, $income, $summary);
+        // Příspěvky zaměstnavatele (10417 a rozpad) jsou rozšíření příjmů jen
+        // formulářů bez příznaku a činnosti K–S; matice scénářů 4 až 6 je
+        // nevedou a příspěvek zůstává součástí osvobozeného úhrnu 10289.
+        if ($form === 'bezPriznaku' || $cinnostKs) {
+            $this->appendEmployerContributions($dom, $income, $summary);
+        }
         $node->appendChild($income);
 
         $declarationSigned = $this->bool(
@@ -1227,6 +1386,18 @@ final class JmhzScenario1XmlSerializer
             'form:danZalohaPoSleve' => ['after_credits', '10305'],
             'form:danBonus' => ['bonus', '10306'],
         ] as $element => [$key, $attributeId]) {
+            if ($element === 'form:danBonus' && $international) {
+                // `souhrnDataZecMpsType` měsíční bonus (10306) nevede.
+                if ($this->int($advance[$key] ?? null, $attributeId) !== 0) {
+                    $this->invalid(
+                        'jmhz_xml_international_hire_attribute_unsupported',
+                        'Formulář mezinárodního pronájmu pracovní síly nemá kam'
+                            . ' zapsat měsíční daňový bonus (10306).',
+                    );
+                }
+
+                continue;
+            }
             if ($element === 'form:danBonus' && !$declarationSigned) {
                 // Kontrola 244 bere za „vyplněný" atribut samotnou přítomnost
                 // elementu, ne až nenulovou částku — nulový bonus u zaměstnance
@@ -1296,6 +1467,17 @@ final class JmhzScenario1XmlSerializer
         );
         $childCredit = $summary['child_credit'] ?? null;
         $childCredit = $childCredit === null ? null : $this->object($childCredit);
+        // Zúžený souhrn pronájmu síly zná ze slev jen základní slevu na
+        // poplatníka (10299); jiná sleva nebo zvýhodnění na děti by se ztratily.
+        if ($international
+            && ($childCredit !== null || array_diff(array_keys($claimed), ['form:zakladniSleva']) !== [])
+        ) {
+            $this->invalid(
+                'jmhz_xml_international_hire_attribute_unsupported',
+                'Formulář mezinárodního pronájmu pracovní síly nese ze slev'
+                    . ' jen základní slevu na poplatníka (10299).',
+            );
+        }
         if ($claimed !== [] || $childCredit !== null) {
             if (!$declarationSigned) {
                 // Slevu lze uplatnit jen s podepsaným prohlášením; kdyby to
@@ -1395,6 +1577,14 @@ final class JmhzScenario1XmlSerializer
                         '10321',
                     ),
                 );
+                // Pronájem síly vede z výsledku ročního zúčtování jen 10321
+                // (kontrola 79 pro scénář 12, kontrolu 78 neuplatňuje).
+                if ($international) {
+                    $annualNode->appendChild($resultNode);
+                    $node->appendChild($annualNode);
+
+                    return $node;
+                }
                 $this->text(
                     $dom,
                     $resultNode,
@@ -1438,7 +1628,7 @@ final class JmhzScenario1XmlSerializer
             $node->appendChild($annualNode);
         }
 
-        if (!$cinnostKs) {
+        if (in_array($form, ['bezPriznaku', 'vezen'], true)) {
             $net = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:mzdaCista');
             $this->text(
                 $dom,
@@ -1459,12 +1649,14 @@ final class JmhzScenario1XmlSerializer
             $node->appendChild($net);
         }
 
-        $healthAmounts = $cinnostKs
-            ? ['form:zdravPojZamestnanec' => ['employee_health_czk', '10371']]
-            : [
+        $healthAmounts = match ($form) {
+            'bezPriznaku' => [
                 'form:zdravPojZamestnavatel' => ['employer_health_czk', '10482'],
                 'form:zdravPojZamestnanec' => ['employee_health_czk', '10371'],
-            ];
+            ],
+            'cinnostKS' => ['form:zdravPojZamestnanec' => ['employee_health_czk', '10371']],
+            default => [],
+        };
         foreach ($healthAmounts as $element => [$key, $attributeId]) {
             $wrapper = $this->node($dom, JmhzSchemaCatalog::NS_FORM, $element);
             $this->text(
@@ -1812,27 +2004,10 @@ final class JmhzScenario1XmlSerializer
         bool $cinnostKs = false,
         ?array $deferred = null,
     ): DOMElement {
-        $eldp = $this->object($employment['eldp'] ?? null);
         $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:pojisteni');
         // Odložený příjem trvání pojištění nevykazuje: vztah v měsíci netrvá.
         if ($deferred === null) {
-            $interval = $this->object($eldp['insurance_interval'] ?? null);
-            $duration = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:trvani');
-            $this->text(
-                $dom,
-                $duration,
-                JmhzSchemaCatalog::NS_FORM,
-                'form:pojisteniOd',
-                $this->date($interval['insurance_from'] ?? null, '10354'),
-            );
-            $this->text(
-                $dom,
-                $duration,
-                JmhzSchemaCatalog::NS_FORM,
-                'form:pojisteniDo',
-                $this->date($interval['insurance_to'] ?? null, '10355'),
-            );
-            $node->appendChild($duration);
+            $node->appendChild($this->insuranceDuration($dom, $employment));
         }
 
         $social = $this->object($employment['social_base'] ?? null);
@@ -1894,56 +2069,7 @@ final class JmhzScenario1XmlSerializer
             $node->appendChild($split);
         }
 
-        $sections = $this->rows($eldp['eldp_sections'] ?? null);
-        if ($sections === []) {
-            $this->invalid(
-                'jmhz_xml_eldp_missing',
-                'Součást musí obsahovat alespoň jednu ELDP sekci.',
-            );
-        }
-        $list = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:eldpSeznam');
-        foreach ($sections as $section) {
-            $entry = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:eldp');
-            $code = $section['code'] ?? null;
-            if (is_string($code) && $code !== '') {
-                $this->text($dom, $entry, JmhzSchemaCatalog::NS_FORM, 'form:kod', $code);
-                $this->text(
-                    $dom,
-                    $entry,
-                    JmhzSchemaCatalog::NS_FORM,
-                    'form:platnostOd',
-                    $this->date($section['valid_from'] ?? null, '10241'),
-                );
-                $this->text(
-                    $dom,
-                    $entry,
-                    JmhzSchemaCatalog::NS_FORM,
-                    'form:platnostDo',
-                    $this->date($section['valid_to'] ?? null, '10242'),
-                );
-            }
-            $days = $this->int($section['insurance_days'] ?? null, '10356');
-            $this->text($dom, $entry, JmhzSchemaCatalog::NS_FORM, 'form:pocetDnu', (string) $days);
-            // 10240 je povinný právě když 10356 > 0; opačně by kód bez dnů
-            // vykázal neexistující dobu pojištění.
-            if ($days > 0 && !(is_string($code) && $code !== '')) {
-                $this->invalid(
-                    'jmhz_xml_eldp_code_required',
-                    'ELDP sekce s nenulovým počtem dnů musí mít kód ELDP.',
-                );
-            }
-            if (is_int($section['assessment_base_czk'] ?? null)) {
-                $this->text(
-                    $dom,
-                    $entry,
-                    JmhzSchemaCatalog::NS_FORM,
-                    'form:vymerovaciZaklad',
-                    (string) $this->int($section['assessment_base_czk'], '10245'),
-                );
-            }
-            $this->appendEldpExcludedDays($dom, $entry, $section, $code);
-            $list->appendChild($entry);
-        }
+        $list = $this->eldpList($dom, $employment);
         if ($deferred === null) {
             $node->appendChild($list);
         } else {
@@ -2011,82 +2137,7 @@ final class JmhzScenario1XmlSerializer
             $node->appendChild($wrapper);
         }
 
-        /*
-         * Sleva na pojistném ZAMĚSTNANCE — 10490 (pracující důchodci, § 7d
-         * ZPSZ) a 10546 (ovocnářství a pěstování zeleniny). Matice povinností
-         * 1.4.0.2 vede oba příznaky jako povinné jádro scénáře, ne jako údaj
-         * podmíněný interakcí, a `slevaZamestnanceType` je má oba v jednom
-         * bloku před slevou zaměstnavatele.
-         *
-         * 10490 = ANO a výši slevy 10491 nese jen vztah, kterému resolver
-         * slevu přiřadil
-         * ({@see JmhzScenario1DocumentResolver::employeeSocialDiscount()}):
-         * tentýž, který nese pojistné osoby. Ostatní vztahy vykazují NE.
-         * Pořadí prvků určuje `slevaZamestnanceType`: příznak, výše slevy,
-         * teprve potom příznak ovocnářů.
-         *
-         * Vykázat příznak je nutné i jako NE: kontrola 297 poměřuje počet
-         * zaměstnanců v `pvpoj:slevyZamestnancu` s počtem vztahů, u nichž je
-         * 10490 = ANO, a kontrola 213 stejně tak úhrn vyměřovacích základů.
-         * Mlčení na formulářích při vyplněné pojistné části je proto rozpor
-         * uvnitř jednoho podání.
-         *
-         * 10546 zůstává NE: sezónní slevu běžný profil nepodporuje a příprava
-         * ji potvrdit nedovolí. ANO u obou na jednom formuláři zakazuje
-         * kontrola 275 a resolver takovou kombinaci zablokuje dřív.
-         */
-        $employeeDiscount = $this->object($employment['employee_social_discount'] ?? null);
-        if ($employeeDiscount !== [] && !$reportsSocial) {
-            $this->invalid(
-                'jmhz_xml_employee_social_discount_misplaced',
-                'Slevu na pojistném zaměstnance smí nést jen formulář,'
-                    . ' který vykazuje pojistné osoby.',
-            );
-        }
-        $employeeDiscounts = $this->node(
-            $dom,
-            JmhzSchemaCatalog::NS_FORM,
-            'form:slevaZamestnance',
-        );
-        $this->text(
-            $dom,
-            $employeeDiscounts,
-            JmhzSchemaCatalog::NS_FORM,
-            'form:slevaZamestnanceEvidovana',
-            $employeeDiscount === [] ? 'false' : 'true',
-        );
-        if ($employeeDiscount !== []) {
-            $discountCzk = $this->int($employeeDiscount['amount_czk'] ?? null, '10491');
-            // 10490 = ANO jen při nenulové slevě; nula s příznakem by tvrdila
-            // uplatněnou slevu, která se neuplatnila.
-            if ($discountCzk === 0) {
-                $this->invalid(
-                    'jmhz_xml_employee_social_discount_zero',
-                    'Sleva na pojistném zaměstnance s příznakem ANO nesmí být nulová.',
-                );
-            }
-            $amountNode = $this->node(
-                $dom,
-                JmhzSchemaCatalog::NS_FORM,
-                'form:slevaZamestnance',
-            );
-            $this->text(
-                $dom,
-                $amountNode,
-                JmhzSchemaCatalog::NS_FORM,
-                'form:vyseSlevy',
-                (string) $discountCzk,
-            );
-            $employeeDiscounts->appendChild($amountNode);
-        }
-        $this->text(
-            $dom,
-            $employeeDiscounts,
-            JmhzSchemaCatalog::NS_FORM,
-            'form:slevaZamestnanceOvoZelEvidovana',
-            'false',
-        );
-        $node->appendChild($employeeDiscounts);
+        $node->appendChild($this->employeeDiscounts($dom, $employment));
 
         /*
          * Sleva na pojistném ZAMĚSTNAVATELE podle § 7a stojí v sekvenci
@@ -2153,6 +2204,252 @@ final class JmhzScenario1XmlSerializer
         }
 
         return $node;
+    }
+
+    /**
+     * Trvání pojištění v měsíci (10354, 10355), společné všem formulářům
+     * s blokem `pojisteni` kromě odloženého příjmu.
+     *
+     * @param array<string,mixed> $employment
+     */
+    private function insuranceDuration(DOMDocument $dom, array $employment): DOMElement
+    {
+        $eldp = $this->object($employment['eldp'] ?? null);
+        $interval = $this->object($eldp['insurance_interval'] ?? null);
+        $duration = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:trvani');
+        $this->text(
+            $dom,
+            $duration,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:pojisteniOd',
+            $this->date($interval['insurance_from'] ?? null, '10354'),
+        );
+        $this->text(
+            $dom,
+            $duration,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:pojisteniDo',
+            $this->date($interval['insurance_to'] ?? null, '10355'),
+        );
+
+        return $duration;
+    }
+
+    /**
+     * Seznam ELDP sekcí vztahu (`eldpSeznam`). Vězeň má zúžený typ sekce
+     * (`eldpVezenType`), proto se vyloučené doby píší jiným rozpadem.
+     *
+     * @param array<string,mixed> $employment
+     */
+    private function eldpList(DOMDocument $dom, array $employment, bool $prisoner = false): DOMElement
+    {
+        $eldp = $this->object($employment['eldp'] ?? null);
+        $sections = $this->rows($eldp['eldp_sections'] ?? null);
+        if ($sections === []) {
+            $this->invalid(
+                'jmhz_xml_eldp_missing',
+                'Součást musí obsahovat alespoň jednu ELDP sekci.',
+            );
+        }
+        $list = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:eldpSeznam');
+        foreach ($sections as $section) {
+            $entry = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:eldp');
+            $code = $section['code'] ?? null;
+            if (is_string($code) && $code !== '') {
+                $this->text($dom, $entry, JmhzSchemaCatalog::NS_FORM, 'form:kod', $code);
+                $this->text(
+                    $dom,
+                    $entry,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:platnostOd',
+                    $this->date($section['valid_from'] ?? null, '10241'),
+                );
+                $this->text(
+                    $dom,
+                    $entry,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:platnostDo',
+                    $this->date($section['valid_to'] ?? null, '10242'),
+                );
+            }
+            $days = $this->int($section['insurance_days'] ?? null, '10356');
+            $this->text($dom, $entry, JmhzSchemaCatalog::NS_FORM, 'form:pocetDnu', (string) $days);
+            // 10240 je povinný právě když 10356 > 0; opačně by kód bez dnů
+            // vykázal neexistující dobu pojištění.
+            if ($days > 0 && !(is_string($code) && $code !== '')) {
+                $this->invalid(
+                    'jmhz_xml_eldp_code_required',
+                    'ELDP sekce s nenulovým počtem dnů musí mít kód ELDP.',
+                );
+            }
+            if (is_int($section['assessment_base_czk'] ?? null)) {
+                $this->text(
+                    $dom,
+                    $entry,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:vymerovaciZaklad',
+                    (string) $this->int($section['assessment_base_czk'], '10245'),
+                );
+            }
+            if ($prisoner) {
+                $this->appendPrisonerEldpExcludedDays($dom, $entry, $section, $code);
+            } else {
+                $this->appendEldpExcludedDays($dom, $entry, $section, $code);
+            }
+            $list->appendChild($entry);
+        }
+
+        return $list;
+    }
+
+    /**
+     * Vyloučené doby ELDP vězně (`vylouceneDnyVezenType`): úhrn 10357, DPN
+     * 10358, PPM 10359 a úhrn § 18 odst. 7 (10366) - bez ošetřování,
+     * otcovské, § 16 odst. 4 písm. j) a bez rozpadu § 18. Matice „1 až 9
+     * výkon trestu" je nevede, takže je formulář nemá kam zapsat; nenulová
+     * hodnota by se tiše ztratila, proto je to vada.
+     *
+     * @param array<string,mixed> $section
+     */
+    private function appendPrisonerEldpExcludedDays(
+        DOMDocument $dom,
+        DOMElement $entry,
+        array $section,
+        mixed $code,
+    ): void {
+        $total = $section['excluded_days_total'] ?? null;
+        $components = $this->object($section['excluded_days'] ?? null);
+        $section18 = $section['section18_days_total'] ?? null;
+        foreach (['osetrovaniClenaRodiny' => '10360', 'otcovska' => '10362', 'vyloucenePar16' => '10536'] as $key => $attributeId) {
+            if (($components[$key] ?? 0) !== 0) {
+                $this->invalid(
+                    'jmhz_xml_prisoner_excluded_days_unsupported',
+                    "Formulář vězně nemá kam zapsat vyloučené doby atributu {$attributeId}.",
+                );
+            }
+        }
+        $hasCode = is_string($code) && $code !== '';
+        $total = $total === null ? null : $this->int($total, '10357');
+        $section18 = $section18 === null ? null : $this->int($section18, '10366');
+        if (!$hasCode) {
+            if (($total ?? 0) !== 0) {
+                $this->invalid(
+                    'jmhz_xml_eldp_excluded_days_without_code',
+                    'Vyloučené doby nelze vykázat v ELDP sekci bez kódu ELDP.',
+                );
+            }
+            if (($section18 ?? 0) === 0) {
+                return;
+            }
+        }
+        if ($total === null && ($section18 ?? 0) === 0) {
+            return;
+        }
+        $block = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:vylouceneDny');
+        if ($hasCode && $total !== null) {
+            $sickness = $this->int($components['docasNeschopnost'] ?? 0, '10358');
+            $maternity = $this->int($components['penezitaPomocMaterstvi'] ?? 0, '10359');
+            if ($sickness + $maternity !== $total) {
+                $this->invalid(
+                    'jmhz_xml_eldp_excluded_days_sum_mismatch',
+                    'Úhrn vyloučených dob neodpovídá rozpadu podle § 16 odst. 4'
+                        . ' zákona č. 155/1995 Sb.',
+                );
+            }
+            $this->text($dom, $block, JmhzSchemaCatalog::NS_FORM, 'form:vylouceneDobyCelkem', (string) $total);
+            if ($total > 0) {
+                $this->text($dom, $block, JmhzSchemaCatalog::NS_FORM, 'form:docasNeschopnost', (string) $sickness);
+                $this->text($dom, $block, JmhzSchemaCatalog::NS_FORM, 'form:penezitaPomocMaterstvi', (string) $maternity);
+            }
+        }
+        if ($section18 !== null) {
+            $this->text($dom, $block, JmhzSchemaCatalog::NS_FORM, 'form:vyloucenePar18', (string) $section18);
+        }
+        $entry->appendChild($block);
+    }
+
+    /**
+     * Sleva na pojistném ZAMĚSTNANCE — 10490 (pracující důchodci, § 7d
+     * ZPSZ) a 10546 (ovocnářství a pěstování zeleniny). Matice povinností
+     * 1.4.0.2 vede oba příznaky jako povinné jádro scénáře, ne jako údaj
+     * podmíněný interakcí, a `slevaZamestnanceType` je má oba v jednom
+     * bloku před slevou zaměstnavatele.
+     *
+     * 10490 = ANO a výši slevy 10491 nese jen vztah, kterému resolver
+     * slevu přiřadil
+     * ({@see JmhzScenario1DocumentResolver::employeeSocialDiscount()}):
+     * tentýž, který nese pojistné osoby. Ostatní vztahy vykazují NE.
+     * Pořadí prvků určuje `slevaZamestnanceType`: příznak, výše slevy,
+     * teprve potom příznak ovocnářů.
+     *
+     * Vykázat příznak je nutné i jako NE: kontrola 297 poměřuje počet
+     * zaměstnanců v `pvpoj:slevyZamestnancu` s počtem vztahů, u nichž je
+     * 10490 = ANO, a kontrola 213 stejně tak úhrn vyměřovacích základů.
+     * Mlčení na formulářích při vyplněné pojistné části je proto rozpor
+     * uvnitř jednoho podání.
+     *
+     * 10546 zůstává NE: sezónní slevu běžný profil nepodporuje a příprava
+     * ji potvrdit nedovolí. ANO u obou na jednom formuláři zakazuje
+     * kontrola 275 a resolver takovou kombinaci zablokuje dřív.
+     *
+     * @param array<string,mixed> $employment
+     */
+    private function employeeDiscounts(DOMDocument $dom, array $employment): DOMElement
+    {
+        $reportsSocial = ($employment['reports_social_contributions'] ?? true) === true;
+        $employeeDiscount = $this->object($employment['employee_social_discount'] ?? null);
+        if ($employeeDiscount !== [] && !$reportsSocial) {
+            $this->invalid(
+                'jmhz_xml_employee_social_discount_misplaced',
+                'Slevu na pojistném zaměstnance smí nést jen formulář,'
+                    . ' který vykazuje pojistné osoby.',
+            );
+        }
+        $employeeDiscounts = $this->node(
+            $dom,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:slevaZamestnance',
+        );
+        $this->text(
+            $dom,
+            $employeeDiscounts,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:slevaZamestnanceEvidovana',
+            $employeeDiscount === [] ? 'false' : 'true',
+        );
+        if ($employeeDiscount !== []) {
+            $discountCzk = $this->int($employeeDiscount['amount_czk'] ?? null, '10491');
+            // 10490 = ANO jen při nenulové slevě; nula s příznakem by tvrdila
+            // uplatněnou slevu, která se neuplatnila.
+            if ($discountCzk === 0) {
+                $this->invalid(
+                    'jmhz_xml_employee_social_discount_zero',
+                    'Sleva na pojistném zaměstnance s příznakem ANO nesmí být nulová.',
+                );
+            }
+            $amountNode = $this->node(
+                $dom,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:slevaZamestnance',
+            );
+            $this->text(
+                $dom,
+                $amountNode,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:vyseSlevy',
+                (string) $discountCzk,
+            );
+            $employeeDiscounts->appendChild($amountNode);
+        }
+        $this->text(
+            $dom,
+            $employeeDiscounts,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:slevaZamestnanceOvoZelEvidovana',
+            'false',
+        );
+
+        return $employeeDiscounts;
     }
 
     /** @param array<string,mixed> $employment */
@@ -2344,6 +2641,21 @@ final class JmhzScenario1XmlSerializer
             );
         }
         $node->appendChild($days);
+        $node->appendChild($this->workedHours($dom, $employment, $values));
+        $this->appendUnworkedHoursAndObstacles($dom, $node, $values);
+
+        return $node;
+    }
+
+    /**
+     * Odpracované hodiny (10268) s rozpadem přesčasu a rizikové práce
+     * (`odpracovaneHodinyType`), společné formuláři bez příznaku i vězni.
+     *
+     * @param array<string,mixed> $employment
+     * @param array<string,mixed> $values
+     */
+    private function workedHours(DOMDocument $dom, array $employment, array $values): DOMElement
+    {
         $hours = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:odpracovaneHodiny');
         $this->text(
             $dom,
@@ -2421,8 +2733,18 @@ final class JmhzScenario1XmlSerializer
             }
             $hours->appendChild($breakdown);
         }
-        $node->appendChild($hours);
 
+        return $hours;
+    }
+
+    /**
+     * Neodpracované hodiny (10275–10280) a překážky v práci (10471, 10472)
+     * formuláře bez příznaku.
+     *
+     * @param array<string,mixed> $values
+     */
+    private function appendUnworkedHoursAndObstacles(DOMDocument $dom, DOMElement $node, array $values): void
+    {
         $unworked = [
             'form:hodinyNeodpracCelkem' => ['unworked_total_millihours', '10275'],
             'form:hodinyNeodpracNahrada' => ['unworked_paid_millihours', '10276'],
@@ -2475,8 +2797,6 @@ final class JmhzScenario1XmlSerializer
             }
             $node->appendChild($block);
         }
-
-        return $node;
     }
 
     /**

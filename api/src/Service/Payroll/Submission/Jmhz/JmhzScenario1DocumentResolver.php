@@ -7,7 +7,6 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 use MyInvoice\Service\Payroll\Absence\PayrollSicknessInputMaterializer;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
 use MyInvoice\Service\Payroll\IncomeTax\TaxRegime;
-use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
 use MyInvoice\Service\Payroll\Submission\CsszEmployerVariableSymbol;
 
@@ -150,7 +149,7 @@ final class JmhzScenario1DocumentResolver
                 || !array_is_list($scenarioSet)
                 || $scenarioSet === []
                 || array_values(array_unique($scenarioSet)) !== $scenarioSet
-                || array_diff($scenarioSet, ['scenario_1', 'scenario_3', 'scenario_8']) !== []
+                || array_diff($scenarioSet, JmhzScenarioFormProfile::ordinaryDocumentScenarios()) !== []
             ) {
                 return new JmhzScenario1Resolution(null, [
                     $this->blocker(
@@ -160,10 +159,12 @@ final class JmhzScenario1DocumentResolver
                     ),
                 ]);
             }
-            // Odložený příjem (scénář 8) je jen jiný druh formuláře téhož
-            // řádného podání, dokument zůstává běžného profilu.
-            $scope['scenario_key'] = count($scenarioSet) === 1 && $scenarioSet[0] !== 'scenario_8'
-                ? $scenarioSet[0]
+            // Odložený příjem (scénář 8) i formuláře vězně, jiného příjmu
+            // a pronájmu síly (4 až 6) jsou jen jiné druhy formuláře téhož
+            // řádného podání, dokument zůstává běžného profilu. Formulář
+            // vybírá selektor každé součásti, ne rozsah dokumentu.
+            $scope['scenario_key'] = $scenarioSet === ['scenario_3']
+                ? 'scenario_3'
                 : 'scenario_1';
         } elseif (($scope['scenario_key'] ?? null) !== 'scenario_1') {
             return new JmhzScenario1Resolution(null, [
@@ -383,18 +384,18 @@ final class JmhzScenario1DocumentResolver
                 $employmentSource = $this->object($employment['employment'] ?? null);
                 $selector = $this->object($employment['scenario_resolution'] ?? null);
                 $scenarioKey = $selector['scenario_key'] ?? null;
+                $relationType = $employmentSource['relation_type'] ?? null;
                 if (!is_string($scenarioKey)
                     || !in_array($scenarioKey, $scenarioSet, true)
-                    || ($scenarioKey === 'scenario_3'
-                        && (!in_array(
-                            $employmentSource['relation_type'] ?? null,
-                            ['partner_dependent', 'statutory_body'],
-                            true,
-                        )
-                            || !PayrollEmploymentJmhzActivityFamily::isCorporateBodyActivity(
-                                $selector['activity_code'] ?? null,
-                            )
-                            || ($selector['relationship_detail_code'] ?? null) !== '1'))
+                    || ($scenarioKey !== 'scenario_8'
+                        && !JmhzScenarioFormProfile::preparable(
+                            $scenarioKey,
+                            is_string($selector['activity_code'] ?? null) ? $selector['activity_code'] : null,
+                            is_string($selector['relationship_detail_code'] ?? null)
+                                ? $selector['relationship_detail_code']
+                                : null,
+                            is_string($relationType) ? $relationType : '',
+                        ))
                 ) {
                     $blockers[] = $this->blocker(
                         'jmhz_scenario_profile_unsupported',
