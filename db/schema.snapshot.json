@@ -946,7 +946,7 @@
         "1962_payroll_personnel_file.sql",
         "1963_supplier_auto_send_reminders_default_off.sql",
         "1964_supplier_tax_representation_code.sql",
-        "1965_client_email_subject_attachment_name.sql"
+        "1981_client_email_subject_attachment_name.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
