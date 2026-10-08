@@ -1241,7 +1241,7 @@
     "bank_rule_templates": "Šablony bank. pravidel",
     "users": "Uživatelé",
     "roles": "Role a oprávnění",
-    "emails": "E-maily",
+    "emails": "E-maily a certifikáty",
     "log": "Log",
     "cron_jobs": "Plánované úlohy",
     "data_exchange": "Export / Import",
@@ -7680,7 +7680,7 @@
       },
       "signing": {
         "title": "Podpisový certifikát ČSSZ",
-        "description": "Vyberte, kterým z uložených certifikátů se podepisují mzdová podání této firmy. Certifikáty se sem nenahrávají. Trezor je v aplikaci jeden: certifikát nahrajete v Systém → Elektronické podpisy → Certifikáty a pro firmu ho povolíte v Daně → EPO podání a archív → Certifikáty EPO.",
+        "description": "Vyberte, kterým z uložených certifikátů se podepisují mzdová podání této firmy. Certifikáty se sem nenahrávají. Trezor je v aplikaci jeden: certifikát nahrajete v Systém → E-maily a certifikáty → Elektronické podpisy a pro firmu ho povolíte v Daně → EPO podání a archív → Certifikáty EPO.",
         "load_failed": "Nastavení podpisového certifikátu se nepodařilo načíst.",
         "state_unknown": "Dokud se načtení nepovede, systém neví, jestli je certifikát zvolený — neberte prosím prázdnou obrazovku jako důkaz, že nastavený není.",
         "storage_unavailable": "Úložiště volby certifikátu zatím není k dispozici — neproběhla migrace databáze. Volbu teď uložit nelze.",
@@ -7703,7 +7703,7 @@
         },
         "picker": {
           "title": "Volba certifikátu",
-          "description": "Nabídka obsahuje certifikáty z trezoru, které máte k dispozici. Nový certifikát se nahrává v Systém → Elektronické podpisy → Certifikáty a pro tuhle firmu se povoluje v Daně → EPO podání a archív → Certifikáty EPO.",
+          "description": "Nabídka obsahuje certifikáty z trezoru, které máte k dispozici. Nový certifikát se nahrává v Systém → E-maily a certifikáty → Elektronické podpisy a pro tuhle firmu se povoluje v Daně → EPO podání a archív → Certifikáty EPO.",
           "label": "Certifikát z trezoru",
           "placeholder": "Vyberte certifikát",
           "no_results": "Žádný odpovídající certifikát",
@@ -7713,7 +7713,7 @@
           "option_not_enabled": "Pro tuhle firmu není povolený"
         },
         "vault": {
-          "empty": "V trezoru nemáte žádný certifikát. Nahrává se na jednom místě pro celou aplikaci, v Systém → Elektronické podpisy → Certifikáty.",
+          "empty": "V trezoru nemáte žádný certifikát. Nahrává se na jednom místě pro celou aplikaci, v Systém → E-maily a certifikáty → Elektronické podpisy.",
           "open": "Otevřít Elektronické podpisy"
         },
         "certificate": {
@@ -24811,7 +24811,7 @@
       "upload_certificate": "Uložit nový P12/PFX",
       "upload_certificate_hint": "Použijte osobní kvalifikovaný certifikát pro elektronický podpis, nikoli běžný SSL nebo komerční certifikát.",
       "upload_moved_title": "Nahrání certifikátu",
-      "upload_moved_hint": "Certifikáty se nahrávají na jednom místě — Systém → Elektronické podpisy → Certifikáty. Odtud si je bere EPO, podpis PDF, S/MIME i mzdová podání. Tady se jen vybírá, který z nich smí tahle firma použít.",
+      "upload_moved_hint": "Certifikáty se nahrávají na jednom místě — Systém → E-maily a certifikáty → Elektronické podpisy. Odtud si je bere EPO, podpis PDF, S/MIME i mzdová podání. Tady se jen vybírá, který z nich smí tahle firma použít.",
       "upload_moved_link": "Přejít na Certifikáty",
       "certificate_file": "Soubor P12/PFX",
       "choose_certificate_file": "Vybrat P12/PFX",
@@ -28472,14 +28472,14 @@
       "credentialDeleted": "Přístup k datové schránce byl smazán.",
       "credentialDeleteFailed": "Přístup k datové schránce se nepodařilo smazat.",
       "certificateSource": "Odkud vzít certifikát",
-      "certificateSourceHint": "Certifikáty má aplikace na jednom místě (Systém → Elektronické podpisy). Vybrat z trezoru znamená, že se stejný klíč nenahrává podruhé a jeho platnost hlídáte jen na jednom místě.",
+      "certificateSourceHint": "Certifikáty má aplikace na jednom místě (Systém → E-maily a certifikáty → Elektronické podpisy). Vybrat z trezoru znamená, že se stejný klíč nenahrává podruhé a jeho platnost hlídáte jen na jednom místě.",
       "certificateFromVault": "Vybrat ze sdíleného trezoru",
       "certificateFromFile": "Nahrát soubor",
       "sharedCertificate": "Certifikát ze sdíleného trezoru",
       "sharedCertificatePlaceholder": "— vyberte certifikát —",
       "sharedCertificateOption": "{label} · platí do {validTo}",
       "sharedCertificateExpiredOption": "{label} · PROŠLÝ {validTo}",
-      "sharedCertificateEmpty": "V trezoru zatím není žádný certifikát povolený pro tuto firmu. Nahrajte ho v Systém → Elektronické podpisy, nebo použijte nahrání souboru.",
+      "sharedCertificateEmpty": "V trezoru zatím není žádný certifikát povolený pro tuto firmu. Nahrajte ho v Systém → E-maily a certifikáty → Elektronické podpisy, nebo použijte nahrání souboru.",
       "sharedCertificateSubject": "Subjekt",
       "sharedCertificateFingerprint": "Otisk",
       "sharedCertificateExpired": "platnost vypršela",

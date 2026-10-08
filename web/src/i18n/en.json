@@ -1241,7 +1241,7 @@
     "bank_rule_templates": "Bank rule templates",
     "users": "Users",
     "roles": "Roles & permissions",
-    "emails": "Emails",
+    "emails": "Emails & certificates",
     "log": "Activity log",
     "cron_jobs": "Scheduled jobs",
     "data_exchange": "Export / Import",
@@ -7680,7 +7680,7 @@
       },
       "signing": {
         "title": "ČSSZ signing certificate",
-        "description": "Choose which stored certificate signs this company's payroll submissions. Certificates are not uploaded here. The application has a single vault: upload the certificate under System → Electronic signatures → Certificates and enable it for the company under Taxes → EPO filing & archive → EPO certificates.",
+        "description": "Choose which stored certificate signs this company's payroll submissions. Certificates are not uploaded here. The application has a single vault: upload the certificate under System → Emails & certificates → Electronic signatures and enable it for the company under Taxes → EPO filing & archive → EPO certificates.",
         "load_failed": "The signing certificate settings could not be loaded.",
         "state_unknown": "Until the request succeeds the system does not know whether a certificate is selected — please do not read this empty screen as proof that none is configured.",
         "storage_unavailable": "The storage for the certificate choice is not available yet — the database migration has not run. The choice cannot be saved right now.",
@@ -7703,7 +7703,7 @@
         },
         "picker": {
           "title": "Certificate choice",
-          "description": "The list contains the vault certificates available to you. A new certificate is uploaded under System → Electronic signatures → Certificates and enabled for this company under Taxes → EPO filing & archive → EPO certificates.",
+          "description": "The list contains the vault certificates available to you. A new certificate is uploaded under System → Emails & certificates → Electronic signatures and enabled for this company under Taxes → EPO filing & archive → EPO certificates.",
           "label": "Certificate from the vault",
           "placeholder": "Select a certificate",
           "no_results": "No matching certificate",
@@ -7713,7 +7713,7 @@
           "option_not_enabled": "Not enabled for this company"
         },
         "vault": {
-          "empty": "Your vault contains no certificate. Certificates are uploaded in one place for the whole application, under System → Electronic signatures → Certificates.",
+          "empty": "Your vault contains no certificate. Certificates are uploaded in one place for the whole application, under System → Emails & certificates → Electronic signatures.",
           "open": "Open Electronic signatures"
         },
         "certificate": {
@@ -24811,7 +24811,7 @@
       "upload_certificate": "Store a new P12/PFX",
       "upload_certificate_hint": "Use a personal qualified electronic-signature certificate, not an ordinary SSL or commercial certificate.",
       "upload_moved_title": "Uploading a certificate",
-      "upload_moved_hint": "Certificates are uploaded in one place — System → Electronic signatures → Certificates. EPO, PDF signing, S/MIME and payroll submissions all read them from there. Here you only pick which of them this company may use.",
+      "upload_moved_hint": "Certificates are uploaded in one place — System → Emails & certificates → Electronic signatures. EPO, PDF signing, S/MIME and payroll submissions all read them from there. Here you only pick which of them this company may use.",
       "upload_moved_link": "Go to Certificates",
       "certificate_file": "P12/PFX file",
       "choose_certificate_file": "Choose P12/PFX",
@@ -28472,14 +28472,14 @@
       "credentialDeleted": "The data box access was deleted.",
       "credentialDeleteFailed": "The data box access could not be deleted.",
       "certificateSource": "Where to take the certificate from",
-      "certificateSourceHint": "Certificates live in one place (System → Electronic signatures). Picking from the vault means the same key is not uploaded twice and its expiry is tracked in a single place.",
+      "certificateSourceHint": "Certificates live in one place (System → Emails & certificates → Electronic signatures). Picking from the vault means the same key is not uploaded twice and its expiry is tracked in a single place.",
       "certificateFromVault": "Pick from the shared vault",
       "certificateFromFile": "Upload a file",
       "sharedCertificate": "Certificate from the shared vault",
       "sharedCertificatePlaceholder": "— select a certificate —",
       "sharedCertificateOption": "{label} · valid until {validTo}",
       "sharedCertificateExpiredOption": "{label} · EXPIRED {validTo}",
-      "sharedCertificateEmpty": "No certificate in the vault is enabled for this company yet. Upload one in System → Electronic signatures, or upload a file here.",
+      "sharedCertificateEmpty": "No certificate in the vault is enabled for this company yet. Upload one in System → Emails & certificates → Electronic signatures, or upload a file here.",
       "sharedCertificateSubject": "Subject",
       "sharedCertificateFingerprint": "Fingerprint",
       "sharedCertificateExpired": "expired",
