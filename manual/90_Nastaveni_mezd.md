@@ -102,9 +102,10 @@ a aplikace hlásí „Nová účinná registrace ČSSZ byla uložena."
 
 > [!WARNING]
 > Desetimístný variabilní symbol ČSSZ musí projít kontrolní číslicí (Luhnův
-> součet) a začínat kódem okresní správy sociálního zabezpečení. Uložení
-> v nastavení hlídá jen deset číslic. Překlep proto odhalí příprava přihlášky
-> nebo změny VS hláškou „Variabilní symbol zaměstnavatele není platný"; ČSSZ by
+> součet) a začínat kódem okresní správy sociálního zabezpečení. Aplikace to
+> ověří už při uložení nového nebo změněného symbolu a chybu ukáže u pole.
+> Dříve uložený neplatný symbol (například zástupný z převodu) uložení jiných
+> údajů nezablokuje, ale zastaví přípravu přihlášky i měsíčního hlášení; ČSSZ by
 > takové podání odmítla. Symbol opravte postupem v
 > [§ 90.14.1](#90141-mzdove-uctarny-a-registrace-u-cssz).
 
@@ -265,7 +266,7 @@ Potřebujete oprávnění spravovat zaměstnance i pracovní vztahy.
 | „Kód správy sociálního zabezpečení musí být trojmístné číslo" | Kód není trojmístný, nebo není v číselníku okresních správ | Opište kód z potvrzení o registraci, nebo pole nechte prázdné. |
 | Tlačítko **Uložit** v dialogu registrace je neaktivní | Variabilní symbol nemá přesně deset číslic | Opište celý desetimístný symbol. |
 | „Datum účinnosti musí navazovat za poslední uloženou verzi." | Nová verze začíná dřív než poslední | Nejnovější záznam **Vzít zpět** a zadejte znovu. |
-| Příprava přihlášky hlásí „Variabilní symbol zaměstnavatele není platný" | Nesouhlasí kontrolní číslice, nebo symbol nezačíná kódem okresní správy | Opravte symbol v **Spravovat účinné registrace** podle oznámení ČSSZ ([§ 90.14.1](#90141-mzdove-uctarny-a-registrace-u-cssz)). |
+| Uložení nebo příprava přihlášky či hlášení JMHZ hlásí, že variabilní symbol ČSSZ není platný | Nesouhlasí kontrolní číslice, nebo symbol nezačíná kódem okresní správy | Opravte symbol v **Spravovat účinné registrace** podle oznámení ČSSZ ([§ 90.14.1](#90141-mzdove-uctarny-a-registrace-u-cssz)). |
 | Mzdový běh za dřívější měsíce neprojde kvůli registraci účtárny | Historie registrace začíná později, nebo chybí | Vezměte poslední verzi zpět a zadejte ji se skutečným datem registrace. |
 | Testovací podání ČSSZ hlásí chybějící pověření nebo certifikát | Odešlo pod ostrým symbolem | Vyplňte **Testovací VS ČSSZ**. |
 | „Pro tuto instituci už ve zvoleném období existuje účet." | Překrývající se období účtů téže instituce a měny | Starému účtu nastavte **Platnost do**. |
@@ -304,7 +305,8 @@ kódem okresní správy z číselníku okresů ČSSZ. Kratší, dříve přiděl
 kontrolu součtu ani okresu nemají. Aplikace tuto kontrolu provádí při přípravě
 přihlášek PREZEC a REGZEC a při změně variabilního symbolu (A5); hláška řekne,
 zda nesouhlasí kontrolní číslice, nebo první tři číslice nejsou kódem okresu.
-Dialog v nastavení hlídá jen délku deseti číslic.
+Stejnou kontrolu dělá i uložení nového nebo změněného symbolu (ostrého
+i testovacího) a příprava měsíčního hlášení JMHZ.
 
 **Testovací VS ČSSZ.** Testovací prostředí ČSSZ má vlastní přidělený symbol
 a podání pod cizím symbolem zamítne. Odmítnutí přitom hlásí chybějící pověření

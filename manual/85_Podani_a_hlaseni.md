@@ -996,11 +996,20 @@ měsíční hlášení zaměstnavatele ČSSZ a součinnost exekutorům. **Daňov
 jdou přes EPO**, ne datovkou; podání odeslané datovkou nedostane potvrzení
 s podacím číslem, jen dodejku.
 
-Vedle brány umí MyÚčto odeslat datovou zprávu i přímo, ale výhradně v **živé
-relaci, kterou uživatel právě sám schválil** Mobilním klíčem eGovernmentu
-nebo SMS kódem. Systémový certifikát firmy ani uložené heslo odesílání
-neotevírají a vypršelá relace se sama neobnovuje. Podrobnosti a chování při
-chybě popisuje kapitola
+Vedle brány umí MyÚčto odeslat datovou zprávu i přímo. U připraveného nebo
+neúspěšného podání (když není aktivní odesílací brána) nabízí tři cesty:
+
+- **Odeslat Mobilním klíčem**: odeslání potvrdíte v aplikaci Mobilní klíč
+  eGovernmentu,
+- **Odeslat jménem a heslem**: heslo k datové schránce zadáte jen pro toto
+  odeslání a aplikace ho neukládá,
+- **Odeslat certifikátem**: jen se systémovým certifikátem firmy uloženým na
+  záložce **Přístup**, vždy s výslovným potvrzením, protože za certifikátem
+  nestojí člověk.
+
+Každé odeslání spouští uživatel. Aplikace sama, na pozadí ani z uloženého
+hesla nic neodešle a vypršelá relace se sama neobnovuje. Podrobnosti
+a chování při chybě popisuje kapitola
 [Datová schránka](97_Datova_schranka.md#97102-prime-odeslani-z-relace).
 
 **VREP ČSSZ.** Alternativou je podporovaný profil VREP pro ČSSZ. Přihlašovací
@@ -2313,18 +2322,19 @@ Formát připravené přílohy se řídí pojišťovnou a obdobím:
 <!-- cols: 12 28 60 -->
 | Kód | Pojišťovna | Formát připravený pro ISDS |
 |---|---|---|
-| 111 | VZP ČR | strojově čitelné PDF |
-| 201 | VoZP ČR | strojově čitelné PDF |
+| 111 | VZP ČR | strojově čitelné PDF do 31. 12. 2026, od 1. 1. 2027 jednotné XML |
+| 201 | VoZP ČR | strojově čitelné PDF do 31. 12. 2026, od 1. 1. 2027 jednotné XML |
 | 205 | ČPZP | XML podle zveřejněného schématu |
 | 207 | OZP | XML podle zveřejněného schématu |
-| 209 | ZPŠ | strojově čitelné PDF |
+| 209 | ZPŠ | strojově čitelné PDF do 31. 12. 2026, od 1. 1. 2027 jednotné XML |
 | 211 | ZP MV ČR | strojově čitelné PDF; nový XML/B2B kanál je oddělený |
 | 213 | RBP | XML podle zveřejněného schématu |
 
 ZP MV ČR plánuje nový XML/B2B kanál od 1. 10. 2026, ale pro ISDS výslovně
 zůstává podporované strojově čitelné PDF i od roku 2027; MyÚčto proto ISDS
 automaticky na XML nepřepíná. RBP připouští XML i vytěžitelné PDF a MyÚčto
-volí XML. U VZP a VoZP je XDP šablona pomůcka pro hromadné vyplnění PDF,
+volí XML. U VZP, VoZP a ZPŠ rozhoduje den přípravy přílohy, ne vykazovaný
+měsíc: přehled připravený od 1. 1. 2027 (i za prosinec 2026) dostane XML. U VZP a VoZP je XDP šablona pomůcka pro hromadné vyplnění PDF,
 nikoli soubor, který by se přikládal k datové zprávě. XSD se rovněž
 neodesílá: slouží jen jako schéma, proti kterému aplikace kontroluje XML.
 Tato matice popisuje formát zvolený aplikací pro ISDS, nikoli neveřejná
