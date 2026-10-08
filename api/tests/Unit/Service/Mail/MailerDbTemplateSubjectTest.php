@@ -101,19 +101,25 @@ final class MailerDbTemplateSubjectTest extends TestCase
     }
 
     /**
-     * Bez šablony z administrace builder `subject` nastavuje vždy (i z formátu
-     * klienta) — jednorázový předmět ho přesto musí přebít. Bere se doslova, jako
-     * dosud u e-mailů bez `subject` ve vars (měsíční výkaz).
+     * Bez šablony z administrace má předmět z vars přednost před jednorázovým
+     * předmětem stejně jako před #277. API/MCP volající, kteří `subject_override`
+     * posílají, nesmí dostat jiný předmět jen proto, že přibyl formát klienta.
      */
-    public function testJednorazovyPredmetVyhrajeIBezSablonyZAdministrace(): void
+    public function testBezSablonyZAdministraceJednorazovyPredmetNemeniPredmetFaktury(): void
     {
-        $transport = $this->sendInvoiceMail(
+        $default = $this->sendInvoiceMail(
+            dbSubject: null,
+            vars: ['subject' => 'Faktura 2605001 — Dodavatel', 'client_subject' => null],
+            subjectOverride: 'Ručně {{ invoice.varsymbol }}',
+        );
+        $client = $this->sendInvoiceMail(
             dbSubject: null,
             vars: ['subject' => 'Klientský', 'client_subject' => 'Klientský'],
-            subjectOverride: 'Ručně {{ invoice.varsymbol }} & {% x',
+            subjectOverride: 'Ručně {{ invoice.varsymbol }}',
         );
 
-        self::assertSame('Ručně {{ invoice.varsymbol }} & {% x', $transport->message->getSubject());
+        self::assertSame('Faktura 2605001 — Dodavatel', $default->message->getSubject());
+        self::assertSame('Klientský', $client->message->getSubject());
     }
 
     /** E-mail bez `subject` ve vars (měsíční výkaz) dostane jednorázový předmět doslova. */

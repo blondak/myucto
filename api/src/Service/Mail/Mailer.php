@@ -316,14 +316,11 @@ final class Mailer
                 $htmlTemplate = "{$code}.cs.html.twig";
                 $textTemplate = "{$code}.cs.txt.twig";
             }
-            // Jednorázový předmět vyhrává i bez šablony z administrace — builder faktury
-            // `subject` nastavuje vždy, takže ho dřív tiše přebil. Bere se doslova jako
-            // dosud u e-mailů bez `subject` ve vars (měsíční výkaz): Twig by u nich
-            // nově rozbil předmět se složenou závorkou.
-            if ($subjectOverride !== null) {
-                $vars['subject'] = $subjectOverride;
-            } elseif (!isset($vars['subject'])) {
-                $vars['subject'] = $this->defaultSubject($code, $locale);
+            // Předmět z vars (faktura: předmět klienta nebo výchozí) má přednost před
+            // jednorázovým předmětem stejně jako dřív. Změna by přepsala předmět
+            // e-mailů API/MCP volajícím, kteří `subject_override` posílají už dnes.
+            if (!isset($vars['subject'])) {
+                $vars['subject'] = $subjectOverride ?? $this->defaultSubject($code, $locale);
             }
             $html = $twig->render($htmlTemplate, $vars);
             $text = $twig->render($textTemplate, $vars);

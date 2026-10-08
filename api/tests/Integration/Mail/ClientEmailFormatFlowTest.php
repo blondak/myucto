@@ -51,7 +51,7 @@ final class ClientEmailFormatFlowTest extends TestCase
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }
         if (!$this->db->hasColumn('clients', 'email_subject_format')) {
-            $this->markTestSkipped('Migrace 1965 neproběhla.');
+            self::fail('Migrace 1981 neproběhla.');
         }
 
         $pdo = $this->db->pdo();
@@ -133,6 +133,43 @@ final class ClientEmailFormatFlowTest extends TestCase
             'Faktura-2099277.pdf',
             $this->vars->pdfAttachment($invoice, '/data/storage/invoices/sup-1/2099-10/Faktura-2099277.pdf')['name'],
         );
+    }
+
+    /**
+     * Bez formátu u klienta musí být předmět i název přílohy bajtově stejné jako
+     * před #277, pro všechny druhy dokladů, oba jazyky i testovací odeslání.
+     */
+    public function testBezFormatuJePredmetINazevPrilohyBajtoveJakoDriv(): void
+    {
+        $invoice = $this->issuedInvoice($this->client([]));
+        $labels = [
+            'invoice'          => ['cs' => 'Faktura', 'en' => 'Invoice'],
+            'proforma'         => ['cs' => 'Zálohová faktura', 'en' => 'Proforma invoice'],
+            'credit_note'      => ['cs' => 'Opravný daňový doklad', 'en' => 'Credit note'],
+            'tax_document'     => ['cs' => 'Faktura', 'en' => 'Invoice'],
+            'payment_calendar' => ['cs' => 'Faktura', 'en' => 'Invoice'],
+        ];
+        foreach ($labels as $type => $byLocale) {
+            foreach ($byLocale as $locale => $label) {
+                $doc = ['invoice_type' => $type, 'language' => $locale] + $invoice;
+                foreach ([false, true] as $isTest) {
+                    $vars = $this->vars->build($doc, $isTest, $locale);
+                    self::assertNull($vars['client_subject'], "$type/$locale");
+                    self::assertSame(
+                        ($isTest ? '[TEST] ' : '') . "{$label} 2099277 — Dodavatel Test s.r.o.",
+                        $vars['subject'],
+                        "$type/$locale",
+                    );
+                }
+                foreach (['Faktura-2099277.pdf', 'Proforma-2099277.pdf', 'Dobropis-2099277.pdf'] as $file) {
+                    self::assertSame(
+                        ['path' => "/data/storage/invoices/sup-1/2099-10/{$file}", 'name' => $file, 'contentType' => 'application/pdf'],
+                        $this->vars->pdfAttachment($doc, "/data/storage/invoices/sup-1/2099-10/{$file}"),
+                        "$type/$locale",
+                    );
+                }
+            }
+        }
     }
 
     public function testPodekovaniZaUhraduNepouzijePredmetFaktury(): void

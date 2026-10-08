@@ -2355,7 +2355,7 @@ paths:
                   items: { type: string, format: email }
                 subject_override:
                   type: string
-                  description: Předmět jen pro toto odeslání; má přednost před předmětem klienta (`email_subject_format`) i šablony `invoice_send`. S šablonou upravenou v administraci se vykreslí jako její Twig předmět, jinak se použije doslova. Prázdný řetězec = nezadaný.
+                  description: Předmět jen pro toto odeslání. Uplatní se jen se šablonou `invoice_send` upravenou v administraci, kde se vykreslí jako její Twig předmět a má přednost i před předmětem klienta (`email_subject_format`). Bez upravené šablony platí předmět klienta, případně výchozí předmět. Prázdný řetězec = nezadaný.
                 note:
                   type: string
                   maxLength: 5000
