@@ -34,7 +34,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   POST /api/admin/imports/pohoda/uploads/{token}/chunks         multipart `chunk` + `offset`
  *   POST /api/admin/imports/pohoda/uploads/{token}/complete
  *   GET  /api/admin/imports/pohoda/uploads/{token}
- *   POST /api/admin/imports/pohoda/uploads/{token}/start          {mode, years: int[] (nebo year), kind: accounting|payroll}
+ *   POST /api/admin/imports/pohoda/uploads/{token}/start          {mode, years: int[] (nebo year), kind: accounting|payroll,
+ *                                                                  stock?: {warehouses: {kód skladu: goods|material|skip}}}
  *   GET  /api/admin/imports/pohoda/runs
  *   GET  /api/admin/imports/pohoda/runs/{id}
  *   DELETE /api/admin/imports/pohoda/runs/{id}                    jen zkouška nanečisto
@@ -186,6 +187,11 @@ final class PohodaMigrationAction extends AbstractMigrationAction
             if ((bool) ($agenda['has_accounting'] ?? true) && !is_array($agenda['counts']['later_years'] ?? null)) {
                 return false;
             }
+            // Přehled skladu (sklady k volbě v průvodci) nese jen přehled nahraný po jeho zavedení.
+            if (!array_key_exists('stock', $agenda) && in_array(PohodaExport::FILES['stock'], array_map(
+                static fn (array $f): string => ($f['state'] ?? 'missing') !== 'missing' ? (string) ($f['file'] ?? '') : '', (array) ($agenda['files'] ?? [])), true)) {
+                return false;
+            }
         }
         return true;
     }
@@ -273,6 +279,10 @@ final class PohodaMigrationAction extends AbstractMigrationAction
         if ($startDecision !== null && !in_array($startDecision, [PohodaPayrollImporter::START_ADVANCE, PohodaPayrollImporter::START_KEEP], true)) {
             return Json::error($response, 'invalid_start_decision', 'Neznámé rozhodnutí k začátku vedení mezd.', 422);
         }
+        $stock = $kind === 'accounting' ? self::stockChoice($body['stock'] ?? null) : null;
+        if ($stock === false) {
+            return Json::error($response, 'invalid_stock', 'Volba převodu skladu je neplatná.', 422);
+        }
         if ($kind === 'payroll') {
             // Mzdy zakládají osoby, vztahy, vstupy a profil importu - i zkouška nanečisto jde celou cestou.
             $missing = self::missingPayrollRights($request);
@@ -325,6 +335,8 @@ final class PohodaMigrationAction extends AbstractMigrationAction
             'start_decision' => $startDecision,
             // Ostrý převod přijme rozdíly, na kterých selhala zkouška nanečisto.
             'accept_differences' => $acceptDifferences,
+            // Sklad z nejnovější agendy: volba po skladech pro karty bez druhu zásoby, `null` = nepřevádí se.
+            'stock' => $stock,
         ], $userId);
         if ($jobId instanceof Response) {
             return $jobId;
@@ -334,6 +346,33 @@ final class PohodaMigrationAction extends AbstractMigrationAction
             $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'));
 
         return Json::ok($response, ['job_id' => $jobId, 'status' => 'queued', 'mode' => $mode], 201);
+    }
+
+    /**
+     * Volba převodu skladu z těla požadavku: `null` = sklad se nepřevádí, `false` = neplatná.
+     *
+     * @return array{warehouses:array<string,string>}|null|false
+     */
+    public static function stockChoice(mixed $raw): array|null|false
+    {
+        if ($raw === null) {
+            return null;
+        }
+        if (!is_array($raw) || !is_array($raw['warehouses'] ?? null) || count($raw['warehouses']) > 500) {
+            return false;
+        }
+        $out = [];
+        foreach ($raw['warehouses'] as $code => $choice) {
+            if (!is_string($code) && !is_int($code)) {
+                return false;
+            }
+            $code = (string) $code;
+            if (mb_strlen($code) > 20 || !in_array($choice, ['goods', 'material', 'skip'], true)) {
+                return false;
+            }
+            $out[$code] = $choice;
+        }
+        return ['warehouses' => $out];
     }
 
     /** Soubory exportního nástroje, které si uživatel stáhne k POHODĚ. */

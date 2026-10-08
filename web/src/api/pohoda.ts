@@ -39,6 +39,18 @@ export interface PohodaPayrollSummary {
   last: string | null
 }
 
+/** Jak převést karty skladu POHODY bez druhu zásoby; `skip` = sklad se nepřevádí. */
+export type PohodaStockChoice = 'goods' | 'material' | 'skip'
+
+/** Sklad z datového souboru POHODY (`92_sklad.xml`): sklady s počty karet a navrženou volbou. */
+export interface PohodaStockSummary {
+  warehouses: { code: string; name: string; cards: number; stocked: number; without_kind: number; suggested: PohodaStockChoice }[]
+  cards: number
+  price_lists: number
+  /** Den, ke kterému se stav převede. */
+  date: string | null
+}
+
 export interface PohodaAgenda {
   ico: string
   year: number
@@ -51,6 +63,8 @@ export interface PohodaAgenda {
   has_accounting?: boolean
   has_payroll?: boolean
   payroll?: PohodaPayrollSummary | null
+  /** Chybí u přehledu nahraného před převodem skladu, `null` = export sklad nemá. */
+  stock?: PohodaStockSummary | null
 }
 
 /** Co se převádí: účetní rok, nebo mzdy (vlastní akce, i pro export jen se mzdami). */
@@ -161,6 +175,8 @@ export interface PohodaStartParams {
   start_decision?: 'advance' | 'keep'
   /** Ostrý převod přijme rozdíly, na kterých selhala zkouška nanečisto. */
   accept_differences?: boolean
+  /** Převod skladu z nejnovější agendy: volba po skladech (kód skladu => volba). Bez ní se sklad nepřevádí. */
+  stock?: { warehouses: Record<string, PohodaStockChoice> }
 }
 
 export interface PohodaToolFile {

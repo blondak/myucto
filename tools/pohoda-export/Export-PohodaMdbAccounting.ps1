@@ -145,14 +145,14 @@ if ($null -eq $connection) {
 }
 
 try {
-    # Majetek a mzdy čte Export-PohodaMdb.ps1 vlastním spojením, proto se účetní spojení
+    # Majetek, mzdy a sklad čte Export-PohodaMdb.ps1 vlastním spojením, proto se účetní spojení
     # před jeho spuštěním zavře.
     $null = Invoke-PohodaAccountingExport -Connection $connection -Vystup $Vystup -Ico $Ico `
         -Rok $(if ($yearWasSpecified) { $Rok } else { 0 }) -Potvrdit ($interactive -or $PotvrditMetadata) -BezZip $BezZip `
         -Doplnky {
             param($agendaDir)
             $connection.Close()
-            & $companion -Mdb $mdbPath -Vystup $agendaDir -Skupiny @('majetek', 'mzdy')
+            & $companion -Mdb $mdbPath -Vystup $agendaDir -Skupiny @('majetek', 'mzdy', 'sklad')
         }
 } finally {
     $connection.Close()

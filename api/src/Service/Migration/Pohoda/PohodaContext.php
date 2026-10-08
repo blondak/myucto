@@ -96,6 +96,14 @@ final class PohodaContext
      */
     public array $skippedYears = [];
 
+    /**
+     * Převod skladu zvolený v průvodci: volba po skladech POHODY (kód skladu => `goods`,
+     * `material` nebo `skip`) pro karty bez druhu zásoby. `null` = sklad se nepřevádí.
+     *
+     * @var array{warehouses:array<string,string>}|null
+     */
+    public ?array $stock = null;
+
     public ?int $runId = null;
 
     /** @var (callable(string,int,int):void)|null */

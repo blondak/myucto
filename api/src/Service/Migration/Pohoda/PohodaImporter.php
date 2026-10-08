@@ -18,7 +18,7 @@ use PDO;
  *
  * Pořadí: osnova → období a deník → režim účetní jednotky → adresář a předkontace →
  * přijaté a vydané doklady → pokladna a banka → vazby dokladů na deník a úhrady →
- * majetek → koeficient krácení odpočtu (§ 76) → rekonciliace. Automatika účtování je po celou dobu vypnutá ({@see AccountingUnitSwitch}).
+ * majetek → sklad → koeficient krácení odpočtu (§ 76) → rekonciliace. Automatika účtování je po celou dobu vypnutá ({@see AccountingUnitSwitch}).
  *
  * **Zkouška nanečisto** běží stejným kódem v jedné transakci, která se na konci vrátí.
  * **Ostrý převod** zapisuje po krocích, každý krok je idempotentní ({@see PohodaImportRepository}):
@@ -49,6 +49,7 @@ final class PohodaImporter
         private readonly TableStatistics $statistics,
         private readonly UnbookedBankPayments $unbooked,
         private readonly VatCoefficientSeeder $coefficients,
+        private readonly StockImporter $stock,
     ) {}
 
     /** @return list<string> */
@@ -70,6 +71,7 @@ final class PohodaImporter
             DocumentLinker::STEP_PAYMENTS,
             AssetImporter::STEP,
             SmallAssetImporter::STEP,
+            StockImporter::STEP,
             VatCoefficientSeeder::STEP,
             PohodaReconciler::STEP,
         ];
@@ -160,8 +162,9 @@ final class PohodaImporter
      * @param (callable():bool)|null $shouldCancel
      * @param list<int> $skipYears roky po roce agendy, které se nepřevádějí
      * @param bool $acceptDifferences ostrý převod přijme rozdíly k přijetí ({@see ImportProtocol::difference()})
+     * @param array{warehouses:array<string,string>}|null $stock převod skladu zvolený v průvodci ({@see PohodaContext::$stock})
      */
-    public function run(int $supplierId, int $userId, PohodaExport $export, bool $dryRun, ?int $runId = null, ?callable $progress = null, ?callable $shouldCancel = null, array $skipYears = [], bool $acceptDifferences = false): ImportProtocol
+    public function run(int $supplierId, int $userId, PohodaExport $export, bool $dryRun, ?int $runId = null, ?callable $progress = null, ?callable $shouldCancel = null, array $skipYears = [], bool $acceptDifferences = false, ?array $stock = null): ImportProtocol
     {
         if ($skipYears !== []) {
             $skipYears = array_values(array_intersect(ChartJournalImporter::laterYears($export), $skipYears));
@@ -196,6 +199,7 @@ final class PohodaImporter
         $ctx->runId = $runId;
         $ctx->progress = $progress;
         $ctx->skippedYears = array_fill_keys($skipYears, true);
+        $ctx->stock = $stock;
 
         $pdo = $this->db->pdo();
         // Zkouška nanečisto uvnitř cizí transakce (testy, vnořené volání) jede přes savepoint -
@@ -294,6 +298,7 @@ final class PohodaImporter
             },
             AssetImporter::STEP => fn () => $this->assets->import($ctx),
             SmallAssetImporter::STEP => fn () => $this->smallAssets->import($ctx),
+            StockImporter::STEP => fn () => $this->stock->import($ctx),
             VatCoefficientSeeder::STEP => fn () => $this->coefficients->seedConverted(
                 $ctx->supplierId,
                 array_keys($this->map->all($ctx->supplierId, PohodaImportRepository::KIND_PERIOD)),

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { isPohodaUploadReady, pohodaApi, type PohodaKind, type PohodaMessage, type PohodaRun, type PohodaStartParams, type PohodaSystem, type PohodaToolFile, type PohodaUpload, type PohodaUploadPending } from '@/api/pohoda'
+import { isPohodaUploadReady, pohodaApi, type PohodaKind, type PohodaMessage, type PohodaRun, type PohodaStartParams, type PohodaStockChoice, type PohodaSystem, type PohodaToolFile, type PohodaUpload, type PohodaUploadPending } from '@/api/pohoda'
 import { useToast } from '@/composables/useToast'
 import { useMigrationWizard } from '@/composables/useMigrationWizard'
 import { useAuthStore } from '@/stores/auth'
@@ -85,6 +85,9 @@ const confirmIdentifiers = ref(false)
 // Mzdy: převzatá docházka a vstupy se rovnou schválí. Zapnuté proto, že měsíce z PAMICA
 // už reálně proběhly a byly podané; jako koncepty by mzdový běh nad nimi vůbec nešel spustit.
 const approveTakenOver = ref(true)
+// Sklad: převést stav z nejnovější agendy a volba po skladech pro karty bez druhu zásoby.
+const stockEnabled = ref(true)
+const stockChoices = ref<Record<string, PohodaStockChoice>>({})
 const toolOpen = ref(false)
 const toolFiles = ref<PohodaToolFile[] | null>(null)
 const TOOL_GROUPS: Record<PohodaSystem, { key: string; names: string[] }[]> = {
@@ -194,6 +197,18 @@ const yearsLabel = computed(() => selectedYears.value.join(', '))
 // Roky, které poběží jako vlastní převod; pozdější roky agendy jdou v běhu své agendy.
 const runYears = computed(() => yearOptions.value.filter(o => o.own && isSelected(o.year)).map(o => o.year))
 const selectedAgendas = computed(() => ownAgendas.value.filter(a => runYears.value.includes(a.year)))
+/**
+ * Sklad se převádí jen z nejnovější agendy účetnictví firmy: stav platí k datu exportu
+ * a starší agenda by ho založila podruhé. Nabízí se, jen když je ta agenda vybraná.
+ */
+const stockAgenda = computed(() => {
+  if (payrollWizard.value) return null
+  const newest = ownAgendas.value.reduce<typeof ownAgendas.value[number] | null>((best, a) => (best === null || a.year > best.year ? a : best), null)
+  return newest && newest.stock && runYears.value.includes(newest.year) ? { year: newest.year, stock: newest.stock } : null
+})
+watch(stockAgenda, agenda => {
+  stockChoices.value = Object.fromEntries((agenda?.stock.warehouses ?? []).map(w => [w.code, stockChoices.value[w.code] ?? w.suggested]))
+}, { immediate: true })
 const noteFiles = computed(() => selectedAgendas.value.flatMap(a => a.files.filter(f => f.state !== 'ok').map(f => ({ ...f, year: a.year }))))
 /**
  * Kontrola před převodem po vybraných rocích vzestupně. Zpráva s rokem v kontextu (období
@@ -269,12 +284,12 @@ watch(kind, () => {
   clearDifferences()
   confirmed.value = false
 })
-// Zkouška nanečisto platí jen pro zvolené rozhodnutí o začátku vedení mezd.
-watch([startDecision, keepStartConfirmed], () => {
+// Zkouška nanečisto platí jen pro zvolené rozhodnutí o začátku vedení mezd a volbu skladu.
+watch([startDecision, keepStartConfirmed, stockEnabled, stockChoices], () => {
   dryRunPassed.value = false
   clearDifferences()
   confirmed.value = false
-})
+}, { deep: true })
 
 function fileState(state: string): string {
   const key = `file_state.${state}`
@@ -315,6 +330,7 @@ async function start(mode: 'dry_run' | 'import'): Promise<void> {
     kind: kind.value,
     ...(kind.value === 'payroll' ? { confirm_identifiers: confirmIdentifiers.value, approve_taken_over: approveTakenOver.value } : {}),
     ...(startBehind.value !== null ? { start_decision: startDecision.value } : {}),
+    ...(stockAgenda.value && stockEnabled.value ? { stock: { warehouses: { ...stockChoices.value } } } : {}),
   })
 }
 
@@ -595,6 +611,48 @@ const actions = computed<ActionItem[]>(() => {
           </div>
 
           <p v-if="skipped > 0" class="mb-5 rounded-lg border border-primary-500/30 bg-primary-50 px-3 py-2 text-sm text-primary-700" data-testid="pohoda-skipped-agendas">{{ tt('other_wizard_hint', { n: skipped }) }}</p>
+
+          <fieldset v-if="stockAgenda" class="mb-5 rounded-lg border border-neutral-200 p-3 text-sm" data-testid="pohoda-stock">
+            <legend class="sr-only">{{ tt('stock.title') }}</legend>
+            <label class="flex cursor-pointer items-start gap-3">
+              <input v-model="stockEnabled" type="checkbox" class="mt-1 rounded border-neutral-300 text-primary-600" data-testid="pohoda-stock-enabled" />
+              <span>
+                <span class="font-medium text-neutral-800">{{ tt('stock.enable', { cards: stockAgenda.stock.cards, date: stockAgenda.stock.date ?? '—' }) }}</span>
+                <span class="block text-neutral-600">{{ tt('stock.hint', { year: stockAgenda.year }) }}</span>
+              </span>
+            </label>
+            <div v-if="stockEnabled" class="mt-3">
+              <div class="overflow-x-auto rounded-md border border-neutral-200">
+                <table class="min-w-full text-sm">
+                  <thead class="bg-neutral-50 text-left text-xs text-neutral-500">
+                    <tr>
+                      <th class="px-3 py-2">{{ tt('stock.col_warehouse') }}</th>
+                      <th class="px-3 py-2 text-right whitespace-nowrap">{{ tt('stock.col_cards') }}</th>
+                      <th class="px-3 py-2 text-right whitespace-nowrap">{{ tt('stock.col_stocked') }}</th>
+                      <th class="px-3 py-2 text-right whitespace-nowrap">{{ tt('stock.col_without_kind') }}</th>
+                      <th class="px-3 py-2">{{ tt('stock.col_choice') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-neutral-100">
+                    <tr v-for="w in stockAgenda.stock.warehouses" :key="w.code" :class="stockChoices[w.code] === 'skip' ? 'text-neutral-400' : ''">
+                      <td class="px-3 py-2"><span class="font-mono whitespace-nowrap">{{ w.code }}</span> <span class="text-neutral-600">{{ w.name }}</span></td>
+                      <td class="px-3 py-2 text-right">{{ w.cards }}</td>
+                      <td class="px-3 py-2 text-right">{{ w.stocked }}</td>
+                      <td class="px-3 py-2 text-right">{{ w.without_kind }}</td>
+                      <td class="px-3 py-2">
+                        <select v-model="stockChoices[w.code]" class="h-9 rounded-md border border-neutral-300 px-2 text-sm" :aria-label="tt('stock.choice_label', { warehouse: w.code })" :data-testid="`pohoda-stock-choice-${w.code}`">
+                          <option value="goods">{{ tt('stock.choice.goods') }}</option>
+                          <option value="material">{{ tt('stock.choice.material') }}</option>
+                          <option value="skip">{{ tt('stock.choice.skip') }}</option>
+                        </select>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="mt-2 text-neutral-500">{{ tt('stock.choice_hint') }}</p>
+            </div>
+          </fieldset>
 
           <label v-if="kind === 'payroll'" class="mb-3 flex cursor-pointer items-start gap-3 rounded-lg border border-neutral-200 p-3">
             <input v-model="confirmIdentifiers" type="checkbox" class="mt-1 rounded border-neutral-300 text-primary-600" data-testid="pohoda-confirm-identifiers" />

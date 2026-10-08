@@ -394,7 +394,8 @@ function Invoke-PohodaAccountingExport {
     $target = Join-Path $agendaDir '89_ucetnictvi_mdb.xml'
     $assetTarget = Join-Path $agendaDir '90_majetek.xml'
     $payrollTarget = Join-Path $agendaDir '91_mzdy.xml'
-    foreach ($existingTarget in @($target, $assetTarget, $payrollTarget)) {
+    $stockTarget = Join-Path $agendaDir '92_sklad.xml'
+    foreach ($existingTarget in @($target, $assetTarget, $payrollTarget, $stockTarget)) {
         if (Test-Path -LiteralPath $existingTarget) {
             throw "Výstup $existingTarget už existuje. Smažte ho nebo zvolte jinou výstupní složku."
         }
@@ -438,11 +439,11 @@ function Invoke-PohodaAccountingExport {
         Move-Item -LiteralPath $temp -Destination $target
         Write-Host "Hotovo: $target ($totalRows řádků)" -ForegroundColor Green
 
-        Write-Host 'Exportuji majetek a mzdy...'
+        Write-Host 'Exportuji majetek, mzdy a sklad...'
         try {
             $null = & $Doplnky $agendaDir $Ico $Rok
         } catch {
-            foreach ($createdTarget in @($target, $assetTarget, $payrollTarget)) {
+            foreach ($createdTarget in @($target, $assetTarget, $payrollTarget, $stockTarget)) {
                 if (Test-Path -LiteralPath $createdTarget) {
                     Remove-Item -LiteralPath $createdTarget -Force
                 }
@@ -458,7 +459,7 @@ function Invoke-PohodaAccountingExport {
                 $zipFiles = @(
                     [pscustomobject]@{ Source = $target; Entry = $agendaName + '/89_ucetnictvi_mdb.xml' }
                 )
-                foreach ($optionalTarget in @($assetTarget, $payrollTarget)) {
+                foreach ($optionalTarget in @($assetTarget, $payrollTarget, $stockTarget)) {
                     if (Test-Path -LiteralPath $optionalTarget -PathType Leaf) {
                         $zipFiles += [pscustomobject]@{
                             Source = $optionalTarget

@@ -1,16 +1,19 @@
 ﻿<#
 .SYNOPSIS
-    Vytáhne z datového souboru POHODY majetek a mzdy, které XML export POHODY neobsahuje.
+    Vytáhne z datového souboru POHODY majetek, mzdy a sklad, které XML export POHODY neobsahuje.
 
 .DESCRIPTION
-    XML rozhraní POHODY nevrací dlouhodobý majetek (karty, odpisové plány) ani mzdy
-    (zaměstnanci, pracovní poměry, zpracované mzdy). Tento skript je čte přímo z datového
-    souboru a uloží je jako XML vedle souborů exportu, aby je MyÚčto při převodu načetlo:
+    XML rozhraní POHODY nevrací dlouhodobý majetek (karty, odpisové plány), mzdy
+    (zaměstnanci, pracovní poměry, zpracované mzdy) ani ocenění skladu. Tento skript je čte
+    přímo z datového souboru a uloží je jako XML vedle souborů exportu, aby je MyÚčto při
+    převodu načetlo:
 
       90_majetek.xml   karty majetku, daňové odpisy po letech, účetní odpisy po měsících
       91_mzdy.xml      zaměstnanci, pracovní poměry, zpracované mzdy, srážky a exekuce,
                        podání pro ČSSZ a zdravotní pojišťovny včetně obsahu odeslaných
                        hlášení, platby a číselníky mezd
+      92_sklad.xml     sklady, členění skladu, karty zásob se stavem, ceníky a ocenění
+                       stavu každé karty po posledním pohybu (historie pohybů ne)
 
     Skupina mzdy je omezená na rok agendy (podle složky <IČO>_<rok> nebo názvu datového
     souboru) - kmenové údaje a číselníky jsou celé, záznamy vázané na rok jen za ten rok.
@@ -47,7 +50,7 @@
     Složka agendy exportu (<IČO>_<rok>), kam se soubory zapíšou. Bez zadání složka vedle skriptu.
 
 .PARAMETER Skupiny
-    Co vytáhnout: majetek, mzdy (výchozí obojí).
+    Co vytáhnout: majetek, mzdy, sklad (výchozí vše).
 
 .EXAMPLE
     .\Export-PohodaMdb.ps1 -Mdb "C:\ProgramData\STORMWARE\POHODA\Data\StwPh_12345678_2026.mdb" -Vystup .\pohoda_export\12345678_2026
@@ -61,7 +64,7 @@ param(
     [string]$SqlServer,
     [string]$Databaze,
     [string]$Vystup,
-    [ValidateSet('majetek', 'mzdy')][string[]]$Skupiny = @('majetek', 'mzdy')
+    [ValidateSet('majetek', 'mzdy', 'sklad')][string[]]$Skupiny = @('majetek', 'mzdy', 'sklad')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -77,8 +80,12 @@ $ErrorActionPreference = 'Stop'
       Zavisi    tabulka, kterou podmínka potřebuje; když v souboru chybí, přeskočí se obojí
       KdeNebo   sloupec a podmínka navíc (spojí se přes OR), použije se jen když ten sloupec
                 v tabulce je - trvalé mzdové složky visí na pracovním poměru, ne na mzdě
-      BezBlobu  binární sloupce, které se nevytahují ani nezkoušejí číst (doručenky
-                datové schránky jsou ZIP s podepsanou zprávou, ne data podání)
+      BezBlobu  sloupce, které se nevytahují: binární (doručenky datové schránky jsou ZIP
+                s podepsanou zprávou, ne data podání) a dlouhé texty, které převod nečte
+                (formátované popisy karet zásob)
+
+    Skupina sklad má navíc odvozenou tabulku SKzStav (Write-PohodaStockValuation): ocenění
+    stavu karty po posledním pohybu. Pohyby samotné (SKzPoh) se nevytahují.
 #>
 $PohodaMdbGroups = [ordered]@{
     majetek = @{
@@ -87,6 +94,15 @@ $PohodaMdbGroups = [ordered]@{
         Tabulky = [ordered]@{
             IM = @{}; IModpis = @{}; IModpisM = @{}; IMuodpis = @{}; IMpohyb = @{}; IMpredm = @{}
             IMclen = @{}; IMmist = @{}; sIMO = @{}; sIMOpol = @{}; DM = @{}; DMpohyb = @{}
+        }
+    }
+    sklad = @{
+        Soubor  = '92_sklad.xml'
+        Klic    = @('SKz')
+        Tabulky = [ordered]@{
+            sSklad = @{}; SkSt = @{}; SkCeny = @{}; sCMeny = @{}
+            SKz    = @{ BezBlobu = @('Popis', 'Popis2', 'FmtPopis', 'FmtPopis2', 'ZpravaV', 'ZpravaP', 'TText') }
+            SKzCn  = @{}; SKzPol = @{}
         }
     }
     mzdy = @{
@@ -404,6 +420,53 @@ function Write-PohodaValue($Writer, [string]$Name, $Value) {
 }
 
 <#
+    Ocenění stavu karty zásoby po posledním pohybu jako tabulka `SKzStav` (RefSKz, Datum,
+    KcOceneni, Pohybu). POHODA vede hodnotu stavu v ocenění každého pohybu; průměrná cena
+    na kartě je zaokrouhlená a stav × cena by se od hodnoty skladu lišil. Pohyby se čtou
+    proudem seřazené podle karty a data, do XML jde jen poslední pohyb karty a počet pohybů.
+    Vrací počet zapsaných karet.
+#>
+function Write-PohodaStockValuation($Conn, $Writer) {
+    $reader = $null
+    foreach ($order in 'RefSKz, Datum, OrderFld, ID', 'RefSKz, Datum, ID') {
+        try {
+            $reader = (New-PohodaMdbCommand $Conn "SELECT RefSKz, Datum, KcOceneni FROM [SKzPoh] ORDER BY $order").ExecuteReader()
+            break
+        } catch {
+            if ($order -eq 'RefSKz, Datum, ID') { throw }
+        }
+    }
+    $written = 0
+    $card = $null; $date = $null; $value = $null; $moves = 0
+    try {
+        while ($reader.Read()) {
+            $ref = $reader.GetValue(0)
+            if ($ref -is [DBNull]) { continue }
+            if ($null -ne $card -and $ref -ne $card) {
+                Write-PohodaStockValuationRow $Writer $card $date $value $moves
+                $written++
+                $moves = 0
+            }
+            $card = $ref; $date = $reader.GetValue(1); $value = $reader.GetValue(2); $moves++
+        }
+        if ($null -ne $card) {
+            Write-PohodaStockValuationRow $Writer $card $date $value $moves
+            $written++
+        }
+    } finally { $reader.Close() }
+    return $written
+}
+
+function Write-PohodaStockValuationRow($Writer, $Card, $Date, $Value, [int]$Moves) {
+    $Writer.WriteStartElement('SKzStav')
+    Write-PohodaValue $Writer 'RefSKz' $Card
+    Write-PohodaValue $Writer 'Datum' $Date
+    Write-PohodaValue $Writer 'KcOceneni' $Value
+    Write-PohodaValue $Writer 'Pohybu' $Moves
+    $Writer.WriteEndElement()
+}
+
+<#
     Vytáhne skupinu tabulek do XML souboru `$Cil`. Vrátí objekt s počtem řádků celkem
     (`Zaznamu`; 0 = soubor nevznikl, skupina v datovém souboru nemá data), počty řádků
     po jednotlivých vytažených tabulkách (`Pocty`, uspořádaný slovník), seznamem tabulek,
@@ -502,6 +565,10 @@ function Export-PohodaMdbGroup($Conn, [string]$Group, [string]$Cil, [string]$Ico
                 $rows++
             }
             $counts[$t] = $table.Rows.Count
+        }
+        if ($Group -eq 'sklad' -and $existing -contains 'SKzPoh') {
+            $counts['SKzStav'] = Write-PohodaStockValuation $Conn $w
+            $rows += $counts['SKzStav']
         }
         $w.WriteEndElement()
         $w.WriteEndDocument()

@@ -9,6 +9,7 @@
       <Vystup>\<IČO>_<rok>\89_ucetnictvi_mdb.xml   účetnictví
       <Vystup>\<IČO>_<rok>\90_majetek.xml          majetek (jen když ho agenda vede)
       <Vystup>\<IČO>_<rok>\91_mzdy.xml             mzdy (jen když je agenda vede)
+      <Vystup>\<IČO>_<rok>\92_sklad.xml            sklad (jen když ho agenda vede)
       <Vystup>\<IČO>_<rok>.zip                     ZIP k nahrání do průvodce Přechod z POHODA
 
     Skript posílá jen dotazy SELECT přes spojení jen pro čtení (ApplicationIntent=ReadOnly,
@@ -139,7 +140,7 @@ try {
         -Potvrdit $potvrdit -BezZip $BezZip -Zdroj 'Databáze' -VeZdroji 'v databázi' `
         -Doplnky {
             param($agendaDir, $agendaIco, $agendaYear)
-            foreach ($row in (Export-PohodaMdbGroups $connection $agendaDir $agendaIco ([string]$agendaYear) @('majetek', 'mzdy'))) {
+            foreach ($row in (Export-PohodaMdbGroups $connection $agendaDir $agendaIco ([string]$agendaYear) @('majetek', 'mzdy', 'sklad'))) {
                 Write-PohodaMdbGroupReport $row
             }
         }

@@ -149,6 +149,55 @@ final class SyntheticPohodaExport
         return $dir;
     }
 
+    /**
+     * Sklad z datového souboru POHODY (`92_sklad.xml`) do složky agendy `$dir`. Hlavní sklad
+     * `HL`, materiálový `MAT` a konsignační `KON`; kabel `K-001` je v obou prvních skladech
+     * (v hlavním 120,5 m za 1 210,37 Kč, v materiálovém 30 m za 303,33 Kč) a v hlavním
+     * patří do větve členění Elektro / Kabely. Šroub `M-001` nese druh materiál a pohyb nemá,
+     * jeho hodnota je stav × průměrná cena (1 000 × 0,3333). Dál služba, výrobek s kusovníkem,
+     * karta se záporným a s nulovým stavem a textová položka. Ceník B2B je s DPH (36,30 =
+     * 30,00 + 21 %), ceník EUR v eurech. Export proběhl 30. 6., poslední pohyb 1. 3.
+     */
+    public static function withStock(string $dir): void
+    {
+        $card = static fn (int $id, string $code, string $name, int $warehouse, int $type, string $qty, string $avg, string $extra = ''): string =>
+            "<SKz><ID>{$id}</ID><IDS>{$code}</IDS><Nazev>{$name}</Nazev><RefSklad>{$warehouse}</RefSklad><RelSkTyp>{$type}</RelSkTyp>"
+            . "<StavZ>{$qty}</StavZ><VNakup>{$avg}</VNakup><RelDPHp>2</RelDPHp><RelSKzVC>0</RelSKzVC>{$extra}</SKz>";
+        file_put_contents($dir . '/92_sklad.xml', '<?xml version="1.0" encoding="UTF-8"?>' . "\n"
+            . '<mdbExport version="1" group="sklad" source="POHODA" state="ok" created="2026-06-30T10:00:00">'
+            . '<sSklad><ID>1</ID><IDS>HL</IDS><SText>Hlavní sklad</SText></sSklad>'
+            . '<sSklad><ID>2</ID><IDS>MAT</IDS><SText>Materiálový sklad</SText></sSklad>'
+            . '<sSklad><ID>3</ID><IDS>KON</IDS><SText>Konsignační sklad Test</SText></sSklad>'
+            . '<SkSt><ID>10</ID><RefSklad>1</RefSklad></SkSt>'
+            . '<SkSt><ID>11</ID><RefSklad>1</RefSklad><Vetev1>Elektro</Vetev1><Vetev2>Kabely</Vetev2></SkSt>'
+            . '<SkSt><ID>20</ID><RefSklad>2</RefSklad></SkSt>'
+            . '<SkCeny><ID>1</ID><IDS>Prodej</IDS><RelTpCeny>0</RelTpCeny><SDph>0</SDph></SkCeny>'
+            . '<SkCeny><ID>2</ID><IDS>B2B</IDS><SText>Velkoobchod</SText><RelTpCeny>1</RelTpCeny><SDph>1</SDph></SkCeny>'
+            . '<SkCeny><ID>3</ID><IDS>EUR</IDS><RelTpCeny>2</RelTpCeny><SDph>0</SDph><RefCM>9</RefCM><Sleva>0</Sleva></SkCeny>'
+            . '<sCMeny><ID>9</ID><Kod>EUR</Kod><IDS>€</IDS></sCMeny>'
+            . $card(101, 'K-001', 'Kabel', 1, 1, '120.5', '10.0444', '<RefStruct>11</RefStruct><MJ>m</MJ><MJ2>cívka</MJ2><MJ2Koef>100</MJ2Koef>'
+                . '<EAN>4006381333931</EAN><ProdejKc>25</ProdejKc><MinLim>10</MinLim><Hmotnost>0.05</Hmotnost><NakupC>9.5</NakupC><RefAD>2</RefAD>')
+            . $card(102, 'K-001', 'Kabel', 2, 1, '30', '10.111', '<RefStruct>20</RefStruct><MJ>m</MJ>')
+            . $card(103, 'M-001', 'Šroub', 2, 1, '1000', '0.3333', '<RefStruct>20</RefStruct><RelSkDruh>3</RelSkDruh><MJ>ks</MJ>')
+            . $card(104, 'SL-01', 'Montáž', 1, 3, '5', '0', '<MJ>hod</MJ>')
+            . $card(105, 'V-01', 'Výrobek', 1, 5, '2', '500', '<MJ>ks</MJ>')
+            . $card(106, 'N-01', 'Záporná karta', 1, 1, '-3', '10', '<MJ>ks</MJ>')
+            . $card(107, 'Z-01', 'Nulová karta', 1, 1, '0', '10', '<MJ>ks</MJ>')
+            . $card(108, 'KON-01', 'Cizí zboží', 3, 1, '7', '10', '<MJ>ks</MJ>')
+            . $card(109, 'T-01', 'Text', 1, 2, '0', '0', '')
+            . '<SKzCn><ID>1</ID><RefAg>101</RefAg><RefSkCeny>1</RefSkCeny><ProdejC>25</ProdejC></SKzCn>'
+            . '<SKzCn><ID>2</ID><RefAg>101</RefAg><RefSkCeny>2</RefSkCeny><ProdejC>36.3</ProdejC></SKzCn>'
+            . '<SKzCn><ID>3</ID><RefAg>101</RefAg><RefSkCeny>3</RefSkCeny><ProdejC>1.2</ProdejC></SKzCn>'
+            . '<SKzCn><ID>4</ID><RefAg>102</RefAg><RefSkCeny>2</RefSkCeny><ProdejC>99</ProdejC></SKzCn>'
+            . '<SKzCn><ID>5</ID><RefAg>103</RefAg><RefSkCeny>2</RefSkCeny><ProdejC>0</ProdejC></SKzCn>'
+            . '<SKzPol><ID>1</ID><RefAg>105</RefAg><RefSKz>101</RefSKz><Mnozstvi>2</Mnozstvi></SKzPol>'
+            . '<SKzPol><ID>2</ID><RefAg>105</RefAg><RefSKz>103</RefSKz><Mnozstvi>8</Mnozstvi></SKzPol>'
+            . '<SKzStav><RefSKz>101</RefSKz><Datum>2026-03-01</Datum><KcOceneni>1210.37</KcOceneni><Pohybu>4</Pohybu></SKzStav>'
+            . '<SKzStav><RefSKz>102</RefSKz><Datum>2026-02-10</Datum><KcOceneni>303.33</KcOceneni><Pohybu>2</Pohybu></SKzStav>'
+            . '<SKzStav><RefSKz>105</RefSKz><Datum>2026-01-20</Datum><KcOceneni>1000</KcOceneni><Pohybu>1</Pohybu></SKzStav>'
+            . '</mdbExport>');
+    }
+
     public static function withOtherItems(string $dir): void
     {
         $append = static function (string $file, string $needle, string $xml): void {

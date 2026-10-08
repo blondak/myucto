@@ -51,7 +51,11 @@ final class PohodaExport
         // Tabulky z datového souboru POHODY (XML export je nemá), vytváří je exportní nástroj.
         'assets' => '90_majetek.xml',
         'payroll' => '91_mzdy.xml',
+        'stock' => '92_sklad.xml',
     ];
+
+    /** Soubory z datového souboru POHODY, které leží i vedle MDB převodu účetnictví. */
+    private const DATA_FILE_KEYS = ['assets', 'payroll', 'stock'];
 
     /** Agendy, bez kterých převod nemá smysl. */
     private const REQUIRED = ['journal', 'chart', 'vat_classes'];
@@ -90,7 +94,7 @@ final class PohodaExport
             throw new PohodaException('export_not_found', 'Složka exportu ' . basename($dir) . ' neexistuje.');
         }
         if (is_file($dir . DIRECTORY_SEPARATOR . PohodaMdbAccounting::FILE)) {
-            foreach (array_diff(array_keys(self::FILES), ['assets', 'payroll']) as $key) {
+            foreach (array_diff(array_keys(self::FILES), self::DATA_FILE_KEYS) as $key) {
                 if (is_file($dir . DIRECTORY_SEPARATOR . self::FILES[$key])) {
                     throw new PohodaException('export_mixed', 'Agenda obsahuje současně MDB převod a standardní účetní XML. Nahrajte pouze jeden export.');
                 }
@@ -388,6 +392,15 @@ final class PohodaExport
                     }
                     continue;
                 }
+                $stockFile = $export->path('stock');
+                $stock = null;
+                if ($stockFile !== null) {
+                    try {
+                        $stock = PohodaStock::summary($stockFile, $export->year);
+                    } catch (\Throwable) {
+                        $stock = null;
+                    }
+                }
                 $out[] = [
                     'dir' => basename($dir),
                     'ico' => $export->ico,
@@ -400,6 +413,7 @@ final class PohodaExport
                     'has_accounting' => true,
                     'has_payroll' => $payroll !== null,
                     'payroll' => $payroll,
+                    'stock' => $stock,
                 ];
                 continue;
             }

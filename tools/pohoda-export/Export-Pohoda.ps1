@@ -43,13 +43,13 @@
 
 .PARAMETER DataDir
     Složka s datovými soubory POHODY (.mdb), když ji skript nenajde sám. Z datového souboru
-    se čte majetek a mzdy, které XML export neobsahuje (Export-PohodaMdb.ps1).
+    se čte majetek, mzdy a sklad, které XML export neobsahuje (Export-PohodaMdb.ps1).
 
 .PARAMETER SqlServer
     Instance SQL serveru u POHODA SQL (výchozí .\POHODA).
 
 .PARAMETER BezMajetkuAMezd
-    Majetek a mzdy z datového souboru nevytahovat.
+    Majetek, mzdy a sklad z datového souboru nevytahovat.
 
 .EXAMPLE
     .\Export-Pohoda.ps1 -Uzivatel Admin -Rok 2026
@@ -285,7 +285,7 @@ function Read-Response([string]$Path) {
 }
 
 <#
-    Datový soubor agendy pro majetek a mzdy: u POHODY s .mdb soubor ve složce dat, u POHODA SQL
+    Datový soubor agendy pro majetek, mzdy a sklad: u POHODY s .mdb soubor ve složce dat, u POHODA SQL
     databáze na SQL serveru. Vrací $null, když se datový soubor nepodařilo najít.
 #>
 function Find-PohodaData($Unit) {
@@ -405,9 +405,9 @@ foreach ($unit in ($selected | Sort-Object Rok)) {
         $summary.Add([pscustomobject]$row)
     }
 
-    # Majetek a mzdy XML export POHODY nemá - čtou se z datového souboru agendy.
+    # Majetek, mzdy a sklad XML export POHODY nemá - čtou se z datového souboru agendy.
     if (-not $BezMajetkuAMezd) {
-        $row = [ordered]@{ Ico = $unit.Ico; Rok = $unit.Rok; Soubor = '90_majetek.xml, 91_mzdy.xml'; Agenda = 'Majetek a mzdy z datového souboru'; Stav = ''; Zaznamu = 0; Velikost_kB = 0; Poznamka = '' }
+        $row = [ordered]@{ Ico = $unit.Ico; Rok = $unit.Rok; Soubor = '90_majetek.xml, 91_mzdy.xml, 92_sklad.xml'; Agenda = 'Majetek, mzdy a sklad z datového souboru'; Stav = ''; Zaznamu = 0; Velikost_kB = 0; Poznamka = '' }
         try {
             $source = Find-PohodaData $unit
             if ($null -eq $source) {
@@ -420,7 +420,7 @@ foreach ($unit in ($selected | Sort-Object Rok)) {
             $row.Stav = 'ok'
             $row.Soubor = ($files | ForEach-Object { $_.Name }) -join ', '
             $row.Velikost_kB = [math]::Round((($files | Measure-Object Length -Sum).Sum) / 1KB)
-            if ($files.Count -eq 0) { $row.Poznamka = 'majetek ani mzdy v datovém souboru nejsou' }
+            if ($files.Count -eq 0) { $row.Poznamka = 'majetek, mzdy ani sklad v datovém souboru nejsou' }
         } catch {
             $row.Stav = 'chyba'
             $row.Poznamka = $_.Exception.Message

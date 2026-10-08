@@ -37,6 +37,16 @@ final class PohodaImportRepository extends AbstractMigrationImportRepository
     public const KIND_DERIVED_ENTRY = 'derived_entry';
     public const KIND_ASSET = 'asset';
     public const KIND_SMALL_ASSET = 'small_asset';
+    /** Sklad podle kódu skladu v POHODĚ => warehouses.id. */
+    public const KIND_STOCK_WAREHOUSE = 'stock_warehouse';
+    /** Karta zásoby podle kódu (`SKz.IDS`) => stock_items.id. */
+    public const KIND_STOCK_ITEM = 'stock_item';
+    /** Počáteční stav karty ve skladu: `kód skladu|kód karty` => stock_document_lines.id. */
+    public const KIND_STOCK_OPENING = 'stock_opening';
+    /** Ceník POHODY podle kódu => stock_price_levels.id. */
+    public const KIND_STOCK_PRICE_LEVEL = 'stock_price_level';
+    /** Větev členění skladu (otisk cesty názvů) => stock_categories.id. */
+    public const KIND_STOCK_CATEGORY = 'stock_category';
     /** Převedený měsíc mezd: `období|otisk sešitu` => id dávky importu docházky. */
     public const KIND_PAYROLL_MONTH = 'payroll_month';
     /** Převedená trvalá srážka: reference srážky v PAMICA => id případu nebo dohody. */

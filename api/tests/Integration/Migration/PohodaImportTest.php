@@ -513,6 +513,93 @@ final class PohodaImportTest extends TestCase
     }
 
     /**
+     * Sklad z `92_sklad.xml`: karta ze dvou skladů je jedna, stav se založí po skladech
+     * příjemkou na haléř podle ocenění POHODY a do deníku nic nejde (hodnotu zásob nese
+     * převedený deník). Konsignační sklad zvolený jako „nepřevádět" se nepřevede, záporný
+     * stav ani služba stav nedostanou, ceníky jsou cenové hladiny s cenou bez DPH.
+     */
+    public function testStockIsTakenOverWithOpeningPricesAndCategories(): void
+    {
+        $supplierId = $this->supplier();
+        $this->db->pdo()->prepare('UPDATE supplier SET stock_enabled = 1 WHERE id = ?')->execute([$supplierId]);
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withStock($dir);
+        $export = PohodaExport::open($dir);
+        $stock = ['warehouses' => ['HL' => 'goods', 'MAT' => 'material', 'KON' => 'skip']];
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false, stock: $stock);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $counts = self::stepCounts($protocol, 'stock');
+        foreach (['warehouses' => 2, 'goods' => 3, 'materials' => 1, 'products' => 1, 'services' => 1, 'opening_lines' => 4, 'opening_documents' => 2,
+            'opening_negative' => 1, 'skipped_text' => 1, 'skipped_warehouse_cards' => 1, 'merged_with_differences' => 1,
+            'price_levels' => 2, 'price_rules' => 2, 'categories' => 2, 'units' => 1] as $key => $expected) {
+            self::assertSame($expected, $counts[$key] ?? 0, $key . ': ' . $this->explain($protocol));
+        }
+        self::assertEqualsWithDelta(2847.0, (float) ($counts['opening_value'] ?? 0), 0.001, $this->explain($protocol));
+
+        $levels = $this->db->pdo()->prepare(
+            'SELECT w.code, i.sku, i.item_type, l.qty, l.value_total FROM stock_levels l
+               JOIN warehouses w ON w.id = l.warehouse_id JOIN stock_items i ON i.id = l.stock_item_id
+              WHERE l.supplier_id = ? ORDER BY w.code, i.sku'
+        );
+        $levels->execute([$supplierId]);
+        self::assertSame([
+            ['HL', 'K-001', 'goods', '120.500', '1210.37'],
+            ['HL', 'V-01', 'product', '2.000', '1000.00'],
+            ['MAT', 'K-001', 'goods', '30.000', '303.33'],
+            ['MAT', 'M-001', 'material', '1000.000', '333.30'],
+        ], array_map(static fn (array $r): array => array_values(array_map('strval', $r)), $levels->fetchAll(\PDO::FETCH_ASSOC)));
+        self::assertSame(0, $this->rows('warehouses', $supplierId, "code = 'KON'"));
+        self::assertSame(0, $this->rows('stock_items', $supplierId, "sku IN ('KON-01', 'T-01')"));
+        self::assertSame(1, $this->rows('stock_items', $supplierId, "sku = 'SL-01' AND is_stocked = 0"));
+        self::assertSame(1, $this->rows('stock_items', $supplierId, "sku = 'K-001' AND unit = 'm' AND ean = '4006381333931' AND sale_price_without_vat = 25.00 AND min_qty = 10.000 AND weight_g = 50"));
+        self::assertSame(2, $this->rows('stock_documents', $supplierId, "doc_type = 'receipt' AND status = 'posted' AND doc_date = '2026-06-30' AND journal_entry_id IS NULL"));
+
+        $rules = $this->db->pdo()->prepare(
+            'SELECT l.code, r.fixed_price, r.currency_code FROM stock_price_level_rules r JOIN stock_price_levels l ON l.id = r.price_level_id
+              WHERE r.supplier_id = ? ORDER BY l.code'
+        );
+        $rules->execute([$supplierId]);
+        self::assertSame([['B2B', '30.00', 'CZK'], ['EUR', '1.20', 'EUR']],
+            array_map(static fn (array $r): array => array_values(array_map('strval', $r)), $rules->fetchAll(\PDO::FETCH_ASSOC)));
+
+        $category = $this->db->pdo()->prepare(
+            'SELECT c.name, p.name AS parent FROM stock_item_categories ic JOIN stock_categories c ON c.id = ic.category_id
+               LEFT JOIN stock_categories p ON p.id = c.parent_id JOIN stock_items i ON i.id = ic.stock_item_id
+              WHERE ic.supplier_id = ? AND i.sku = ?'
+        );
+        $category->execute([$supplierId, 'K-001']);
+        self::assertSame(['name' => 'Kabely', 'parent' => 'Elektro'], $category->fetch(\PDO::FETCH_ASSOC));
+        $units = $this->db->pdo()->prepare('SELECT u.unit_code, u.numerator, u.denominator FROM stock_item_units u JOIN stock_items i ON i.id = u.stock_item_id WHERE u.supplier_id = ? AND i.sku = ?');
+        $units->execute([$supplierId, 'K-001']);
+        self::assertSame(['cívka', 100, 1], array_values(array_map(static fn ($v) => is_numeric($v) ? (int) $v : $v, $units->fetch(\PDO::FETCH_ASSOC))));
+
+        // Opakovaný převod nic nezdvojí.
+        $again = $this->importer->run($supplierId, $this->userId, $export, false, stock: $stock);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        $counts = self::stepCounts($again, 'stock');
+        self::assertSame([6, 4, 2, 0, 0], [$counts['items_existing'] ?? 0, $counts['opening_existing'] ?? 0, $counts['price_levels_existing'] ?? 0,
+            $counts['opening_lines'] ?? 0, $counts['price_rules'] ?? 0], $this->explain($again));
+        self::assertSame(2, $this->rows('stock_documents', $supplierId));
+        self::assertSame(2, $this->rows('stock_price_level_rules', $supplierId));
+    }
+
+    /** Bez volby v průvodci a bez zapnutého skladu se sklad nepřevede, zbytek převodu ano. */
+    public function testStockIsSkippedWithoutChoiceOrStockModule(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withStock($dir);
+        $export = PohodaExport::open($dir);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, true);
+        self::assertContains('stock_not_selected', $this->messageCodes($protocol));
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, true, stock: ['warehouses' => []]);
+        self::assertContains('stock_module_missing', $this->messageCodes($protocol));
+        self::assertSame(0, $this->rows('stock_items', $supplierId));
+    }
+
+    /**
      * Doklad v režimu OSS (členění mimo přiznání, sazba státu spotřeby, odběratel bez DIČ)
      * se převezme jako OSS plnění, ne jako koncept k ruční kontrole. U e-shopu prodávajícího
      * do EU jde o stovky až tisíce dokladů ročně - ručně neprůchodné.

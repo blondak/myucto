@@ -267,10 +267,10 @@ Export jen čte. Do POHODY nic nezapisuje a nic v ní nemění.
 - POHODA vede každý účetní rok samostatně a export obsahuje jednu agendu za
   každou kombinaci IČO a roku. Převádějí se roky, které zaškrtnete v náhledu
   (jeden i víc najednou). Nevybrané roky zůstávají v POHODĚ.
-- Majetek a mzdy XML export POHODY neobsahuje. Nástroj je čte přímo
-  z datového souboru a přidá do exportu jako `90_majetek.xml`
-  a `91_mzdy.xml`, viz [§ 107.9.1.4](#107914-majetek-z-datoveho-souboru). Tento průvodce ale zpracuje jen
-  `90_majetek.xml` - mzdy z téhož souboru převede
+- Majetek, mzdy a ocenění skladu XML export POHODY neobsahuje. Nástroj je čte
+  přímo z datového souboru a přidá do exportu jako `90_majetek.xml`,
+  `91_mzdy.xml` a `92_sklad.xml`, viz [§ 107.9.1.4](#107914-majetek-z-datoveho-souboru). Tento průvodce
+  zpracuje majetek a sklad - mzdy z téhož souboru převede
   [Přechod z PAMICA](108_Prechod_z_PAMICA.md).
 - ZIP může obsahovat podsložky. Průvodce v nich najde XML soubory všech agend
   a k převodu nabídne jen ty, které podle IČO patří firmě v MyÚčtu. Agendy
@@ -286,14 +286,15 @@ Export jen čte. Do POHODY nic nezapisuje a nic v ní nemění.
 
 #### 107.9.1.4 Majetek z datového souboru
 
-XML rozhraní POHODY nevrací dlouhodobý majetek, drobný majetek ani mzdy. Čte
-je skript `Export-PohodaMdb.ps1` přímo z datového souboru POHODY (`.mdb`),
-u POHODA SQL z databáze agendy. Data jen čte, nic v nich nemění.
+XML rozhraní POHODY nevrací dlouhodobý majetek, drobný majetek, mzdy ani
+ocenění skladu. Čte je skript `Export-PohodaMdb.ps1` přímo z datového souboru
+POHODY (`.mdb`), u POHODA SQL z databáze agendy. Data jen čte, nic v nich nemění.
 
 | Soubor | Obsah |
 |---|---|
 | `90_majetek.xml` | karty dlouhodobého majetku, daňové odpisy po letech, účetní odpisy po měsících, drobný majetek a jeho zdrojové doklady |
 | `91_mzdy.xml` | zaměstnanci, pracovní poměry, zpracované mzdy a číselníky mezd - tento průvodce ho nevyužije, viz [Přechod z PAMICA](108_Prechod_z_PAMICA.md) |
+| `92_sklad.xml` | sklady, členění skladu, karty zásob se stavem, ceníky, kusovníky a ocenění stavu každé karty po jejím posledním pohybu; samotné pohyby ne |
 
 **Při běžném exportu nemusíte dělat nic.** `Export-Pohoda.cmd` skript spustí
 sám po každé agendě a soubory přidá do její složky v ZIP. Datový soubor najde
@@ -369,8 +370,9 @@ Totéž platí pro neznámé typy dokladů v běžném XML exportu.
 POHODA SQL ukládá každou účetní jednotku a rok do vlastní databáze na Microsoft
 SQL Serveru, pojmenované `StwPh_<IČO>_<rok>`. Tabulky jsou stejné jako
 v datovém souboru MDB, proto `Export-PohodaSQL.cmd` vytvoří **stejný ZIP jako
-převod MDB** v cestě 2: `89_ucetnictvi_mdb.xml` s účetnictvím, `90_majetek.xml`
-a `91_mzdy.xml`, se stejnými kontrolami IČO a roku a se souhrny vedle souborů.
+převod MDB** v cestě 2: `89_ucetnictvi_mdb.xml` s účetnictvím, `90_majetek.xml`,
+`91_mzdy.xml` a `92_sklad.xml`, se stejnými kontrolami IČO a roku a se souhrny
+vedle souborů.
 Nástroj posílá jen dotazy `SELECT` přes šifrované spojení jen pro čtení
 (`ApplicationIntent=ReadOnly`). Do databáze nic nezapisuje.
 
@@ -441,7 +443,7 @@ v konfiguraci `"driver": "odbc"` a nainstalujte
 [Microsoft ODBC Driver for SQL Server](https://learn.microsoft.com/sql/connect/odbc/download-odbc-driver-for-sql-server).
 Výsledek je s oběma ovladači stejný.
 
-Soubory `90_majetek.xml` a `91_mzdy.xml` jsou stejné jako u datového souboru
+Soubory `90_majetek.xml`, `91_mzdy.xml` a `92_sklad.xml` jsou stejné jako u datového souboru
 ([§ 107.9.1.4](#107914-majetek-z-datoveho-souboru)). Mzdy z programu PAMICA SQL popisuje
 [Přechod z PAMICA](108_Prechod_z_PAMICA.md).
 
@@ -463,6 +465,39 @@ Soubory `90_majetek.xml` a `91_mzdy.xml` jsou stejné jako u datového souboru
 | likvidace faktur | spárování faktury s bankovním pohybem nebo pokladním dokladem |
 | karty dlouhodobého majetku (`90_majetek.xml`) | karty zařazené do užívání s počátečními stavy daňových a účetních odpisů |
 | drobný majetek (`90_majetek.xml`) | karty evidence drobného majetku navázané na zdrojový doklad |
+| sklady a karty zásob (`92_sklad.xml`) | sklady, skladové karty a počáteční stav každé karty po skladech k datu exportu |
+| ceníky (`92_sklad.xml`) | cenové hladiny s cenou bez DPH u každé karty |
+| členění skladu, alternativní jednotky, dodavatel karty (`92_sklad.xml`) | kategorie skladu, balení karty, dodavatel karty s nákupní cenou |
+
+**Sklad.** Převádí se jen z nejnovější agendy v exportu a jen když ho
+v náhledu necháte zaškrtnutý. Firma musí mít zapnutý sklad. Převede se stav,
+ne historie: každá karta dostane ve svém skladu počáteční stav k datu exportu
+(nejpozději ke konci roku agendy), jednou příjemkou za sklad. Hodnota stavu je
+ocenění, které vede POHODA po posledním pohybu karty, takže sklad v MyÚčtu
+sedí s POHODOU na haléř. Příjemka se neúčtuje: hodnotu zásob nese převedený
+deník a do účetnictví se sklad promítne roční uzávěrkou.
+
+- Karta, kterou POHODA vede ve více skladech, je v MyÚčtu jedna se stavem
+  v každém skladu. Údaje karty se vezmou ze skladu s největším stavem.
+- Typ karty: zásoba se převede jako zboží nebo materiál podle druhu zásoby
+  z POHODY. Kartám bez druhu (POHODA ho vede jen při účtování zásob způsobem A)
+  určíte typ v náhledu volbou u každého skladu. Volbou *Nepřevádět* sklad
+  vynecháte celý; konsignační sklady jsou tak předvolené, jejich zásoba firmě
+  nepatří.
+- Služba se převede jako neskladová karta bez stavu. Komplet a výrobek jako
+  výrobek; kusovník MyÚčto nevede a protokol uvede, kolik karet ho mělo.
+  Textové položky a soupravy se nepřevádějí.
+- Záporný stav se nepřevede, protokol uvede počet karet; doplňte ho inventurou.
+  Šarže a výrobní čísla se nepřevádějí, stav karty je souhrnný.
+- Základní ceník POHODY je prodejní cena karty. Ostatní ceníky se převedou
+  jako cenové hladiny s pevnou cenou bez DPH (cenu s DPH převod přepočte sazbou
+  karty), v měně ceníku.
+- Pojmenované větve členění skladu jsou kategorie, alternativní jednotky karty
+  balení a dodavatel karty její dodavatel s nákupní cenou, je-li v převedeném
+  adresáři dodavatelem.
+- Opakovaný převod nic nezdvojí: karta, stav i ceník, které už převedené jsou,
+  zůstanou beze změny. Sklad, který v MyÚčtu už byl a má pohyby, dostane karty,
+  ale stav do něj nejde.
 
 **Majetek.** Karta vznikne jako zařazená, bez zápisu v deníku: zařazení
 i dosavadní odpisy už v převedeném deníku jsou. Daňové odpisy za roky před

@@ -59,6 +59,7 @@ final class PohodaImportJobService extends AbstractImportJobService
         'payroll_sickness' => 'Nemocenská a náhrady mzdy',
         'payroll_posting_map' => 'Kontace z původního programu',
         'small_assets' => 'Drobný majetek',
+        'stock' => 'Sklad',
         'reconciliation' => 'Rekonciliace',
         'done' => 'Dokončuji',
     ];
@@ -265,7 +266,8 @@ final class PohodaImportJobService extends AbstractImportJobService
                         ? $this->payroll->run($supplierId, $userId, $agendaDir . DIRECTORY_SEPARATOR . PohodaExport::FILES['payroll'], (int) $agenda['year'], $dryRun, $runId, $progress, $cancel,
                             (bool) ($params['confirm_identifiers'] ?? false), (bool) ($params['approve_taken_over'] ?? false),
                             isset($params['start_decision']) ? (string) $params['start_decision'] : null, (bool) ($params['accept_differences'] ?? false))
-                        : $this->importer->run($supplierId, $userId, $export, $dryRun, $runId, $progress, $cancel, $item['skip'], (bool) ($params['accept_differences'] ?? false)),
+                        : $this->importer->run($supplierId, $userId, $export, $dryRun, $runId, $progress, $cancel, $item['skip'], (bool) ($params['accept_differences'] ?? false),
+                            self::stockFor($meta, (string) ($params['ico'] ?? ''), $year, $params['stock'] ?? null)),
                     'journal' => static fn (array $byStep): array => $payroll
                         ? ['entries' => $byStep[PohodaPayrollImporter::STEP_MONTHS]['counts']['months'] ?? 0, 'existing' => $byStep[PohodaPayrollImporter::STEP_MONTHS]['counts']['existing'] ?? 0]
                         : $byStep['journal']['counts'] ?? [],
@@ -313,6 +315,28 @@ final class PohodaImportJobService extends AbstractImportJobService
             }
         }
         return $plan;
+    }
+
+    /**
+     * Volba převodu skladu pro běh agendy `$year`. Stav skladu platí k datu exportu, proto
+     * se převádí jen z nejnovější agendy účetnictví firmy v exportu; starší agenda by stav
+     * založila podruhé a k jinému dni.
+     *
+     * @param array<string,mixed> $meta
+     * @return array{warehouses:array<string,string>}|null
+     */
+    public static function stockFor(array $meta, string $ico, int $year, mixed $stock): ?array
+    {
+        if (!is_array($stock) || !is_array($stock['warehouses'] ?? null)) {
+            return null;
+        }
+        $newest = null;
+        foreach ((array) ($meta['agendas'] ?? []) as $a) {
+            if (($ico === '' || (string) ($a['ico'] ?? '') === $ico) && (bool) ($a['has_accounting'] ?? true)) {
+                $newest = max($newest ?? 0, (int) ($a['year'] ?? 0));
+            }
+        }
+        return $newest === $year ? ['warehouses' => $stock['warehouses']] : null;
     }
 
     /**
