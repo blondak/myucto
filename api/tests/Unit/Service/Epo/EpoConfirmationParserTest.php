@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Unit\Service\Epo;
 use MyInvoice\Service\Epo\EpoConfirmationExtractor;
 use MyInvoice\Service\Epo\EpoConfirmationParser;
 use MyInvoice\Service\Epo\EpoDirectResponseParser;
+use MyInvoice\Service\Epo\EpoSubmissionXmlComparator;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -116,6 +117,88 @@ final class EpoConfirmationParserTest extends TestCase
         self::assertFalse($result['content_match']);
     }
 
+    /**
+     * Podání přes portál EPO: portál písemnost přegeneruje, takže `@KC` je MD5 jeho
+     * XML, ne exportu. Platná dodejka se stejnými hodnotami nesmí skončit jako
+     * „neplatná" — rozhoduje věcné porovnání echa (issue #134).
+     */
+    public function testPortalReserializedEchoMatchesSnapshotByContent(): void
+    {
+        if (!function_exists('openssl_cms_sign')) {
+            self::markTestSkipped('OpenSSL CMS není dostupné.');
+        }
+
+        $result = $this->parser()->parse(
+            $this->signDer($this->portalConfirmation($this->portalEcho('100000.0'))),
+            self::EXPORT_DPHDP3,
+            'dphdp3',
+        );
+
+        self::assertTrue($result['form_match']);
+        self::assertTrue($result['content_match']);
+        self::assertNull($result['content_diff']);
+    }
+
+    /** Hodnota změněná ve formuláři portálu se naopak musí ukázat jako neshoda. */
+    public function testPortalEchoWithChangedAmountStaysMismatch(): void
+    {
+        if (!function_exists('openssl_cms_sign')) {
+            self::markTestSkipped('OpenSSL CMS není dostupné.');
+        }
+
+        $result = $this->parser()->parse(
+            $this->signDer($this->portalConfirmation($this->portalEcho('100001'))),
+            self::EXPORT_DPHDP3,
+            'dphdp3',
+        );
+
+        self::assertFalse($result['content_match']);
+        self::assertSame(1, $result['content_diff']['difference_count'] ?? null);
+        self::assertSame(
+            ['path' => 'Pisemnost/DPHDP3[1]/Veta1[1]@obrat23', 'expected' => '100000', 'actual' => '100001'],
+            $result['content_diff']['differences'][0] ?? null,
+        );
+    }
+
+    private const EXPORT_DPHDP3 = <<<'XML'
+        <?xml version="1.0" encoding="UTF-8"?>
+        <Pisemnost nazevSW="MyÚčto.cz" verzeSW="6.31.0">
+          <DPHDP3 verzePis="03.01">
+            <VetaD k_uladis="DPH" rok="2026" mesic="9" dapdph_forma="B" dokument="DP3" typ_platce="P" c_okec="621000" d_poddp="10.10.2026" trans="A"/>
+            <VetaP c_ufo="461" c_pracufo="3201" dic="1234567890" typ_ds="F" jmeno="Jan" prijmeni="Vzorový" ulice="Vzorová" c_pop="1" naz_obce="Praha" psc="11000" stat="ČESKÁ REPUBLIKA"/>
+            <Veta1 obrat23="100000" dan23="21000"/>
+            <Veta4 pln23="10000" odp_tuz23_nar="2100" odp_sum_nar="2100"/>
+            <Veta6 dan_zocelk="21000" odp_zocelk="2100" dano_da="18900"/>
+            <VetaR poradi="1"/>
+          </DPHDP3>
+        </Pisemnost>
+        XML;
+
+    private function portalEcho(string $obrat23): string
+    {
+        return '<?xml version="1.0" encoding="UTF-8"?>' . "\n"
+            . '<Pisemnost nazevSW="EPO MF ČR" verzeSW="51.2.1">' . "\n"
+            . '<DPHDP3 verzePis="03.01">' . "\n"
+            . '<VetaD c_okec="621000" d_poddp="10.10.2026" dapdph_forma="B" dokument="DP3" k_uladis="DPH" mesic="9" rok="2026" trans="A" typ_platce="P" />' . "\n"
+            . '<VetaP c_pop="1" c_pracufo="3201" c_ufo="461" dic="1234567890" jmeno="Jan" naz_obce="Praha 1" prijmeni="Vzorový" psc="11000" stat="ČESKÁ REPUBLIKA" typ_ds="F" ulice="Vzorová" />' . "\n"
+            . '<Veta1 dan23="21000" obrat23="' . $obrat23 . '" />' . "\n"
+            . '<Veta4 odp_sum_nar="2100" odp_tuz23_nar="2100" pln23="10000" />' . "\n"
+            . '<Veta6 dan_zocelk="21000" dano_da="18900" odp_zocelk="2100" />' . "\n"
+            . '</DPHDP3>' . "\n"
+            . '<Kontrola><Soubor Delka="590" KC="' . md5('portal') . '" Nazev="DPHDP3-1234567890-20261010-120000" c_ufo="461" /></Kontrola></Pisemnost>';
+    }
+
+    private function portalConfirmation(string $echo): string
+    {
+        return sprintf(
+            '<Pisemnost><Data>%s</Data>'
+            . '<Kontrola><Soubor Delka="590" KC="%s" Nazev="DPHDP3-1234567890-20261010-120000" c_ufo="461"/></Kontrola>'
+            . '<Podani Cislo="568467012" Datum="2026-10-10T12:00:00" Heslo="tajne"/></Pisemnost>',
+            bin2hex($echo),
+            md5('portal'),
+        );
+    }
+
     public function testRejectsUnsignedBytes(): void
     {
         $path = $this->tempFile('not-a-cms');
@@ -133,6 +216,7 @@ final class EpoConfirmationParserTest extends TestCase
         return new EpoConfirmationParser(
             new EpoDirectResponseParser(null, [], []),
             new EpoConfirmationExtractor(),
+            new EpoSubmissionXmlComparator(),
         );
     }
 

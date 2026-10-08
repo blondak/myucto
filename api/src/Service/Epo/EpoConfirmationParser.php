@@ -33,13 +33,15 @@ final class EpoConfirmationParser
     public function __construct(
         private readonly EpoDirectResponseParser $responses,
         private readonly EpoConfirmationExtractor $extractor,
+        private readonly EpoSubmissionXmlComparator $xmlComparator,
     ) {}
 
     /**
      * @return array{
      *   signature_valid:bool,chain_valid:bool,epo_signer_valid:bool,
      *   reference:?string,submitted_at:?string,state_password:?string,
-     *   content_match:?bool,form_match:?bool,embedded_form_code:?string,
+     *   content_match:?bool,content_diff:?array<string,mixed>,
+     *   form_match:?bool,embedded_form_code:?string,
      *   confirmation_xml_sha256:?string,is_confirmation:bool,
      *   receipt:array<string,mixed>
      * }
@@ -58,6 +60,7 @@ final class EpoConfirmationParser
             'submitted_at' => null,
             'state_password' => null,
             'content_match' => null,
+            'content_diff' => null,
             'form_match' => null,
             'embedded_form_code' => null,
             'confirmation_xml_sha256' => null,
@@ -84,6 +87,19 @@ final class EpoConfirmationParser
 
         $embeddedFormCode = $this->embeddedFormCode($parts['echo'] ?? null);
         $contentMatch = $core['content_match'];
+        $contentDiff = null;
+        // Přes portál EPO se nepodávají bajty exportu: portál písemnost přegeneruje
+        // a `@KC` je MD5 JEHO XML. Neshoda součtu tu proto ještě neznamená jiný obsah —
+        // rozhodne věcné porovnání vět z podepsaného echa proti snapshotu.
+        if ($contentMatch === false && ($parts['echo']['suffix'] ?? '') === 'xml') {
+            $diff = $this->xmlComparator->compareFiledContent($expectedXml, $parts['echo']['bytes']);
+            if ($diff['comparable'] && $diff['form_match'] === true) {
+                $contentMatch = $diff['difference_count'] === 0;
+                if (!$contentMatch) {
+                    $contentDiff = $diff;
+                }
+            }
+        }
         // Potvrzení kontrolního hlášení obsahuje ZÁMĚRNĚ redukovanou kopii. U starších
         // potvrzenek bez `Kontrola/Soubor/@KC` se proto nedá porovnat obsah, jen typ
         // formuláře — jinak by pravá dodejka skončila jako „neplatná".
@@ -103,6 +119,7 @@ final class EpoConfirmationParser
             'submitted_at' => $core['submitted_at'],
             'state_password' => $core['state_password'],
             'content_match' => $contentMatch,
+            'content_diff' => $contentDiff,
             'form_match' => $embeddedFormCode !== null
                 ? hash_equals(strtolower($expectedFormCode), $embeddedFormCode)
                 : null,

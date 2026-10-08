@@ -30,6 +30,41 @@ final class EpoSubmissionXmlComparator
      */
     public function compare(string $expectedXml, string $actualXml): array
     {
+        return $this->compareDocuments($expectedXml, $actualXml, false);
+    }
+
+    /**
+     * Porovná snapshot s echem podání z potvrzenky EPO.
+     *
+     * Portál EPO písemnost před podpisem sám přegeneruje: přepíše `nazevSW`/`verzeSW`,
+     * přeřadí atributy, zahodí odsazení i prázdné věty (`VetaR` jen s `poradi`),
+     * identifikaci (`VetaP`) může nahradit údaji přihlášené identity a čísla vypíše
+     * jinak (`100000.0`). `Kontrola/@KC` je pak MD5 JEHO XML, ne exportu, takže shodu
+     * obsahu nese jen věcné porovnání vět. Identifikace podatele se nepočítá — to,
+     * KDO podal, potvrzuje pečeť EPO, ne snapshot.
+     *
+     * @return array{
+     *   comparable:bool,
+     *   form_code:?string,expected_form_code:?string,form_match:?bool,
+     *   difference_count:int,
+     *   differences:list<array{path:string,expected:?string,actual:?string}>
+     * }
+     */
+    public function compareFiledContent(string $expectedXml, string $echoXml): array
+    {
+        return $this->compareDocuments($expectedXml, $echoXml, true);
+    }
+
+    /**
+     * @return array{
+     *   comparable:bool,
+     *   form_code:?string,expected_form_code:?string,form_match:?bool,
+     *   difference_count:int,
+     *   differences:list<array{path:string,expected:?string,actual:?string}>
+     * }
+     */
+    private function compareDocuments(string $expectedXml, string $actualXml, bool $filedContent): array
+    {
         $empty = [
             'comparable' => false,
             'form_code' => null,
@@ -48,8 +83,12 @@ final class EpoSubmissionXmlComparator
         $expectedForm = $this->formCode($expected);
         $actualForm = $this->formCode($actual);
 
-        $expectedValues = $this->flatten($expected);
-        $actualValues = $this->flatten($actual);
+        if ($filedContent) {
+            $this->stripPortalNoise($expected);
+            $this->stripPortalNoise($actual);
+        }
+        $expectedValues = $this->flatten($expected, $filedContent);
+        $actualValues = $this->flatten($actual, $filedContent);
 
         $differences = [];
         foreach ($expectedValues as $path => $value) {
@@ -112,14 +151,22 @@ final class EpoSubmissionXmlComparator
      *
      * @return array<string,string>
      */
-    private function flatten(\DOMDocument $dom): array
+    private function flatten(\DOMDocument $dom, bool $filedContent = false): array
     {
         $values = [];
-        $walk = function (\DOMElement $element, string $prefix) use (&$walk, &$values): void {
+        $walk = function (\DOMElement $element, string $prefix) use (&$walk, &$values, $filedContent): void {
             foreach ($element->attributes ?? [] as $attribute) {
-                if ($attribute instanceof \DOMAttr) {
-                    $values[$prefix . '@' . $attribute->localName] = $this->normalize($attribute->value);
+                if (!$attribute instanceof \DOMAttr) {
+                    continue;
                 }
+                $value = $this->normalize($attribute->value);
+                if ($filedContent) {
+                    if ($value === '') {
+                        continue;
+                    }
+                    $value = $this->normalizeNumber($value);
+                }
+                $values[$prefix . '@' . $attribute->localName] = $value;
             }
             $counts = [];
             $hasChildElement = false;
@@ -142,9 +189,73 @@ final class EpoSubmissionXmlComparator
 
         $root = $dom->documentElement;
         if ($root !== null) {
+            if ($filedContent) {
+                // `nazevSW`/`verzeSW` na kořeni přepisuje portál na sebe.
+                foreach (iterator_to_array($root->attributes ?? []) as $attribute) {
+                    if ($attribute instanceof \DOMAttr) {
+                        $root->removeAttributeNode($attribute);
+                    }
+                }
+            }
             $walk($root, (string) $root->localName);
         }
         return $values;
+    }
+
+    /**
+     * Odstraní z dokumentu, co portál EPO při přegenerování mění nebo doplňuje:
+     * identifikaci podatele (`VetaP`), vlastní kontrolní blok (`Kontrola`) a věty
+     * bez věcného obsahu (jen pořadové číslo). Atributy kořene odstraní {@see flatten()}.
+     */
+    private function stripPortalNoise(\DOMDocument $dom): void
+    {
+        $remove = [];
+        foreach ((new \DOMXPath($dom))->query('//*') ?: [] as $node) {
+            if (!$node instanceof \DOMElement || $node === $dom->documentElement) {
+                continue;
+            }
+            $name = (string) $node->localName;
+            if ($name === 'VetaP' || $name === 'Kontrola') {
+                $remove[] = $node;
+                continue;
+            }
+            if (!$this->hasSubstance($node)) {
+                $remove[] = $node;
+            }
+        }
+        foreach ($remove as $node) {
+            $node->parentNode?->removeChild($node);
+        }
+    }
+
+    private function hasSubstance(\DOMElement $element): bool
+    {
+        foreach ($element->attributes ?? [] as $attribute) {
+            if (
+                $attribute instanceof \DOMAttr
+                && $attribute->localName !== 'poradi'
+                && $this->normalize($attribute->value) !== ''
+            ) {
+                return true;
+            }
+        }
+        foreach ($element->childNodes as $child) {
+            if ($child instanceof \DOMElement && $this->hasSubstance($child)) {
+                return true;
+            }
+        }
+        return $element->getElementsByTagName('*')->length === 0
+            && $this->normalize($element->textContent) !== '';
+    }
+
+    /** `100000`, `100000.0` i `100000.00` je táž částka. */
+    private function normalizeNumber(string $value): string
+    {
+        if (preg_match('/^-?\d+\.\d+$/', $value) !== 1) {
+            return $value;
+        }
+        $value = rtrim(rtrim($value, '0'), '.');
+        return $value === '-0' ? '0' : $value;
     }
 
     private function normalize(string $value): string
