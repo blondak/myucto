@@ -1251,9 +1251,9 @@ final class CrmAggregationService
               WHERE pi.supplier_id = ?
                 AND pi.status IN ('received', 'booked')" . PayablePredicate::excludeAdvanceVatDocument()
                 . PayablePredicate::excludeFullySettled() . "
-                AND pi.due_date < ?"
+                AND pi.due_date {$overdueOperator} CURDATE()"
         );
-        $stmt->execute([$supplierId, $today]);
+        $stmt->execute([$supplierId]);
         $payablesIds = array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
         $payablesIds = $this->filterByDismissal($payablesIds, $dismissals, 'overdue_payables');
         $payablesCount = count($payablesIds);
@@ -2973,14 +2973,16 @@ final class CrmAggregationService
                 $stmt->execute([$supplierId, $today, $today, $today]);
                 break;
             case 'overdue_payables':
+                $overdueOperator = $this->overduePolicy->comparisonOperator();
+                // Zrcadlí actionItems() i seznam /purchase-invoices?overdue=1.
                 $stmt = $pdo->prepare(
                     "SELECT pi.id FROM purchase_invoices pi
                       WHERE pi.supplier_id = ?
                         AND pi.status IN ('received','booked')" . PayablePredicate::excludeAdvanceVatDocument()
                         . PayablePredicate::excludeFullySettled() . "
-                        AND pi.due_date < ?"
+                        AND pi.due_date {$overdueOperator} CURDATE()"
                 );
-                $stmt->execute([$supplierId, $today]);
+                $stmt->execute([$supplierId]);
                 break;
             case 'purchase_drafts':
                 $stmt = $pdo->prepare(

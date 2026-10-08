@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Obligations\OtherItemForecastService;
 use MyInvoice\Service\Accounting\Obligations\ExistingObligationSourceService;
+use MyInvoice\Service\Invoice\OverduePolicy;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -45,6 +46,7 @@ final class PurchaseSummaryAction
     public function __construct(
         private readonly Connection $db,
         private readonly ExistingObligationSourceService $obligationSources,
+        private readonly OverduePolicy $overduePolicy,
     ) {}
 
     public function annualCostsForecast(int $supplierId): array
@@ -329,13 +331,14 @@ final class PurchaseSummaryAction
         ], $unpaid);
         $unpaidTotalCount = array_sum(array_column($unpaidPerCurrency, 'count'));
 
-        // Po splatnosti — počet
+        // Po splatnosti — počet. Hranice jako seznam /purchase-invoices?overdue=1.
+        $overdueOperator = $this->overduePolicy->comparisonOperator();
         $stmt = $pdo->prepare(
             "SELECT COUNT(*) FROM purchase_invoices pi
               WHERE pi.supplier_id = ?
                 AND pi.status IN " . self::UNPAID_STATUSES . $this->payableDocKindExclude()
                 . PayablePredicate::excludeFullySettled() . "
-                AND pi.due_date < CURDATE()"
+                AND pi.due_date {$overdueOperator} CURDATE()"
         );
         $stmt->execute([$sid]);
         $overdueCount = (int) $stmt->fetchColumn();
@@ -389,10 +392,11 @@ final class PurchaseSummaryAction
         ];
     }
 
-    /** Po splatnosti — nezaplacené závazky s due_date < dnes (top 20). */
+    /** Po splatnosti podle OverduePolicy (jako seznam) — nezaplacené závazky (top 20). */
     private function overdue(\PDO $pdo, int $sid): array
     {
         $remaining = PayablePredicate::remainingExpression('pi');
+        $overdueOperator = $this->overduePolicy->comparisonOperator();
         $sql = "SELECT pi.id, pi.varsymbol, pi.vendor_invoice_number, pi.document_kind, pi.vendor_id,
                        cur.code AS currency, pi.issue_date, pi.due_date,
                        GREATEST({$remaining}, 0) AS amount_to_pay, pi.status,
@@ -404,7 +408,7 @@ final class PurchaseSummaryAction
                  WHERE pi.supplier_id = ?
                    AND pi.status IN " . self::UNPAID_STATUSES . $this->payableDocKindExclude()
                    . PayablePredicate::excludeFullySettled() . "
-                   AND pi.due_date < CURDATE()
+                   AND pi.due_date {$overdueOperator} CURDATE()
                  ORDER BY pi.due_date ASC
                  LIMIT 20";
         $stmt = $pdo->prepare($sql);

@@ -612,16 +612,16 @@ final class SummaryAction
         $stmt->execute([$sid]);
         $piUnpaid = $stmt->fetch(\PDO::FETCH_ASSOC) ?: ['cnt' => 0, 'unpaid_czk' => 0];
 
-        $today = date('Y-m-d');
+        $overdueOperator = $this->overduePolicy->comparisonOperator();
         $stmt = $pdo->prepare(
             "SELECT COUNT(*) AS cnt
                FROM purchase_invoices pi
               WHERE pi.supplier_id = ?
                 AND pi.status IN ('received', 'booked')" . PayablePredicate::excludeAdvanceVatDocument()
                 . PayablePredicate::excludeFullySettled() . "
-                AND pi.due_date < ?"
+                AND pi.due_date {$overdueOperator} CURDATE()"
         );
-        $stmt->execute([$sid, $today]);
+        $stmt->execute([$sid]);
         $piOverdueCount = (int) $stmt->fetchColumn();
 
         return [
