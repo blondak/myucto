@@ -46,6 +46,9 @@ const VERIFICATION_STATUSES = new Set(['unverified', 'trusted'])
 const SUBMISSION_ISSUE_CODES = new Set([
   'receipt_unverified',
   'jmhz_protocol_untrusted',
+  'jmhz_protocol_service_authorization_missing',
+  'jmhz_protocol_result_not_recorded',
+  'jmhz_protocol_shape_undocumented',
   'jmhz_xsd_validation_failed',
   'zp_xsd_validation_failed',
   'eldp_xsd_validation_failed',

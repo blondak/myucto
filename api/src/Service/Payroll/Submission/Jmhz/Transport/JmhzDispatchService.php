@@ -12,6 +12,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
 use MyInvoice\Service\Payroll\Submission\PayrollDispatchGate;
 use MyInvoice\Service\Payroll\Submission\PayrollReceiptVerifierInterface;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Vrep\CsszFormReceiptRecorder;
 use MyInvoice\Service\Signing\PersonalCertificateVaultService;
 
 /**
@@ -99,6 +100,11 @@ readonly class JmhzDispatchService
          * se uloží jako nedůvěryhodná příloha a stav podání nechá být.
          */
         private ?JmhzProtocolSignatureVerifierInterface $signatures = null,
+        /**
+         * Zápis výsledku ověřeného protokolu NEMPRI, HZUPN a OZUSPOJ do
+         * případu dávky nebo záměru slevy. Bez něj se posune jen podání.
+         */
+        private ?CsszFormReceiptRecorder $formReceipts = null,
     ) {}
 
     /**
@@ -908,7 +914,7 @@ readonly class JmhzDispatchService
         }
 
         try {
-            $this->import(
+            $imported = $this->import(
                 $submissions,
                 $supplierId,
                 $submissionId,
@@ -921,12 +927,18 @@ readonly class JmhzDispatchService
                 $verifier,
                 partId: $partId,
             );
-
-            return;
         } catch (\Throwable $exception) {
+            $imported = null;
             $reason = $exception instanceof JmhzTransportException
                 ? $exception->errorCode
                 : 'jmhz_protocol_untrusted';
+        }
+        if ($imported !== null) {
+            if (($imported['trusted'] ?? false) === true) {
+                $this->recordFormReceipt($supplierId, (string) $attempt['environment'], $submissionId, $report);
+            }
+
+            return;
         }
 
         try {
@@ -956,6 +968,28 @@ readonly class JmhzDispatchService
                 'remote',
                 $reason,
             );
+        } catch (\Throwable) {
+            return;
+        }
+    }
+
+    /**
+     * Ověřený protokol k NEMPRI, HZUPN nebo OZUSPOJ se zapíše i do případu
+     * dávky nebo záměru slevy ({@see CsszFormReceiptRecorder}). Podání už je
+     * posunuté a protokol uložený; selhání zápisu výsledek dotazu nepřebije,
+     * důvod nese nález u podání.
+     */
+    private function recordFormReceipt(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        JmhzProtocolReport $report,
+    ): void {
+        if ($this->formReceipts === null) {
+            return;
+        }
+        try {
+            $this->formReceipts->record($supplierId, $environment, $submissionId, $report);
         } catch (\Throwable) {
             return;
         }
@@ -1138,6 +1172,9 @@ readonly class JmhzDispatchService
             // Verifier je předaný vždy, takže sem se dostat nejde. Kdyby ano,
             // hlásit „ověřeno" by bylo přesně to, čemu tahle brána brání.
             throw new \LogicException('Znovu ověřený protokol se neuložil jako ověřený.');
+        }
+        if ($imported['created'] === true) {
+            $this->recordFormReceipt($supplierId, $environment, $submissionId, $report);
         }
         $stored = $submissions->storedReceipt(
             $supplierId,
@@ -1400,8 +1437,8 @@ readonly class JmhzDispatchService
     }
 
     /**
-     * Konečná odpověď ČSSZ, jejíž tvar nemáme doložený (NEMPRI, HZUPN,
-     * OZUSPOJ). Nevykládá se, ale ani nezahazuje: pokus se uzavře jako
+     * Konečná odpověď ČSSZ k NEMPRI, HZUPN nebo OZUSPOJ, která neodpovídá
+     * doloženému tvaru protokolu. Nevykládá se, ale ani nezahazuje: pokus se uzavře jako
      * dotažený (transakci jde uzavřít, jak podací protokol žádá), odpověď se
      * uloží k podání jako neověřený protokol — povinnost tím přejde do ruční
      * kontroly — a podání dostane nález s pojmenovaným důvodem. Stav podání se

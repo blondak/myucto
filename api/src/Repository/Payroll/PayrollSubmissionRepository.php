@@ -1733,6 +1733,46 @@ final class PayrollSubmissionRepository
     }
 
     /**
+     * Na co se váže výsledek podání jednoho formuláře: reference jeho jediné
+     * součásti (`sickness:<případ>:<tiskopis>`, `ozuspoj:<záměr>:<druh>`)
+     * a okamžik odeslání (UTC). Podání bez součásti nebo s více součástmi
+     * vrací `null` — výsledek by se nedal jednoznačně přiřadit.
+     *
+     * @return array{status:string,submitted_at:?string,part_reference:string}|null
+     */
+    public function singlePartReceiptTarget(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT submission.status, submission.submitted_at,
+                    part.part_reference
+               FROM payroll_submissions submission
+               JOIN payroll_submission_parts part
+                 ON part.supplier_id = submission.supplier_id
+                AND part.environment = submission.environment
+                AND part.submission_id = submission.id
+              WHERE submission.supplier_id = ?
+                AND submission.environment = ?
+                AND submission.id = ?
+              LIMIT 2',
+        );
+        $statement->execute([$supplierId, $environment, $submissionId]);
+        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+        if (count($rows) !== 1 || !is_array($rows[0])) {
+            return null;
+        }
+        $row = $rows[0];
+
+        return [
+            'status' => (string) $row['status'],
+            'submitted_at' => $row['submitted_at'] === null ? null : (string) $row['submitted_at'],
+            'part_reference' => (string) $row['part_reference'],
+        ];
+    }
+
+    /**
      * Poslední řádek odchozí fronty datové schránky, který k podání patří.
      *
      * Je to jediné místo, kde se dá DOLOŽIT, že zpráva aplikaci opustila:

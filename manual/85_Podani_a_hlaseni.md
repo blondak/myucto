@@ -26,6 +26,21 @@ Nastavení v MyÚčtu:
 
 Podání přes datovou schránku registraci certifikátu nevyžaduje, zmocnění ano. Datovou schránku zmocněnce je vhodné uvést na Oznámení o zmocnění, jinak ČSSZ podání dohledává ručně a odpověď přijde se zpožděním.
 
+### 85.2.2 Výsledek podání NEMPRI, HZUPN a OZUSPOJ přes VREP
+
+Protokol ČSSZ k oznámení o dávce (NEMPRI), hlášení při ukončení pracovní neschopnosti (HZUPN) a oznámení záměru slevy (OZUSPOJ) aplikace po dotazu **Zjistit výsledek** přečte sama. Nejdřív ověří podpis ČSSZ, protokol uloží k podání a podání vede jako **Přijato** nebo **Odmítnuto**. Přijetí s upozorněním je přijetí, upozornění zůstává v protokolu.
+
+Výsledek se pak zapíše tam, kam patří:
+
+- **Dávka nemocenského:** u případu se příslušný tiskopis (NEMPRI nebo HZUPN) označí jako přijatý se dnem odeslání podání jako dnem doručení, nebo jako odmítnutý s kódem a textem chyby z protokolu. Odmítnutý tiskopis zůstává k podání a lhůta se hlídá dál.
+- **Záměr slevy:** přijaté oznámení o zahájení zapíše záměr jako přijatý se dnem odeslání podání jako dnem doručení, přijaté oznámení o skončení záměr ukončí a přijaté storno ho zruší. Odmítnuté oznámení o zahájení se zapíše jako odmítnutý záměr s důvodem z protokolu. Podrobnosti jsou v odstavci Odeslání OZUSPOJ v § 85.11.1.
+
+Zápis jde přes stejná pravidla jako ruční zápis výsledku. Když ho pravidla odmítnou (případ je zrušený, přijetí už je zapsané, případ mezitím dostal nové podání, den doručení u záměru předchází podání přihlášky), podání nese nález **Výsledek z protokolu se nezapsal** s důvodem a výsledek zapíšete ručně. Protokol, který neprošel ověřením podpisu, se uloží jen jako neověřená příloha a nezapíše nic.
+
+**Chyba 103 — chybí pověření k e-službě.** ČSSZ podání vůbec nezpracovala, protože u OSSZ není v registru podávajících zaznamenané pověření k dané e-službě (třída `CSSZ_NEM_PRI` pro NEMPRI a HZUPN, `CSSZ_OZUSPOJ` pro OZUSPOJ), nebo tam není certifikát, kterým je podání podepsané. Nejde o vadu podání. Podání nese nález s touto hláškou a vede se jako odmítnuté. Pověření nebo certifikát nechte zapsat na OSSZ (viz § 85.2.1) a podání pak pošlete znovu tlačítkem **Zahodit a podat znovu** (§ 85.5.1).
+
+Protokol, který neodpovídá doloženému tvaru, aplikace nevykládá: uloží ho k podání k ruční kontrole a výsledek zapíšete podle něj.
+
 ## 85.3 Měsíc — co podat a odeslat
 
 Stránka **Mzdy → Podání a hlášení** ukazuje jako hlavní záložky to, co se
@@ -1100,8 +1115,14 @@ vyzve ke zvolení pozdějšího dne.
 **Odeslání OZUSPOJ.** Připravené oznámení jde v testovacím prostředí ČSSZ
 odeslat z fronty podání přes VREP (podepsané certifikátem jako JMHZ). Do
 ostrého prostředí ho aplikace zatím neodešle; fronta to u řádku napíše
-a připravené XML podáte ze své datové schránky. Odpověď ČSSZ se uloží k podání
-jako protokol k ruční kontrole a přijetí záměru zapíšete podle něj.
+a připravené XML podáte ze své datové schránky. Výsledek podání přes VREP se
+k záměru zapíše sám podle ověřeného protokolu (§ 85.2.2). Odmítnuté oznámení
+o skončení ani odmítnuté storno záměr nemění; záměr platí dál tak, jak ho ČSSZ
+přijala. Nezpracuje-li ČSSZ oznámení o zahájení vůbec (chyba 103, chybějící
+pověření u OSSZ), záměr zůstane podaný: ČSSZ o něm nerozhodla a po vyřízení
+pověření oznámení pošlete znovu. Přijetí záměru s dnem doručení před podáním
+přihlášky aplikace nezapíše ani tady; podání pak nese nález a výsledek
+vyřešíte ručně.
 
 **Co aplikace u záměru hlídá.**
 
@@ -1888,9 +1909,10 @@ HZUPN** ji zmrazit; MyÚčto ji ověří proti připnutému XSD. Odesílá se ro
 odsud tlačítkem **Odeslat NEMPRI/HZUPN datovou schránkou**; stejně je odešle
 i fronta podání. Druhým kanálem je VREP (podepsané certifikátem jako JMHZ),
 zatím jen do testovacího prostředí ČSSZ. Podání, které odešlo jedním kanálem,
-druhým už aplikace neodešle. Odpověď ČSSZ přes VREP se uloží k podání jako
-protokol k ruční kontrole a výsledek zapíšete u případu stejně jako u datové
-schránky. Na záložce **Odesláno** (měsíční hlášení) tahle podání
+druhým už aplikace neodešle. Ověřený protokol ČSSZ přes VREP zapíše výsledek
+k případu sám (§ 85.2.2): přijaté NEMPRI nebo HZUPN se dnem odeslání podání
+jako dnem doručení, odmítnuté s důvodem z protokolu. U datové schránky výsledek
+zapíšete u případu ručně. Na záložce **Odesláno** (měsíční hlášení) tahle podání
 nenajdete. U připraveného podání je vždy napsané, co
 se s ním stane: buď ho MyÚčto vloží do datové schránky jako koncept a odeslání
 schválíte v ISDS, nebo ho odešle po potvrzení Mobilním klíčem, nebo si přílohu
