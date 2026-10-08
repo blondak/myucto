@@ -28,6 +28,9 @@ final class PayrollRegistrationProfileCompletion
     /** Jen údaje, které ONZ nevedla (A3-DOHL). */
     public const MINIMAL = 'minimal';
 
+    /** Od tohoto dne se daňová rezidence v registraci vede. */
+    private const TAX_RESIDENCY_EPOCH = '2026-01-01';
+
     /** Pracovní údaje, které se dohlašují vždy. */
     private const COMPLETION_EMPLOYMENT = [
         'employment_status_code',
@@ -102,8 +105,9 @@ final class PayrollRegistrationProfileCompletion
                 ? null
                 : [
                     'country_code' => $taxResidency['country_code'],
-                    // Rezidence platí od nástupu; tak to posílají i cizí programy.
-                    'changed_on' => (string) $a1->employment['actual_start_on'],
+                    'changed_on' => self::initialTaxResidencySince(
+                        (string) $a1->employment['actual_start_on'],
+                    ),
                 ] + ($full
                     ? self::pick($taxResidency, ['identifier_type', 'identifier', 'residence_address'])
                     : []),
@@ -140,6 +144,21 @@ final class PayrollRegistrationProfileCompletion
             $delta,
             static fn (mixed $value): bool => $value !== null && $value !== [],
         );
+    }
+
+    /**
+     * Platnost kódu státu rezidence (10459) při prvotním dohlášení.
+     *
+     * Kdo nastoupil před 1. 1. 2026, má 1. 1. 2026, jinak den nástupu
+     * (Síťovka 1 a 2, Asociace personalistů, FAQ chyba 243; matice
+     * REGZEC25-PROC.tax-residency-01). Pozdější změna rezidence se hlásí
+     * ke dni, kdy nastala, a tohle pravidlo se jí netýká.
+     */
+    public static function initialTaxResidencySince(string $actualStartOn): string
+    {
+        return $actualStartOn !== '' && $actualStartOn >= self::TAX_RESIDENCY_EPOCH
+            ? $actualStartOn
+            : self::TAX_RESIDENCY_EPOCH;
     }
 
     /**
