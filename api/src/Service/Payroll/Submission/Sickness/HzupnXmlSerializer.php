@@ -95,9 +95,9 @@ final class HzupnXmlSerializer
             $this->text($document, $namespace, $node, 'nazevOSSZ', $payload->osszName);
         }
         $this->text($document, $namespace, $node, 'datumVystaveni', $payload->issuedOn);
-        if ($payload->correction) {
-            $this->flag($document, $namespace, $node, 'opravnePodani', true);
-        }
+        // XSD HZUPN20 v1.2 prvek připouští vynechat, DV_HZUPN20_v12 ho vede
+        // jako povinný; ČSSZ přijala všech 12 řádných hlášení Premier s „N".
+        $this->flag($document, $namespace, $node, 'opravnePodani', $payload->correction);
 
         return $node;
     }
