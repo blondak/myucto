@@ -131,8 +131,10 @@ final class PayrollRegistrationNormCoverageRulesTest extends TestCase
         self::assertFalse(PayrollRegistrationHouseNumber::validDescriptive('12/3'));
         self::assertFalse(PayrollRegistrationHouseNumber::validDescriptive('0', true));
         self::assertTrue(PayrollRegistrationHouseNumber::validDescriptive('9999', true));
-        self::assertTrue(PayrollRegistrationHouseNumber::validCzechResidenceOrientation('12ab'));
-        self::assertFalse(PayrollRegistrationHouseNumber::validCzechResidenceOrientation('12abc'));
+        self::assertTrue(PayrollRegistrationHouseNumber::validOrientation('12ab', true));
+        self::assertFalse(PayrollRegistrationHouseNumber::validOrientation('12abc', true));
+        self::assertTrue(PayrollRegistrationHouseNumber::validOrientation('123456789012', false));
+        self::assertFalse(PayrollRegistrationHouseNumber::validOrientation('1234567890123', false));
     }
 
     public function testDeltaVariantRuleListsForbiddenParts(): void

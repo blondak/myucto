@@ -107,6 +107,40 @@ final class PayrollRegistrationNormCoverageA1Test extends TestCase
         self::assertContains('czech_residence_address.postal_code', $fields);
     }
 
+    /** REGZEC25-client.adr.onum-04, REGZEC25-client.cdr.onum-04 */
+    public function testCzechPermanentAndContactAddressAllowFourCharacterOrientationOnly(): void
+    {
+        $source = PayrollRegistrationA1SnapshotBuilderTest::source('1', '1');
+        $source['permanent_address']['orientation_number'] = '12345';
+        $source['contact_address'] = [
+            'street' => 'Testovací',
+            'house_number' => '7',
+            'orientation_number' => '1234a',
+            'city' => 'Praha',
+            'postal_code' => '11000',
+            'country_code' => 'CZ',
+            'ruian_point' => null,
+        ];
+        $problems = $this->problems($source, PayrollRegistrationA1SnapshotBuilderTest::identity());
+        $byField = array_column($problems, 'message_key', 'field');
+
+        self::assertSame('orientation_number_cz', $byField['permanent_address.orientation_number'] ?? null);
+        self::assertSame('orientation_number_cz', $byField['contact_address.orientation_number'] ?? null);
+
+        $source['permanent_address']['orientation_number'] = '12a';
+        $source['contact_address']['orientation_number'] = '1234';
+        $source['contact_address']['country_code'] = 'SK';
+        $source['contact_address']['postal_code'] = '81101';
+        $source['contact_address']['orientation_number'] = '123456789012';
+        $fields = array_column(
+            $this->problems($source, PayrollRegistrationA1SnapshotBuilderTest::identity()),
+            'field',
+        );
+
+        self::assertNotContains('permanent_address.orientation_number', $fields);
+        self::assertNotContains('contact_address.orientation_number', $fields);
+    }
+
     /** REGZEC25-client.fdr.num-05 */
     public function testCzechResidenceIsForbiddenForCzechPermanentResidence(): void
     {
@@ -120,6 +154,36 @@ final class PayrollRegistrationNormCoverageA1Test extends TestCase
 
         self::assertNull($a1->czechResidenceAddress);
         self::assertStringNotContainsString('<fdr', self::serialize($a1));
+    }
+
+    /** REGZEC25-client.vcp-03: VČP je u A1-10 zakázané, u A1-OST se pošle. */
+    public function testVariableInsuredNumberIsSentOnlyOutsideVariant10(): void
+    {
+        $identifiers = [
+            'birth_number' => null,
+            'ecp' => null,
+            'vcp' => '612345678',
+            'foreign_tax_identifier' => null,
+        ];
+        $variant10 = (new PayrollRegistrationA1SnapshotBuilder())->build(
+            self::foreignAbroadSource('10', null),
+            self::foreignIdentity(),
+            self::scope(),
+        );
+        self::assertStringNotContainsString(
+            'vcp=',
+            self::serialize($variant10, self::foreignIdentity(), self::START, $identifiers),
+        );
+
+        $ordinary = (new PayrollRegistrationA1SnapshotBuilder())->build(
+            self::foreignAbroadSource('1', '1'),
+            self::foreignIdentity(),
+            self::scope(),
+        );
+        self::assertStringContainsString(
+            'vcp="612345678"',
+            self::serialize($ordinary, self::foreignIdentity(), self::START, $identifiers),
+        );
     }
 
     public function testCzechResidenceIsForbiddenForVariant10(): void
@@ -441,11 +505,15 @@ final class PayrollRegistrationNormCoverageA1Test extends TestCase
         ];
     }
 
-    /** @param array<string,mixed>|null $identity */
+    /**
+     * @param array<string,mixed>|null $identity
+     * @param array<string,?string>|null $identifiers
+     */
     private static function serialize(
         PayrollRegistrationA1Snapshot $a1,
         ?array $identity = null,
         string $start = self::START,
+        ?array $identifiers = null,
     ): string {
         $payload = new PayrollRegistrationXmlPayload(
             identity: new PayrollRegistrationIdentitySnapshot(
@@ -460,7 +528,7 @@ final class PayrollRegistrationNormCoverageA1Test extends TestCase
                     'effective_on' => $start,
                 ],
                 identity: $identity ?? PayrollRegistrationA1SnapshotBuilderTest::identity(),
-                identifiers: [
+                identifiers: $identifiers ?? [
                     'birth_number' => '9152031234',
                     'ecp' => null,
                     'vcp' => null,
@@ -484,7 +552,7 @@ final class PayrollRegistrationNormCoverageA1Test extends TestCase
             preparedOn: '2026-09-26',
             expectedStartOn: null,
             actualStartOn: $start,
-            employerVariableSymbol: '1234567890',
+            employerVariableSymbol: '1100000007',
             employerName: 'Syntetický zaměstnavatel s.r.o.',
             csszWorkplaceCode: '110',
         );

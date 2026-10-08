@@ -16,6 +16,7 @@ use MyInvoice\Service\Payroll\PayrollEmploymentJmhzEvidenceCatalog;
 use MyInvoice\Service\Payroll\CzechBirthNumber;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
+use MyInvoice\Service\Payroll\Submission\CsszEmployerVariableSymbol;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDeltaPlanner;
@@ -652,6 +653,17 @@ final readonly class PayrollRegistrationEventService
     private function newVariableSymbol(mixed $value, mixed $currentVariableSymbol): string
     {
         $new = $this->requiredDigits($value, 'new_variable_symbol', 8, 10);
+        $problem = CsszEmployerVariableSymbol::invalidReason($new);
+        if ($problem !== null) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a5_variable_symbol_invalid',
+                PayrollRegistrationFieldVocabulary::label('new_variable_symbol')
+                    . " {$new} není platný: {$problem}. ČSSZ by "
+                    . $this->actionName(5) . ' odmítla. Opište nový symbol '
+                    . 'přesně z oznámení ČSSZ.'
+                    . PayrollRegistrationFieldVocabulary::reference('new_variable_symbol'),
+            );
+        }
         if (is_string($currentVariableSymbol) && $new === trim($currentVariableSymbol)) {
             throw new PayrollRegistrationXmlException(
                 'registration_a5_variable_symbol_unchanged',
@@ -2001,6 +2013,17 @@ final readonly class PayrollRegistrationEventService
                 );
             }
         }
+        // EDV 1.4.0.6, ID 10101: sektor je kód z číselníku Sektor (EESSI),
+        // stejně jako v přihlášce A1.
+        if (isset($result['sector'])
+            && !PayrollRegistrationForeignInsurerSector::isKnown($result['sector'])
+        ) {
+            throw new \InvalidArgumentException($this->say(
+                'foreign_insurance.sector',
+                'musí být kód z číselníku Sektor (01 až 08), teď je „'
+                    . $result['sector'] . '“. Vyberte sektor z nabídky.',
+            ));
+        }
         // EDV 1.4.0.6, ID 10095, 10097, 10098: je-li uvedena část adresy,
         // jsou povinné číslo popisné, PSČ i obec.
         $missing = PayrollRegistrationForeignInsurerAddress::missing($result);
@@ -2380,18 +2403,7 @@ final readonly class PayrollRegistrationEventService
                 );
             }
         }
-        if (isset($result['orientation_number'])
-            && !PayrollRegistrationHouseNumber::validCzechResidenceOrientation(
-                $result['orientation_number'],
-            )
-        ) {
-            throw new \InvalidArgumentException($this->say(
-                'czech_residence_address.orientation_number',
-                'smí mít u adresy pobytu v ČR nejvýš '
-                    . PayrollRegistrationHouseNumber::CZECH_RESIDENCE_ORIENTATION_MAX
-                    . ' znaky, teď je „' . $result['orientation_number'] . '“.',
-            ));
-        }
+        $this->assertOrientationNumber($result, 'CZ', 'czech_residence_address', true);
         ksort($result, SORT_STRING);
 
         return $result;
@@ -2557,6 +2569,7 @@ final readonly class PayrollRegistrationEventService
                 $result[$key] = $this->requiredText($raw[$key], 'permanent_address.' . $key, $max);
             }
         }
+        $this->assertOrientationNumber($result, $country, 'permanent_address');
         ksort($result, SORT_STRING);
 
         return $result;
@@ -2661,7 +2674,37 @@ final readonly class PayrollRegistrationEventService
                 );
             }
         }
+        $this->assertOrientationNumber($result, $country, 'contact_address');
         return $result;
+    }
+
+    /**
+     * Orientační číslo má u české adresy (stát CZ, vždy u pobytu v ČR)
+     * nejvýš 4 znaky, u cizí 12 (EDV 1.4.0.6, ID 10079, 10508, 10515).
+     * Pravidlo drží {@see PayrollRegistrationHouseNumber}, stejně jako
+     * u přihlášky A1.
+     *
+     * @param array<string,mixed> $address
+     */
+    private function assertOrientationNumber(
+        array $address,
+        string $country,
+        string $path,
+        bool $czechResidence = false,
+    ): void {
+        $value = $address['orientation_number'] ?? null;
+        $czech = $czechResidence || $country === 'CZ';
+        if (!is_string($value)
+            || PayrollRegistrationHouseNumber::validOrientation($value, $czech)
+        ) {
+            return;
+        }
+        throw new \InvalidArgumentException($this->say(
+            $path . '.orientation_number',
+            'smí mít u ' . ($czechResidence ? 'adresy pobytu v ČR' : 'české adresy')
+                . ' nejvýš ' . PayrollRegistrationHouseNumber::orientationMax($czech)
+                . ' znaky, teď je „' . $value . '“.',
+        ));
     }
 
     /** @return list<array{from:string,to:string}> */

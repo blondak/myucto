@@ -2096,7 +2096,7 @@ final class PayrollRegistrationActionTest extends TestCase
                 'interaction' => 'variable_symbol_transfer',
                 'effective_on' => self::TODAY,
                 'source_reference' => 'synthetic-a5-transfer',
-                'new_variable_symbol' => '9990005678',
+                'new_variable_symbol' => '1110000005',
             ]),
             new Response(),
             ['employmentId' => (string) $this->employmentId],
@@ -2882,7 +2882,7 @@ final class PayrollRegistrationActionTest extends TestCase
     public function testPlaceholderVariableSymbolIsWarnedInPreview(): void
     {
         $this->db->pdo()->prepare(
-            'UPDATE payroll_offices SET social_security_variable_symbol = "9876543210"
+            'UPDATE payroll_offices SET social_security_variable_symbol = "12345678"
               WHERE supplier_id = ? AND id = ?',
         )->execute([$this->supplierId, $this->officeId]);
 
@@ -2894,7 +2894,7 @@ final class PayrollRegistrationActionTest extends TestCase
 
         self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
         $body = $this->json($response);
-        self::assertStringContainsString('vs="9876543210"', $body['xml']);
+        self::assertStringContainsString('vs="12345678"', $body['xml']);
         self::assertSame('employer_variable_symbol_placeholder', $body['warnings'][0]['code']);
         self::assertSame('employer_settings', $body['warnings'][0]['target']);
 
@@ -2913,7 +2913,7 @@ final class PayrollRegistrationActionTest extends TestCase
     public function testTestEnvironmentRegistrationUsesTheOfficeTestVariableSymbol(): void
     {
         $this->db->pdo()->prepare(
-            'UPDATE payroll_offices SET test_social_security_variable_symbol = "8880001234"
+            'UPDATE payroll_offices SET test_social_security_variable_symbol = "2210000002"
               WHERE supplier_id = ? AND id = ?',
         )->execute([$this->supplierId, $this->officeId]);
 
@@ -2929,11 +2929,11 @@ final class PayrollRegistrationActionTest extends TestCase
         );
         $prepared = $this->json($this->post());
 
-        self::assertStringContainsString('vs="8880001234"', $test['xml']);
-        self::assertStringNotContainsString('vs="9990001234"', $test['xml']);
-        self::assertStringContainsString('vs="9990001234"', $production['xml']);
+        self::assertStringContainsString('vs="2210000002"', $test['xml']);
+        self::assertStringNotContainsString('vs="1100000007"', $test['xml']);
+        self::assertStringContainsString('vs="1100000007"', $production['xml']);
         self::assertStringContainsString(
-            'vs="8880001234"',
+            'vs="2210000002"',
             $this->storedArtifactXml((int) $prepared['submission_id']),
         );
     }
@@ -4350,6 +4350,34 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame(201, $abroad->getStatusCode(), (string) $abroad->getBody());
     }
 
+    /** REGZEC25-client.adr.onum-04 a cdr.onum-04 v oznámení A3. */
+    public function testA3CzechAddressAllowsFourCharacterOrientationNumberOnly(): void
+    {
+        $this->employmentActiveSince('2026-03-01');
+        $this->seedRegistrationEventPrerequisites('1', '1', '2026-03-01');
+        $address = [
+            'street' => 'Krátká',
+            'house_number' => '3',
+            'orientation_number' => '12345',
+            'postal_code' => '11000',
+            'city' => 'Praha',
+            'country_code' => 'CZ',
+        ];
+        foreach (['permanent_address', 'contact_address'] as $key) {
+            $long = $this->approveA3([$key => $address], 'synthetic-onum-' . $key);
+            self::assertSame(422, $long->getStatusCode(), (string) $long->getBody());
+            self::assertStringContainsString(
+                'u české adresy nejvýš 4 znaky',
+                $this->json($long)['error']['message'],
+            );
+        }
+
+        $address['country_code'] = 'SK';
+        $address['postal_code'] = '81101';
+        $abroad = $this->approveA3(['permanent_address' => $address], 'synthetic-onum-abroad');
+        self::assertSame(201, $abroad->getStatusCode(), (string) $abroad->getBody());
+    }
+
     /** REGZEC25-client.rdr.num-04 a rdr.cnt-08 v oznámení A3. */
     public function testA3ResidenceAddressMatchesTheTaxResidencyCountry(): void
     {
@@ -4474,7 +4502,7 @@ final class PayrollRegistrationActionTest extends TestCase
                 'interaction' => 'variable_symbol_transfer',
                 'effective_on' => self::TODAY,
                 'source_reference' => 'synthetic-a5-same',
-                'new_variable_symbol' => '9990001234',
+                'new_variable_symbol' => '1100000007',
             ]),
             new Response(),
             ['employmentId' => (string) $this->employmentId],
@@ -4482,13 +4510,28 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame(422, $same->getStatusCode(), (string) $same->getBody());
         self::assertSame('registration_a5_variable_symbol_unchanged', $this->json($same)['error']['code']);
 
+        // REGZEC25-comp.nvs-06: C_COKR + Luhn pro VS10 platí i pro nový VS.
+        $typo = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'variable_symbol_transfer',
+                'effective_on' => self::TODAY,
+                'source_reference' => 'synthetic-a5-typo',
+                'new_variable_symbol' => '1110000006',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(422, $typo->getStatusCode(), (string) $typo->getBody());
+        self::assertSame('registration_a5_variable_symbol_invalid', $this->json($typo)['error']['code']);
+
         $other = ($this->action)->approveEvent(
             $this->request('POST')->withParsedBody([
                 'environment' => 'test',
                 'interaction' => 'variable_symbol_transfer',
                 'effective_on' => self::TODAY,
                 'source_reference' => 'synthetic-a5-other',
-                'new_variable_symbol' => '9990005678',
+                'new_variable_symbol' => '1110000005',
             ]),
             new Response(),
             ['employmentId' => (string) $this->employmentId],
@@ -4512,7 +4555,7 @@ final class PayrollRegistrationActionTest extends TestCase
                 'interaction' => 'variable_symbol_transfer',
                 'effective_on' => self::TODAY,
                 'source_reference' => 'synthetic-dep-invalid',
-                'new_variable_symbol' => '9990005678',
+                'new_variable_symbol' => '1110000005',
             ]),
             new Response(),
             ['employmentId' => (string) $this->employmentId],
@@ -4559,6 +4602,49 @@ final class PayrollRegistrationActionTest extends TestCase
             ['employmentId' => (string) $this->employmentId],
         );
         self::assertSame(201, $complete->getStatusCode(), (string) $complete->getBody());
+    }
+
+    /** REGZEC25-forin.sec-04: sektor nositele v A6 a A7 je kód z číselníku 01 až 08. */
+    public function testA6AndA7ForeignInsurerSectorMustBeFromTheCodebook(): void
+    {
+        $this->employmentActiveSince(self::TODAY);
+        $this->seedRegistrationEventPrerequisites('1', '1', self::TODAY);
+        foreach ([['czech_legislation_start', 'P'], ['czech_legislation_end', 'S']] as [$interaction, $current]) {
+            $insurer = [
+                'current' => $current,
+                'name' => 'Syntetická zahraniční instituce',
+                'country_code' => 'SK',
+                'identifier' => 'SYN-INSTITUTION-1',
+                'sector' => 'Nemoc',
+            ];
+            $text = ($this->action)->approveEvent(
+                $this->request('POST')->withParsedBody([
+                    'environment' => 'test',
+                    'interaction' => $interaction,
+                    'effective_on' => self::TODAY,
+                    'source_reference' => 'synthetic-sector-text-' . $current,
+                    'foreign_insurance' => $insurer,
+                ]),
+                new Response(),
+                ['employmentId' => (string) $this->employmentId],
+            );
+            self::assertSame(422, $text->getStatusCode(), (string) $text->getBody());
+            self::assertStringContainsString('číselníku Sektor', $this->json($text)['error']['message']);
+
+            $insurer['sector'] = '06';
+            $code = ($this->action)->approveEvent(
+                $this->request('POST')->withParsedBody([
+                    'environment' => 'test',
+                    'interaction' => $interaction,
+                    'effective_on' => self::TODAY,
+                    'source_reference' => 'synthetic-sector-code-' . $current,
+                    'foreign_insurance' => $insurer,
+                ]),
+                new Response(),
+                ['employmentId' => (string) $this->employmentId],
+            );
+            self::assertSame(201, $code->getStatusCode(), (string) $code->getBody());
+        }
     }
 
     /** REGZEC25-attachs.attach-02 u zdůvodnění storna A8. */
@@ -4783,7 +4869,7 @@ final class PayrollRegistrationActionTest extends TestCase
     {
         $this->seedAcceptedPreRegistrationReceipt();
         $this->db->pdo()->prepare(
-            'UPDATE payroll_offices SET social_security_variable_symbol = "9990005678"
+            'UPDATE payroll_offices SET social_security_variable_symbol = "1110000005"
               WHERE supplier_id = ? AND id = ?',
         )->execute([$this->supplierId, $this->officeId]);
         $this->db->pdo()->prepare(
@@ -4796,8 +4882,8 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
         $xml = $this->storedArtifactXml((int) $this->json($response)['submission_id']);
         self::assertStringContainsString('act="10"', $xml);
-        self::assertStringContainsString(' vs="9990001234"', $xml);
-        self::assertStringNotContainsString('9990005678', $xml);
+        self::assertStringContainsString(' vs="1100000007"', $xml);
+        self::assertStringNotContainsString('1110000005', $xml);
     }
 
     /** PREZEC26-predat-5: zaměstnanec mladší 14 let k nástupu se do P1 nedostane. */
@@ -5248,7 +5334,7 @@ final class PayrollRegistrationActionTest extends TestCase
             'INSERT INTO payroll_offices
                 (supplier_id, code, name,
                  social_security_variable_symbol, is_active)
-             VALUES (?, "REG", "Synteticka uctarna", "9990001234", 1)',
+             VALUES (?, "REG", "Synteticka uctarna", "1100000007", 1)',
         )->execute([$this->supplierId]);
         $this->officeId = (int) $pdo->lastInsertId();
         $pdo->prepare(
@@ -5523,7 +5609,7 @@ final class PayrollRegistrationActionTest extends TestCase
         );
         $cases = [
             'variable_symbol_transfer' => [
-                'new_variable_symbol' => '9990005678',
+                'new_variable_symbol' => '1110000005',
             ],
             'czech_legislation_start' => [
                 'foreign_insurance' => [

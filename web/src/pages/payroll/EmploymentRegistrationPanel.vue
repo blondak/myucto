@@ -36,6 +36,7 @@ import {
   registrationMissingItems,
 } from './registrationMissingItems'
 import { registrationA1FieldLabel } from './registrationA1FieldLabels'
+import { registrationRemediation } from './registrationRemediation'
 import { usePersonCardSaveSection } from './personCardSave'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
@@ -117,6 +118,7 @@ const events = ref<PayrollRegistrationEvent[]>([])
 const eventsBusy = ref(false)
 const eventSaving = ref(false)
 const eventError = ref('')
+const eventErrorCode = ref('')
 const selectedEventId = ref<number | null>(null)
 const eventFormOpen = ref(false)
 const eventInteraction = ref<PayrollRegistrationEventInteraction>('termination')
@@ -1749,6 +1751,7 @@ async function saveEvent(): Promise<void> {
   if (!eventCanSave.value) return
   eventSaving.value = true
   eventError.value = ''
+  eventErrorCode.value = ''
   try {
     const event = await payrollApi.approveEmploymentRegistrationEvent(
       props.employmentId,
@@ -1760,6 +1763,7 @@ async function saveEvent(): Promise<void> {
     resetEventForm()
     await run('preview')
   } catch (exception) {
+    eventErrorCode.value = apiErrorCode(exception)
     eventError.value = serverErrorMessage(
       exception,
       t('payroll.people.registration.event.save_failed'),
@@ -4567,7 +4571,12 @@ async function copyXml(): Promise<void> {
           <label class="text-xs font-medium text-neutral-700">{{ t('payroll.people.registration.event.address.orientation_number') }}<input v-model="foreignOrientationNumber" maxlength="50" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" /></label>
           <label class="text-xs font-medium text-neutral-700">{{ t('payroll.people.registration.event.address.postal_code') }}<input v-model="foreignPostalCode" maxlength="50" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" /></label>
           <label class="text-xs font-medium text-neutral-700">{{ t('payroll.people.registration.event.address.city') }}<input v-model="foreignCity" maxlength="50" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" /></label>
-          <label class="text-xs font-medium text-neutral-700">{{ t('payroll.people.registration.event.foreign_sector') }}<input v-model="foreignSector" maxlength="50" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" /></label>
+          <label class="text-xs font-medium text-neutral-700">{{ t('payroll.people.registration.event.foreign_sector') }}<select v-model="foreignSector" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" data-test="registration-event-foreign-sector">
+            <option value="">{{ t('payroll.people.registration.a1.unset') }}</option>
+            <option v-for="code in FOREIGN_INSURANCE_SECTORS" :key="code" :value="code">
+              {{ code }} · {{ t(`payroll.people.registration.a1.foreign_insurance.sector_option.${code}`) }}
+            </option>
+          </select></label>
         </div>
 
         <div v-if="eventInteraction === 'cancellation'" class="mt-4 space-y-3" data-test="registration-event-a8">
@@ -4629,9 +4638,36 @@ async function copyXml(): Promise<void> {
         </div>
       </div>
 
-      <p v-if="eventError" class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700" role="alert" data-test="registration-event-error">
-        {{ eventError }}
-      </p>
+      <div v-if="eventError" class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700" role="alert" data-test="registration-event-error">
+        <p>{{ eventError }}</p>
+        <div v-if="registrationRemediation(eventErrorCode) !== null" class="mt-2 flex flex-wrap gap-2">
+          <button
+            v-if="registrationRemediation(eventErrorCode) === 'a1_profile'"
+            type="button"
+            :class="btnFilled('success')"
+            class="whitespace-nowrap"
+            data-test="registration-event-error-open-a1"
+            @click="openA1ProfileFromError"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.eye" />
+            </svg>
+            {{ t('payroll.people.registration.a1.show') }}
+          </button>
+          <RouterLink
+            v-else
+            :to="problemTarget('employer_settings', null, 'employer_variable_symbol')!"
+            :class="btnOutline('danger')"
+            class="whitespace-nowrap"
+            data-test="registration-event-error-open-settings"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.edit" />
+            </svg>
+            {{ t('payroll.people.registration.missing.open_settings') }}
+          </RouterLink>
+        </div>
+      </div>
     </div>
 
     <div
@@ -4797,7 +4833,7 @@ async function copyXml(): Promise<void> {
     >
       <p>{{ error }}</p>
       <button
-        v-if="errorCode === 'registration_regzec_a1_profile_missing'"
+        v-if="registrationRemediation(errorCode) === 'a1_profile'"
         type="button"
         :class="[btnFilled('success'), 'mt-2']"
         data-test="registration-error-open-a1"
@@ -4808,6 +4844,17 @@ async function copyXml(): Promise<void> {
         </svg>
         {{ t('payroll.people.registration.a1.show') }}
       </button>
+      <RouterLink
+        v-else-if="registrationRemediation(errorCode) === 'employer_settings'"
+        :to="problemTarget('employer_settings', null, 'employer_variable_symbol')!"
+        :class="[btnOutline('danger'), 'mt-2 whitespace-nowrap']"
+        data-test="registration-error-open-settings"
+      >
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path :d="ICONS.edit" />
+        </svg>
+        {{ t('payroll.people.registration.missing.open_settings') }}
+      </RouterLink>
       <ul v-if="errorProblems.length > 0" class="mt-2 space-y-1.5" data-test="registration-missing-list">
         <li
           v-for="problem in errorProblems"

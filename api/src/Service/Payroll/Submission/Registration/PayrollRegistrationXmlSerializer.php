@@ -176,7 +176,11 @@ final class PayrollRegistrationXmlSerializer
         $bno = $this->nullableBno($payload);
         if ($bno !== null) {
             $client->setAttribute('bno', $bno);
-        } elseif ($payload->identity->identifiers['vcp'] !== null) {
+        } elseif ($payload->identity->identifiers['vcp'] !== null
+            // EDV 1.4.0.6, ID 10060: u A1-10 je VČP zakázané, ČSSZ by
+            // přihlášku zamítla. Osobu bez RČ/EČP identifikuje datum narození.
+            && $a1->variant !== PayrollRegistrationBusinessMatrix::VARIANT_10
+        ) {
             $client->setAttribute(
                 'vcp',
                 $payload->identity->identifiers['vcp'],

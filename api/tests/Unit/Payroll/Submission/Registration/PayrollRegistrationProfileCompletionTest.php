@@ -192,7 +192,7 @@ final class PayrollRegistrationProfileCompletionTest extends TestCase
             preparedOn: self::SENT_ON,
             expectedStartOn: null,
             actualStartOn: null,
-            employerVariableSymbol: '1234567890',
+            employerVariableSymbol: '1100000007',
             employerName: 'Syntetický zaměstnavatel s.r.o.',
             csszWorkplaceCode: '110',
             eventSnapshot: [
@@ -208,7 +208,7 @@ final class PayrollRegistrationProfileCompletionTest extends TestCase
                 'person_external_identifier' => ['id' => 61, 'row_version' => 1, 'value' => '1000000001'],
                 'employment_external_identifier' => ['id' => 71, 'row_version' => 1, 'value' => '200000000000000000002'],
                 'employer' => [
-                    'variable_symbol' => '1234567890',
+                    'variable_symbol' => '1100000007',
                     'name' => 'Syntetický zaměstnavatel s.r.o.',
                     'workplace_code' => '110',
                 ],

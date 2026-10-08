@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Registration;
 
 use DOMDocument;
+use MyInvoice\Service\Payroll\Submission\CsszEmployerVariableSymbol;
 
 final readonly class PayrollRegistrationXmlValidator
 {
@@ -129,6 +130,26 @@ final readonly class PayrollRegistrationXmlValidator
                 PayrollRegistrationFieldVocabulary::label(
                     'employer_variable_symbol',
                 ) . ' musí mít 8 až 10 číslic bez mezer a lomítek. '
+                    . PayrollRegistrationFieldVocabulary::describe(
+                        'employer_variable_symbol',
+                    ),
+            );
+        }
+        // EDV 1.4.0.6, ID 10221 (PREZEC i REGZEC): C_COKR + Luhn pro VS10.
+        // ČSSZ podání s takovým symbolem odmítne chybou „Variabilní symbol
+        // není platný" (katalog kontrol MH č. 143), pravidlo je v jediné
+        // třídě společné všem agendám ČSSZ.
+        $variableSymbolProblem = CsszEmployerVariableSymbol::invalidReason(
+            $payload->employerVariableSymbol,
+        );
+        if ($variableSymbolProblem !== null) {
+            $this->invalid(
+                'registration_employer_variable_symbol_invalid',
+                PayrollRegistrationFieldVocabulary::label(
+                    'employer_variable_symbol',
+                ) . ' ' . $payload->employerVariableSymbol . ' není platný: '
+                    . $variableSymbolProblem . '. ČSSZ by podání odmítla. '
+                    . 'Opište symbol přesně z oznámení ČSSZ. '
                     . PayrollRegistrationFieldVocabulary::describe(
                         'employer_variable_symbol',
                     ),

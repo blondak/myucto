@@ -78,7 +78,7 @@ final class PayrollRegistrationLifecycleFlowTest extends TestCase
         self::assertInstanceOf(PayrollRegistrationAction::class, $registration);
         $this->registration = $registration;
 
-        $this->officeId = $this->createOffice('REG', 'Syntetická účtárna registrací', '9990001234');
+        $this->officeId = $this->createOffice('REG', 'Syntetická účtárna registrací', '1100000007');
         $this->db->pdo()->prepare(
             'INSERT INTO payroll_employer_settings
                 (supplier_id, default_office_id, social_security_office_code)

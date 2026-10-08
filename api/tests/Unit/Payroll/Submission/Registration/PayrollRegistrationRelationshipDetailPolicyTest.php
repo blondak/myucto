@@ -124,7 +124,7 @@ final class PayrollRegistrationRelationshipDetailPolicyTest extends TestCase
             preparedOn: '2026-08-04',
             expectedStartOn: null,
             actualStartOn: '2026-08-05',
-            employerVariableSymbol: '1234567890',
+            employerVariableSymbol: '1100000007',
             employerName: 'Syntetický zaměstnavatel s.r.o.',
             csszWorkplaceCode: '110',
         );
@@ -151,7 +151,7 @@ final class PayrollRegistrationRelationshipDetailPolicyTest extends TestCase
             'person_external_identifier' => ['id' => 61, 'row_version' => 1, 'value' => '1000000001'],
             'employment_external_identifier' => ['id' => 71, 'row_version' => 1, 'value' => '200000000000000000002'],
             'employer' => [
-                'variable_symbol' => '1234567890',
+                'variable_symbol' => '1100000007',
                 'name' => 'Syntetický zaměstnavatel s.r.o.',
                 'workplace_code' => '110',
             ],
@@ -193,7 +193,7 @@ final class PayrollRegistrationRelationshipDetailPolicyTest extends TestCase
             preparedOn: '2026-08-04',
             expectedStartOn: null,
             actualStartOn: null,
-            employerVariableSymbol: '1234567890',
+            employerVariableSymbol: '1100000007',
             employerName: 'Syntetický zaměstnavatel s.r.o.',
             csszWorkplaceCode: '110',
             eventSnapshot: $event,
