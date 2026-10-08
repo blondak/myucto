@@ -25651,11 +25651,35 @@
         "running": "Running",
         "completed": "Completed",
         "failed": "Failed",
-        "cancelled": "Cancelled"
+        "cancelled": "Cancelled",
+        "completed_with_warnings": "Completed with errors"
       },
       "include_bank_accounts": "Bank accounts",
       "include_bank_transactions": "Bank transactions",
       "include_bank_transactions_hint": "Imports movements from iDoklad. GPC/PDF statements remain authoritative and duplicate payments are not counted twice."
+    },
+    "import_report": {
+      "dry_run_note": "Dry run: the documents went through the same checks as in the real import (VAT rates, recalculation, matching the amounts with Fakturoid). Nothing was written, the counts show what the import would do.",
+      "agenda": "Agenda",
+      "created": "Transferred",
+      "skipped": "Skipped",
+      "failed": "Not transferred",
+      "review": "To review",
+      "agendas": {
+        "subjects": "Subjects",
+        "issued": "Issued invoices",
+        "received": "Received invoices"
+      },
+      "errors_title": "Documents not transferred ({count})",
+      "review_title": "Documents to review ({count})",
+      "fakturoid_id": "Fakturoid ID {id}",
+      "omitted": "{count} more documents are only in the job log.",
+      "hints": {
+        "vat_rate": "The VAT rate of the document is not in the VAT rate list for the date of supply. It is never replaced with another rate. Add the rate to the list or correct the document in Fakturoid, then run the import again. Transferred documents are skipped.",
+        "subject": "The document refers to a subject that is not in the system. Run the import again with subjects selected.",
+        "amounts": "The document was transferred, but its VAT summary differs from Fakturoid and could not be taken over exactly. Compare it with the original and correct it manually if needed.",
+        "generic": "Fix the cause and run the import again. Transferred documents are skipped."
+      }
     },
     "fakturoid": {
       "tab": "Fakturoid",
@@ -25684,7 +25708,8 @@
       "test_success": "Fakturoid connection works — account {name}.",
       "delete_confirm": "Really remove Fakturoid credentials?",
       "deleted": "Fakturoid credentials removed",
-      "coming_hint": "—"
+      "coming_hint": "—",
+      "dry_run_hint": "A dry run goes through the same checks as the real import (subjects, VAT rates, recalculation and matching the amounts with Fakturoid) and lists the errors, but writes nothing."
     },
     "ai": {
       "tab": "AI extraction",

@@ -219,6 +219,20 @@ final class ImportJobRepository
         )->execute([$relPath, $name, $size, $mime, $id]);
     }
 
+    /**
+     * Strukturovaný výsledek úlohy (migrace 1975) — počty per agenda a přehled
+     * nepřenesených dokladů. Úloha, která ho nepíše, ho má NULL.
+     *
+     * @param array<string,mixed> $report
+     */
+    public function setReport(int $id, array $report): void
+    {
+        $this->db->pdo()->prepare('UPDATE import_jobs SET report = ? WHERE id = ?')->execute([
+            json_encode($report, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE),
+            $id,
+        ]);
+    }
+
     public function markCompleted(int $id): void
     {
         $this->db->pdo()->prepare(
@@ -324,6 +338,10 @@ final class ImportJobRepository
         if ($row['params'] !== null) {
             $decoded = json_decode((string) $row['params'], true);
             $row['params'] = is_array($decoded) ? $decoded : null;
+        }
+        if (array_key_exists('report', $row) && $row['report'] !== null) {
+            $decoded = json_decode((string) $row['report'], true);
+            $row['report'] = is_array($decoded) ? $decoded : null;
         }
         return $row;
     }

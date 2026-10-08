@@ -955,7 +955,8 @@
         "1971_payroll_sickness_case_slovak.sql",
         "1972_payroll_health_coverage_employee_notice.sql",
         "1973_payroll_eldp_deducted_days.sql",
-        "1974_payroll_person_pension_evidence.sql"
+        "1974_payroll_person_pension_evidence.sql",
+        "1975_import_jobs_report.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -5428,6 +5429,7 @@
                 "log_text": "mediumtext NULL DEFAULT NULL",
                 "params": "longtext NULL DEFAULT NULL COLLATE utf8mb4_bin",
                 "processed": "int(10) unsigned NOT NULL DEFAULT 0",
+                "report": "longtext NULL DEFAULT NULL COLLATE utf8mb4_bin",
                 "result_mime": "varchar(100) NULL DEFAULT NULL",
                 "result_name": "varchar(255) NULL DEFAULT NULL",
                 "result_path": "varchar(255) NULL DEFAULT NULL",
