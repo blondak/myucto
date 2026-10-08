@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationEmployerName;
 use PDO;
 
 /**
@@ -48,7 +49,8 @@ final class PayrollRegistrationSubmissionRepository
                     employment.start_date,
                     employment.actual_start_date,
                     employment.end_date,
-                    supplier.company_name,'
+                    supplier.company_name,
+                    supplier.city AS company_city,'
                     . PayrollEmployerIdentifierSql::SELECT . '
                FROM payroll_employments employment
                JOIN supplier
@@ -76,7 +78,10 @@ final class PayrollRegistrationSubmissionRepository
             'actual_start_date' =>
                 $this->nullableString($row['actual_start_date']),
             'end_date' => $this->nullableString($row['end_date']),
-            'employer_name' => (string) $row['company_name'],
+            'employer_name' => PayrollRegistrationEmployerName::forSubmission(
+                (string) $row['company_name'],
+                $this->nullableString($row['company_city']),
+            ),
             'employer_variable_symbol' => $this->nullableString(
                 $row['employer_variable_symbol'],
             ),

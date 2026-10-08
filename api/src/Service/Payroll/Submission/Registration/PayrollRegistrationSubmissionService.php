@@ -335,6 +335,8 @@ final readonly class PayrollRegistrationSubmissionService
                     $employmentId,
                     $probe['interaction']->documentType,
                     $sourceHash,
+                    $probe['interaction']->interaction,
+                    $probe['snapshot']->employmentExternalIdentifier['value'] ?? null,
                 );
             }
             $keys = $this->idempotencyKeys(
@@ -1463,6 +1465,12 @@ final readonly class PayrollRegistrationSubmissionService
      * existujícího podání (stejný otisk zdroje); s JINÝMI daty se dřív pokus
      * o druhé podání k téže povinnosti zastavil až na unikátním klíči
      * `uq_payroll_submissions_regular` jako chyba 500, bez rady, co dál.
+     *
+     * Vztah, který už má od ČSSZ ID PPV (převzatý z jiného programu nebo
+     * načtený z protokolu), je u ČSSZ přihlášený, i když přihláška z aplikace
+     * neodešla. Druhou A1 ČSSZ odmítne jako duplicitu nebo chybou 603/604
+     * (zpětný převod Premier: šest takových odmítnutí). Po přijaté P1 se
+     * A1 naopak podává, proto se pravidlo týká jen přímé plné registrace.
      */
     private function assertNoOtherLiveBaseRegistration(
         int $supplierId,
@@ -1470,6 +1478,8 @@ final readonly class PayrollRegistrationSubmissionService
         int $employmentId,
         string $agendaCode,
         string $sourceHash,
+        string $interaction,
+        mixed $employmentExternalIdentifier,
     ): void {
         $live = $this->registrations->liveBaseRegistration(
             $supplierId,
@@ -1477,6 +1487,24 @@ final readonly class PayrollRegistrationSubmissionService
             $employmentId,
             $agendaCode,
         );
+        if ($live === null
+            && $interaction === 'direct_full_registration'
+            && is_string($employmentExternalIdentifier)
+            && trim($employmentExternalIdentifier) !== ''
+        ) {
+            throw new PayrollRegistrationXmlException(
+                'registration_already_registered',
+                'Pracovní vztah už má od ČSSZ přidělené ID PPV, takže je u ČSSZ '
+                . 'přihlášený (přihláška odešla z jiného programu nebo přišla '
+                . 's převzatými daty). Druhou přihlášku ČSSZ odmítne jako '
+                . 'duplicitu. Chybějící nebo změněné údaje nahlaste změnovým '
+                . 'hlášením (A3, v bloku Změny k ohlášení nebo Dohlášení údajů), '
+                . 'chybu v podané přihlášce opravným hlášením (A4).'
+                . PayrollRegistrationFieldVocabulary::reference(
+                    'employment_external_identifier',
+                ),
+            );
+        }
         if ($live === null
             || hash_equals($live['source_snapshot_hash'], $sourceHash)
         ) {
