@@ -82,6 +82,43 @@ final class PayrollRegistrationIdentitySnapshotBuilderTest extends TestCase
         self::assertFalse($officialSubmission['supported']);
     }
 
+    /**
+     * Cizinec bez rodného čísla, EČP, VČP i zahraničního daňového čísla nemá
+     * žádný zdroj identifikátoru, takže `identifier_sources` je prázdné pole.
+     * Prázdné pole není poškozená struktura - REGZEC se úplnou zahraniční
+     * identitou (datum, místo a stát narození, občanství, pohlaví) je platný.
+     */
+    public function testRegzecAcceptsPersonWithoutAnyIdentifierSource(): void
+    {
+        $source = $this->source();
+        $source['identity']['citizenship_country_code'] = 'UA';
+        $source['identity']['birth_country_code'] = 'UA';
+        $source['identifiers']['foreign_tax_identifier'] = null;
+        $source['identifier_sources'] = [];
+
+        $snapshot = $this->builder->build($this->scope(), $source);
+
+        self::assertNull($snapshot->identifiers['birth_number']);
+        self::assertNull($snapshot->identifiers['ecp']);
+        self::assertNull($snapshot->identifiers['vcp']);
+        self::assertNull($snapshot->identifiers['foreign_tax_identifier']);
+        self::assertSame(
+            [],
+            $snapshot->toArray()['source_versions']['identifiers'],
+        );
+    }
+
+    public function testStillRejectsCorruptedIdentifierSourcesStructure(): void
+    {
+        $source = $this->source();
+        $source['identifier_sources'] = ['neni-objekt'];
+
+        $this->expectCode(
+            'registration_identity_source_invalid',
+            fn () => $this->builder->build($this->scope(), $source),
+        );
+    }
+
     public function testPrezecRequiresBirthNumberOrEcpButBirthNumberIsNullable(): void
     {
         $source = $this->source();

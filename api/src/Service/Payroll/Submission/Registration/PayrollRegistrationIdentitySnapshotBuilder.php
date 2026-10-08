@@ -37,6 +37,7 @@ final class PayrollRegistrationIdentitySnapshotBuilder
             $this->object(
                 $source['identifier_sources'] ?? null,
                 'identifier_sources',
+                true,
             ),
             $identifiers,
         );
@@ -615,9 +616,21 @@ final class PayrollRegistrationIdentitySnapshotBuilder
             && ($identity['sex'] ?? null) !== null;
     }
 
-    /** @return array<string,mixed> */
-    private function object(mixed $value, string $field): array
-    {
+    /**
+     * `$allowEmpty` pro mapy, které smějí být prázdné (osoba bez jakéhokoli
+     * identifikátoru nemá žádný zdroj): prázdné pole je v PHP zároveň
+     * seznam, takže by jinak prošlo jako poškozená struktura.
+     *
+     * @return array<string,mixed>
+     */
+    private function object(
+        mixed $value,
+        string $field,
+        bool $allowEmpty = false,
+    ): array {
+        if ($allowEmpty && $value === []) {
+            return [];
+        }
         if (!is_array($value) || array_is_list($value)) {
             $this->invalid(
                 'registration_identity_source_invalid',
