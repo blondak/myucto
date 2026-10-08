@@ -108,6 +108,9 @@ final class PayrollEnumContractTest extends TestCase
         // Veličiny kontroly shody počátečních stavů s převzatými mzdami.
         'payrollTakeover.ts::TakeoverLayerMetric'
             => 'const:MyInvoice\Service\Payroll\Migration\PayrollTakeoverLayerCheck::METRIC_NAMES',
+        // Veličiny porovnání převzaté mzdy s přijatým hlášením JMHZ předchozího programu.
+        'payrollTakeover.ts::TakeoverJmhzFormMetric'
+            => 'const:MyInvoice\Service\Payroll\Migration\PayrollTakeoverJmhzFormCheck::METRIC_NAMES',
         // Odkud je měsíc roku přechodu. `none` je díra v roce, ne prázdná hodnota —
         // klient, který ji nezná, by ji nakreslil jako „v pořádku".
         'payrollMigrationReconciliation.ts::PayrollTakeoverPresence'
@@ -443,6 +446,11 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlOutcome',
         'payroll.ts::PayrollJmhzProtocolStatus'
             => 'enum-names:MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSubmissionStatus',
+        // Náprava chyby z protokolu ČSSZ (FAQ 9. 6. 2026, Katalog kontrol 1.4.2.10).
+        'payroll.ts::PayrollJmhzProtocolRemediationCode'
+            => 'const:MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolRemediationCatalog::CODES',
+        'payroll.ts::PayrollJmhzProtocolRemediationSource'
+            => 'const:MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolRemediationCatalog::SOURCES',
         // Skupina agend přehledu podání: klasifikaci dělá SQL v repozitáři,
         // protože se podle ní filtruje stránka i souhrny. Frontend ji jen čte.
         'payroll.ts::PayrollSubmissionAgendaGroup'
@@ -694,6 +702,8 @@ final class PayrollEnumContractTest extends TestCase
      * @var array<string,string>
      */
     private const I18N_DOMAIN = [
+        'payroll.jmhz_protocol_help.source'
+            => 'const:MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolRemediationCatalog::SOURCES',
         'payroll.migration_reconciliation.source_name'
             => 'const:MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter::SOURCES',
         'payroll.runs.status'   => 'enum:MyInvoice\Service\Payroll\Run\PayrollRunStatus',

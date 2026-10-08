@@ -572,8 +572,19 @@ final class JmhzScenario1DocumentResolver
                         $employment['jmhz_default_interpretations'] ?? null,
                     'work_month' => $employment['work_month'] ?? null,
                     'eldp' => $employment['eldp'] ?? null,
+                    // Nulový formulář vztahu bez příjmu: 10345 = 0 podle
+                    // JmhzZeroReportProfile (Pravidla podání 1.4.5, kap. 4).
+                    // Příprava v takovém měsíci průměr nezmrazí.
                     'average_hourly' => [
-                        'minor_units' => $average['average_hourly_minor'] ?? null,
+                        'minor_units' => $average === []
+                            && JmhzZeroReportProfile::isMonthWithoutIncome(
+                                $earnings,
+                                is_int($employment['exempt_income_minor'] ?? null)
+                                    ? $employment['exempt_income_minor']
+                                    : 0,
+                            )
+                            ? 0
+                            : ($average['average_hourly_minor'] ?? null),
                         'scale' => 2,
                     ],
                     'earnings_by_attribute_czk' => $earningsCzk,

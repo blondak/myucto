@@ -208,7 +208,7 @@ const absenceTypes: AbsenceType[] = [
   'vacation', 'dpn', 'quarantine', 'ocr', 'long_term_care', 'ppm',
   'paternity', 'parental', 'unpaid_leave', 'employee_obstacle',
   'employer_obstacle', 'compensatory_time_off', 'unexcused',
-  'public_function', 'employee_obstacle_unpaid', 'other',
+  'public_function', 'employee_obstacle_unpaid', 'invalid_termination', 'other',
 ]
 /*
  * Druhy, u kterých formulář vysvětlí, co se s nepřítomností stane: náhrada
@@ -392,6 +392,7 @@ const needsAverage = computed(() =>
  */
 const isMaternity = computed(() => absenceForm.absence_type === 'ppm')
 const isUnpaidExcused = computed(() => UNPAID_EXCUSED_TYPES.includes(absenceForm.absence_type))
+const isInvalidTermination = computed(() => absenceForm.absence_type === 'invalid_termination')
 /*
  * Placená překážka: druh určuje, jaká náhrada mzdy přísluší (100 % u překážek
  * zaměstnance, 80/60/100 % u zaměstnavatele) a do které kolonky měsíčního
@@ -1665,6 +1666,13 @@ onMounted(async () => {
               class="mt-1 text-xs text-neutral-500"
             >
               {{ t('payroll_absence.absences.unpaid_excused_hint') }}
+            </p>
+            <p
+              v-if="isInvalidTermination"
+              data-test="absence-invalid-termination-hint"
+              class="mt-1 text-xs text-neutral-500"
+            >
+              {{ t('payroll_absence.absences.invalid_termination_hint') }}
             </p>
           </div>
           <template v-if="isPaidObstacle">

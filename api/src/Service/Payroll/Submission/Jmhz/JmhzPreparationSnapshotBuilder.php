@@ -284,15 +284,8 @@ final class JmhzPreparationSnapshotBuilder
                 if ($deferredType === null) {
                     $this->inspectWorkMonth($entry['time_month'] ?? null, $employmentId, $issues);
                 }
-                $averageEarning = ($scenarioKey === null
-                    || $this->scenarioRequiresAttribute($scenarioKey, '10345'))
-                        ? $this->inspectAverageEarning(
-                            $entry['average_earning'] ?? null,
-                            $employmentId,
-                            $periodStart,
-                            $issues,
-                        )
-                        : null;
+                $averageRequired = $scenarioKey === null
+                    || $this->scenarioRequiresAttribute($scenarioKey, '10345');
                 $workSummary = is_array($entry['time_month'] ?? null)
                     ? ($entry['time_month']['jmhz_work_summary'] ?? null)
                     : null;
@@ -471,6 +464,32 @@ final class JmhzPreparationSnapshotBuilder
                         (int) ($left['component_definition_id'] ?? 0)
                         <=> (int) ($right['component_definition_id'] ?? 0),
                 );
+                /*
+                 * Měsíc bez zúčtovaného příjmu trvajícího vztahu se hlásí
+                 * nulovým formulářem a 10345 je v něm nula (Pravidla podání
+                 * JMHZ 1.4.5, kap. 4, viz JmhzZeroReportProfile). Chybějící
+                 * průměr (typicky dohoda, která ještě nic nevydělala) proto
+                 * takový měsíc nezastaví; existující průměr se vykazuje dál
+                 * jako dřív.
+                 *
+                 * Rozhodují ČÁSTKY VSTUPŮ, ne vektor výdělků: složka bez
+                 * mapování do vektoru nepřispěje, a nulový vektor tedy ještě
+                 * neznamená nulový příjem.
+                 */
+                $inputAmounts = array_map(
+                    static fn (mixed $row): mixed => is_array($row) ? ($row['amount_minor'] ?? null) : null,
+                    $this->rows($entry['inputs'] ?? null, 'employment.inputs'),
+                );
+                $averageEarning = !$averageRequired
+                    || (($entry['average_earning'] ?? null) === null
+                        && JmhzZeroReportProfile::isMonthWithoutIncome($inputAmounts, $exemptIncome))
+                    ? null
+                    : $this->inspectAverageEarning(
+                        $entry['average_earning'] ?? null,
+                        $employmentId,
+                        $periodStart,
+                        $issues,
+                    );
                 $identity = $identitySources[$employmentId] ?? null;
                 if (!is_array($identity)) {
                     /*

@@ -267,7 +267,7 @@ const RARE_ABSENCE_BLOCKS = [
   { key: 'parental', absenceTypes: ['parental'], suggestion: 'parental_hours' },
   {
     key: 'unpaid_leave',
-    absenceTypes: ['unpaid_leave', 'public_function', 'employee_obstacle_unpaid'],
+    absenceTypes: ['unpaid_leave', 'public_function', 'employee_obstacle_unpaid', 'invalid_termination'],
     suggestion: 'unpaid_leave_hours',
   },
   { key: 'unexcused', absenceTypes: ['unexcused'], suggestion: 'unexcused_hours' },

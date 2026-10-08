@@ -65,6 +65,7 @@ import PayrollPossiblyDeliveredNotice from '@/components/payroll/PayrollPossibly
 import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
 import { isTestEnvironmentRejection, useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
 import { jmhzBlockerLabel } from './jmhzBlockerRemediation'
+import JmhzProtocolErrorRemediation from './JmhzProtocolErrorRemediation.vue'
 
 const { t, te } = useI18n()
 const auth = useAuthStore()
@@ -2821,6 +2822,11 @@ onMounted(loadVariableSymbols)
                       >
                         {{ t('payroll.submissions.transport.report.control_unknown') }}
                       </p>
+                      <JmhzProtocolErrorRemediation
+                        v-if="error.remediation"
+                        :remediation="error.remediation"
+                        :test-id="`transport-report-remediation-${attempt.id}-${index}`"
+                      />
                       <p v-if="errorLocation(error).length" class="mt-2 text-xs text-neutral-600">
                         {{ errorLocation(error).join(' · ') }}
                       </p>
@@ -3050,6 +3056,11 @@ onMounted(loadVariableSymbols)
                 <p v-else class="mt-2 text-xs text-neutral-600">
                   {{ t('payroll.submissions.transport.report.control_unknown') }}
                 </p>
+                <JmhzProtocolErrorRemediation
+                  v-if="error.remediation"
+                  :remediation="error.remediation"
+                  :test-id="`transport-imported-remediation-${entry.protocol.id}-${index}`"
+                />
                 <p v-if="errorLocation(error).length" class="mt-2 text-xs text-neutral-600">
                   {{ errorLocation(error).join(' · ') }}
                 </p>

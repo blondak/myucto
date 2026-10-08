@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Architecture;
 
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolRemediationCatalog;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -69,6 +70,9 @@ final class JmhzCodeCatalogCoverageTest extends TestCase
         'jmhz_external_codebook_manifest_sha256' => 'field',
         'jmhz_external_codebook_overlay_key' => 'field',
         'jmhz_external_codebooks_verified_for_period' => 'field',
+        // Kontrola převzetí: převzatá mzda proti přijatému hlášení předchozího programu.
+        'jmhz_form_differences' => 'field',
+        'jmhz_minor' => 'field',
         'jmhz_functional_benefits_status' => 'field',
         'jmhz_identity' => 'route',
         // Původ identifikátoru osoby (source_origin), ne kód blokace.
@@ -230,6 +234,45 @@ final class JmhzCodeCatalogCoverageTest extends TestCase
                     if (!is_string($label) || trim($label) === '') {
                         $problems[] = "{$locale}: chybí payroll.jmhz_gate.{$group}.{$kind}";
                     }
+                }
+            }
+        }
+
+        self::assertSame([], $problems);
+    }
+
+    /**
+     * Náprava chyby z protokolu ČSSZ ukazuje kroky z překladů
+     * (`payroll.jmhz_protocol_help.steps.<kód>`, pole přes `tm()`). Kód bez
+     * kroků by v UI zobrazil prázdný postup; kroky ke kódu, který server
+     * nevydává, by tiše zastaraly.
+     */
+    public function testEveryProtocolRemediationHasStepsInBothLocales(): void
+    {
+        $problems = [];
+        foreach (['cs', 'en'] as $locale) {
+            $steps = $this->locale($locale)['payroll']['jmhz_protocol_help']['steps'] ?? [];
+            if (!is_array($steps)) {
+                $problems[] = "{$locale}: payroll.jmhz_protocol_help.steps není objekt";
+                continue;
+            }
+            foreach (JmhzProtocolRemediationCatalog::CODES as $code) {
+                $list = $steps[$code] ?? null;
+                if (!is_array($list) || $list === [] || !array_is_list($list)) {
+                    $problems[] = "{$locale}: chybí kroky payroll.jmhz_protocol_help.steps.{$code}";
+                    continue;
+                }
+                foreach ($list as $index => $step) {
+                    if (!is_string($step) || trim($step) === '') {
+                        $problems[] = "{$locale}: prázdný krok {$code}[{$index}]";
+                    } elseif (preg_match('/[{}|@]/', $step) === 1) {
+                        $problems[] = "{$locale}: krok {$code}[{$index}] obsahuje znak, který vue-i18n vykládá jako syntaxi";
+                    }
+                }
+            }
+            foreach (array_keys($steps) as $code) {
+                if (!in_array($code, JmhzProtocolRemediationCatalog::CODES, true)) {
+                    $problems[] = "{$locale}: kroky {$code} patří kódu, který server nevydává";
                 }
             }
         }

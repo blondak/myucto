@@ -4,6 +4,7 @@ import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import TakeoverEstimatedStartList from './TakeoverEstimatedStartList.vue'
 import TakeoverGapList from './TakeoverGapList.vue'
+import TakeoverJmhzFormFindings from './TakeoverJmhzFormFindings.vue'
 import TakeoverLayerFindings from './TakeoverLayerFindings.vue'
 import { monthRanges, type TakeoverCheck } from './takeoverMonths'
 
@@ -19,10 +20,12 @@ const { t } = useI18n()
 
 const estimatedStarts = computed(() => props.check.estimated_starts ?? [])
 const missingDiscountIntents = computed(() => props.check.missing_discount_intents ?? [])
+const jmhzFormDifferences = computed(() => props.check.jmhz_form_differences ?? [])
 
 const hasFindings = computed(() => props.check.missing_openings.length > 0
   || estimatedStarts.value.length > 0
   || missingDiscountIntents.value.length > 0
+  || jmhzFormDifferences.value.length > 0
   || props.check.differences.length > 0
   || props.check.opening_only.length > 0
   || props.check.takeover_only.length > 0)
@@ -82,6 +85,16 @@ const hasFindings = computed(() => props.check.missing_openings.length > 0
           ({{ row.employment_code }}): {{ t('payroll.discountIntents.reasons.' + row.discount_reason) }}
         </li>
       </ul>
+    </div>
+
+    <div
+      v-if="jmhzFormDifferences.length > 0"
+      class="mt-3 rounded-lg border border-warning-500/40 bg-warning-50 p-3 text-sm text-warning-800"
+      data-test="takeover-check-jmhz-forms"
+    >
+      <p class="font-medium">{{ t('payroll.takeover_check.jmhz_form_title') }}</p>
+      <p class="mt-0.5 text-xs">{{ t('payroll.takeover_check.jmhz_form_hint') }}</p>
+      <TakeoverJmhzFormFindings class="mt-2" :rows="jmhzFormDifferences" />
     </div>
 
     <TakeoverLayerFindings

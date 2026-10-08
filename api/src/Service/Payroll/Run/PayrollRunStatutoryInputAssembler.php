@@ -2106,6 +2106,8 @@ final class PayrollRunStatutoryInputAssembler
         'ocr',
         'long_term_care',
         'compensatory_time_off',
+        // Vztah trval po neplatném skončení, náhrada mzdy přiznána nebyla.
+        'invalid_termination',
     ];
 
     /** Jediné pravidlo i pro varování `employment_without_inputs` v PayrollRunSnapshotBuilder. */

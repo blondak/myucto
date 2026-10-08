@@ -8,6 +8,7 @@ use MyInvoice\Repository\Payroll\PayrollMigrationReconciliationRepository;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverCoverage;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverDiscountIntentCheck;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverJmhzFormCheck;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverLayerCheck;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 
@@ -28,6 +29,7 @@ final class PayrollMigrationReconciliationService
         private readonly PayrollTakeoverLayerCheck $layers,
         private readonly PayrollHistoricalPeriodService $historical,
         private readonly PayrollTakeoverDiscountIntentCheck $discountIntents,
+        private readonly PayrollTakeoverJmhzFormCheck $jmhzForms,
         ?PayrollMigrationReconciliationBuilder $builder = null,
     ) {
         $this->builder = $builder ?? new PayrollMigrationReconciliationBuilder();
@@ -76,6 +78,9 @@ final class PayrollMigrationReconciliationService
             // Sleva na pojistném bez přijatého záměru OZUSPOJ se neuplatní; po
             // převodu záměr předchozího programu chybí, dokud se nepřevezme.
             'missing_discount_intents' => $this->discountIntents->missingIntents($supplierId, $year),
+            // Hlášení předchozího programu podané před opravou mzdy: podnět
+            // k opravnému hlášení, převzetí nedrží.
+            'jmhz_form_differences' => $this->jmhzForms->check($supplierId, $year),
             ...$this->layers->check($supplierId, $year),
         ];
 

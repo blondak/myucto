@@ -58,7 +58,7 @@ enum PayrollWageReplacementTitle: string
             'ocr', 'long_term_care', 'ppm', 'paternity', 'parental' => self::StateBenefit,
             'employee_obstacle', 'employer_obstacle' => self::PaidObstacle,
             'unpaid_leave', 'compensatory_time_off', 'unexcused', 'other',
-            'public_function', 'employee_obstacle_unpaid' => self::Unpaid,
+            'public_function', 'employee_obstacle_unpaid', 'invalid_termination' => self::Unpaid,
             default => null,
         };
     }

@@ -110,6 +110,10 @@ final class PayrollJmhzAbsenceHoursDeriver
         // se dokládají stejně jako neplacené volno.
         'public_function' => 'unpaid_leave',
         'employee_obstacle_unpaid' => 'unpaid_leave',
+        // Vztah trvající po neplatném skončení bez přiznané náhrady mzdy
+        // (§ 16 odst. 4 písm. j) zákona č. 155/1995 Sb.): směny, které na tu
+        // dobu připadnou, jsou neodpracované hodiny bez náhrady, jen v úhrnu 10275.
+        'invalid_termination' => 'unpaid_leave',
         'unexcused' => 'unexcused',
         // Náhradní volno za přesčas: mzda za dobu čerpání nepřísluší
         // (§ 114 odst. 1 ZP), takže hodiny jdou jen do úhrnu 10275, ne do 10276.

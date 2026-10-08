@@ -34,12 +34,16 @@ export interface PayrollAbsenceDecisionResult {
  * `public_function` (výkon veřejné funkce, § 200 až 202 ZP) a
  * `employee_obstacle_unpaid` jsou pracovní volno BEZ náhrady mzdy; placená
  * překážka zůstává `employee_obstacle`.
+ *
+ * `invalid_termination` je doba, po kterou podle pravomocného rozhodnutí soudu
+ * vztah trval po neplatném skončení bez přiznané náhrady mzdy (§ 16 odst. 4
+ * písm. j) zákona č. 155/1995 Sb., v hlášení vyloučená doba 10536).
  */
 export type AbsenceType =
   | 'vacation' | 'dpn' | 'quarantine' | 'ocr' | 'long_term_care' | 'ppm'
   | 'paternity' | 'parental' | 'unpaid_leave' | 'employee_obstacle'
   | 'employer_obstacle' | 'compensatory_time_off' | 'unexcused' | 'other'
-  | 'public_function' | 'employee_obstacle_unpaid'
+  | 'public_function' | 'employee_obstacle_unpaid' | 'invalid_termination'
 
 /**
  * Druh placené překážky v práci. Pořadí zrcadlí `payroll_absences.obstacle_kind`

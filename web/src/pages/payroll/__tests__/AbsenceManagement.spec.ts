@@ -669,6 +669,32 @@ describe('AbsenceManagement', () => {
   })
 
   /*
+   * Doba trvání vztahu po neplatném skončení (§ 16 odst. 4 písm. j) zákona
+   * č. 155/1995 Sb.) je vlastní druh; formulář vysvětlí, kdy ho použít.
+   */
+  it('nabídne trvání vztahu po neplatném skončení a vysvětlí ho', async () => {
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    const type = wrapper.findComponent('[data-test="absence-type"]') as VueWrapper<any>
+    expect(type.props('options')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ value: 'invalid_termination' }),
+    ]))
+    expect(wrapper.find('[data-test="absence-invalid-termination-hint"]').exists()).toBe(false)
+
+    type.vm.$emit('update:modelValue', 'invalid_termination')
+    await flushPromises()
+    expect(wrapper.find('[data-test="absence-invalid-termination-hint"]').exists()).toBe(true)
+    await wrapper.get('[data-test="absence-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.createAbsence).toHaveBeenLastCalledWith(expect.objectContaining({
+      absence_type: 'invalid_termination',
+      average_snapshot_id: null,
+    }))
+    wrapper.unmount()
+  })
+
+  /*
    * Placená překážka: druh vybere účetní, sazba se předvyplní z tabulky
    * serveru, jiná sazba si vyžádá důvod a vše odejde na server.
    */

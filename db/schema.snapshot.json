@@ -960,7 +960,8 @@
         "1976_payroll_submission_manual_acceptances.sql",
         "1977_payroll_sickness_case_transfer_notice.sql",
         "1978_payroll_health_and_discount_exceptions_2026.sql",
-        "1979_payroll_pension_requests.sql"
+        "1979_payroll_pension_requests.sql",
+        "1980_payroll_absence_invalid_termination.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -7678,7 +7679,7 @@
             "engine": "InnoDB",
             "collation": "utf8mb4_unicode_ci",
             "columns": {
-                "absence_type": "enum('vacation','dpn','quarantine','ocr','long_term_care','ppm','paternity','parental','unpaid_leave','employee_obstacle','employer_obstacle','compensatory_time_off','unexcused','other','public_function','employee_obstacle_unpaid') NOT NULL",
+                "absence_type": "enum('vacation','dpn','quarantine','ocr','long_term_care','ppm','paternity','parental','unpaid_leave','employee_obstacle','employer_obstacle','compensatory_time_off','unexcused','other','public_function','employee_obstacle_unpaid','invalid_termination') NOT NULL",
                 "average_snapshot_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "childbirth_date": "date NULL DEFAULT NULL",
                 "childbirth_recorded_at": "datetime NULL DEFAULT NULL",

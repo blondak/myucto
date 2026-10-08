@@ -189,6 +189,30 @@ final class JmhzZeroReportProfile
         );
     }
 
+    /**
+     * Vztah nemá v měsíci zúčtovaný žádný příjem: vektor výdělků podle
+     * atributů (v haléřích i v korunách, rozhoduje jen nula) a osvobozený
+     * příjem jsou nulové. Je to podmínka situace
+     * {@see self::SITUATION_REGULAR_WITHOUT_WORK} („nebyl zúčtován příjem ze
+     * závislé činnosti“); v řádném hlášení jiná situace nastat nemůže,
+     * anulování nevykazovaného měsíce je vždy opravné hlášení.
+     *
+     * @param array<array-key,mixed> $earningsByAttribute
+     */
+    public static function isMonthWithoutIncome(array $earningsByAttribute, int $exemptIncome = 0): bool
+    {
+        if ($exemptIncome !== 0) {
+            return false;
+        }
+        foreach ($earningsByAttribute as $amount) {
+            if (!is_int($amount) || $amount !== 0) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /** @return list<string> */
     public static function divergentAttributes(): array
     {

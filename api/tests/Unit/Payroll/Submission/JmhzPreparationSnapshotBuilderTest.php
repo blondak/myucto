@@ -291,9 +291,53 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         );
     }
 
-    public function testMissingAverageEarningAndPrimaryEmploymentStayBlocked(): void
+    /**
+     * Vztah bez jediného zúčtovaného příjmu se hlásí nulovým formulářem
+     * s 10345 = 0 (Pravidla podání 1.4.5, kap. 4). Chybějící průměr ho proto
+     * nezastaví — dohoda, která v měsíci nic nevydělala, průměr nemá.
+     */
+    public function testMissingAverageEarningDoesNotBlockMonthWithoutIncome(): void
     {
         $source = $this->source();
+        $input = json_decode(
+            $source['revision']['input_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($input);
+        self::assertSame([], $input['people'][0]['employments'][0]['inputs']);
+        unset($input['people'][0]['employments'][0]['average_earning']);
+        $source['revision']['input_snapshot_json'] = CanonicalJson::encode($input);
+        $source['revision']['input_snapshot_hash'] = hash(
+            'sha256',
+            $source['revision']['input_snapshot_json'],
+        );
+        $result = json_decode(
+            $source['revision']['result_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($result);
+        $result['source_snapshot_hash'] = $source['revision']['input_snapshot_hash'];
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash(
+            'sha256',
+            $source['revision']['result_snapshot_json'],
+        );
+
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(7, 'test', $source, [], []);
+
+        self::assertNotContains(
+            'jmhz_average_hourly_earning_missing',
+            $snapshot->payload['readiness_issue_codes'],
+        );
+        self::assertNull($snapshot->payload['people'][0]['employments'][0]['average_earning']);
+    }
+
+    public function testMissingAverageEarningAndPrimaryEmploymentStayBlocked(): void
+    {
+        // Vztah S příjmem: tam průměr chybět nesmí.
+        $source = $this->source(negativeIncomeComponent: true);
         $input = json_decode(
             $source['revision']['input_snapshot_json'],
             true,

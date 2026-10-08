@@ -23,6 +23,7 @@ final class PayrollAbsenceOverlapException extends \RuntimeException
         'other' => 'jiná nepřítomnost',
         'public_function' => 'výkon veřejné funkce',
         'employee_obstacle_unpaid' => 'neplacená překážka na straně zaměstnance',
+        'invalid_termination' => 'trvání vztahu po neplatném skončení',
     ];
 
     private const STATUS_LABELS = [
