@@ -593,6 +593,13 @@ final class PayrollRunSnapshotBuilder
                         $row['foreign_legislation_country_code'],
                     'a1_certificate_until' => $row['a1_certificate_until'],
                 ];
+                // Člen družstva nebo SVJ (§ 5 písm. a) body 4 a 5 zákona
+                // č. 48/1997 Sb.) je zaměstnancem pro ZP jen v měsíci se
+                // započitatelným příjmem. Klíč jde do snímku jen u takového
+                // vztahu, ostatním zůstává snímek i otisk vstupu beze změny.
+                if ((int) ($row['health_association_member'] ?? 0) === 1) {
+                    $termSnapshot['health_association_member'] = true;
+                }
             }
             $people[$employeeId]['employments'][] = [
                 'employment' => [
@@ -1206,6 +1213,7 @@ final class PayrollRunSnapshotBuilder
                     term.jmhz_deep_mining_work_applies,
                     term.social_insurance_participation,
                     term.health_insurance_participation,
+                    term.health_association_member,
                     term.tax_regime,
                     term.tax_declaration_signed,
                     term.is_primary AS term_is_primary,
@@ -1600,6 +1608,7 @@ final class PayrollRunSnapshotBuilder
             $relationType,
             ($row['monthly_gross_minor'] ?? null) === null ? null : (int) $row['monthly_gross_minor'],
             PayrollExpectedHealthParticipation::dpcThreshold($this->rulesets, $periodEnd),
+            associationMember: (int) ($row['health_association_member'] ?? 0) === 1,
         );
     }
 

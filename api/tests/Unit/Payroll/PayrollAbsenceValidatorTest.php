@@ -340,6 +340,23 @@ final class PayrollAbsenceValidatorTest extends TestCase
         $this->validator()->absence($this->obstacle('employer_obstacle', 'partial_unemployment'));
     }
 
+    /**
+     * Částečná práce s příspěvkem (§ 120a a násl. zákona o zaměstnanosti) je
+     * překážka na straně zaměstnavatele s náhradou nejméně 80 %; méně neprojde.
+     */
+    public function testPartialWorkIsAnEmployerObstacleWithAtLeastEightyPercent(): void
+    {
+        $data = $this->validator()->absence($this->obstacle('employer_obstacle', 'partial_work'));
+        self::assertSame('partial_work', $data['obstacle_kind']);
+        self::assertSame(8_000, $data['compensation_rate_basis_points']);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->validator()->absence($this->obstacle('employer_obstacle', 'partial_work', [
+            'compensation_rate_basis_points' => 6_000,
+            'compensation_rate_reason' => 'Pokus',
+        ]));
+    }
+
     public function testObstacleFieldsAreRefusedOnOtherTypes(): void
     {
         $this->expectException(\InvalidArgumentException::class);

@@ -52,6 +52,7 @@ final class PayrollExpectedHealthParticipation
         ?int $agreedMonthlyMinor,
         ?int $dpcThresholdMinor,
         bool $participatedInRun = false,
+        bool $associationMember = false,
     ): bool {
         $value = $participation ?? 'automatic';
         if ($value === 'included') {
@@ -61,6 +62,18 @@ final class PayrollExpectedHealthParticipation
             return false;
         }
         $kind = self::kind($relationType);
+        if ($associationMember
+            && ($kind === HealthEmploymentKind::Employment
+                || $kind === HealthEmploymentKind::CorporateBody)
+        ) {
+            // Člen družstva nebo SVJ je zaměstnancem jen v měsíci se
+            // započitatelným příjmem (§ 5 písm. a) body 4 a 5): stejně jako
+            // DPČ podle sjednané odměny, nebo až podle schváleného běhu.
+            return $participatedInRun
+                || ($agreedMonthlyMinor !== null
+                    && $dpcThresholdMinor !== null
+                    && $agreedMonthlyMinor >= $dpcThresholdMinor);
+        }
 
         return match ($kind) {
             HealthEmploymentKind::Employment => true,
@@ -80,9 +93,12 @@ final class PayrollExpectedHealthParticipation
      * se účast doložená během čte z výsledku výpočtu a přihláška se váže
      * k měsíci, ve kterém účast poprvé vznikla.
      */
-    public static function decidedByMonthlyIncome(string $relationType): bool
-    {
-        return in_array(self::kind($relationType), self::RUN_DECIDED_KINDS, true);
+    public static function decidedByMonthlyIncome(
+        string $relationType,
+        bool $associationMember = false,
+    ): bool {
+        return $associationMember
+            || in_array(self::kind($relationType), self::RUN_DECIDED_KINDS, true);
     }
 
     /** Práh účasti DPČ k datu z pravidel ZDRAVOTNÍHO pojištění; `null`, když pravidla nejsou. */

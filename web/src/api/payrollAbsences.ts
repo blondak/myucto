@@ -53,7 +53,7 @@ export type ObstacleKind =
   | 'coworker_funeral' | 'relocation_employer_interest' | 'job_search_redundancy'
   | 'blood_donation' | 'employee_representation' | 'qualification_training'
   | 'other_paid_employee' | 'downtime' | 'weather_interruption'
-  | 'other_employer_obstacle' | 'partial_unemployment'
+  | 'other_employer_obstacle' | 'partial_unemployment' | 'partial_work'
 
 export interface PayrollObstacleKindRule {
   kind: ObstacleKind

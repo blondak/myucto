@@ -474,6 +474,85 @@ final class HealthInsuranceXmlSerializerTest extends TestCase
         }
     }
 
+    /**
+     * Sídlo v obci bez ulic: `adresaPlatceUlice` je povinný prvek, ale
+     * `string60Typ` prázdný řetězec připouští. Prvek se proto vypíše prázdný
+     * a věta projde XSD v PPZ i v HOZ; povinné zůstává číslo popisné a obec.
+     */
+    public function testEmployerSeatWithoutStreetKeepsTheMandatoryEmptyStreetElement(): void
+    {
+        $employer = HealthEmployerIdentification::fromBusinessId(
+            businessId: '12345678',
+            accountingUnit: '00',
+            name: 'Testovací firma s.r.o.',
+            street: '',
+            houseNumber: '12',
+            postalCode: '11000',
+            city: 'Lhota',
+            phone: '',
+        );
+        $employer->assertValid();
+
+        $overview = $this->serializer->serializePaymentOverview(
+            new HealthPaymentOverviewPayload(
+                insurerCode: '205',
+                overviewKind: HealthPaymentOverviewPayload::KIND_REGULAR,
+                employer: $employer,
+                month: 1,
+                year: 2026,
+                employeeCount: 1,
+                assessmentBaseMinorUnits: 2_240_000,
+                contributionCzk: 3024,
+            ),
+        );
+        self::assertMatchesRegularExpression(
+            '#<adresaPlatceUlice(/>|></adresaPlatceUlice>)\s*<adresaPlatceCisloPopisneOrientacni>12<#',
+            $overview,
+        );
+        $this->assertValidAgainstPinnedSchema(
+            HealthInsuranceSchemaCatalog::PPZ,
+            $overview,
+        );
+
+        $bulk = $this->serializer->serializeBulkNotification(
+            new HealthBulkNotificationPayload(
+                insurerCode: '205',
+                employer: $employer,
+                changes: [new HealthNotificationChange(
+                    changeCode: 'P',
+                    changedOn: '2026-01-05',
+                    insuranceNumber: '9001011234',
+                    lastName: 'Testová',
+                    firstName: 'Jana',
+                )],
+            ),
+        );
+        self::assertStringContainsString('adresaPlatceUlice', $bulk);
+        $this->assertValidAgainstPinnedSchema(
+            HealthInsuranceSchemaCatalog::HOZ,
+            $bulk,
+        );
+
+        foreach (['houseNumber' => 'zp_employer_house_number_missing', 'city' => 'zp_employer_city_missing'] as $field => $code) {
+            $values = [
+                'payerNumber' => '1234567800',
+                'name' => 'F',
+                'street' => '',
+                'houseNumber' => '1',
+                'postalCode' => '11000',
+                'city' => 'P',
+                'phone' => '',
+            ];
+            $values[$field] = ' ';
+            try {
+                (new HealthEmployerIdentification(...$values))->assertValid();
+                self::fail("Bez {$field} sídlo identifikované není.");
+            } catch (HealthNotificationException $e) {
+                self::assertSame($code, $e->errorCode);
+            }
+        }
+    }
+
     // --- PPZ -------------------------------------------------------------
 
     private function paymentOverview(): HealthPaymentOverviewPayload

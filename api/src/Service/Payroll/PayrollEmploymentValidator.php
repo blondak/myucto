@@ -44,6 +44,7 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationRelatio
  *   jmhz_relationship_detail_code:?string,
  *   social_insurance_participation:string,
  *   health_insurance_participation:string,
+ *   health_association_member:bool,
  *   tax_regime:string,
  *   other_withholding_eligibility:string,
  *   foreign_legislation_country_code:?string,
@@ -343,6 +344,13 @@ final class PayrollEmploymentValidator
         }
 
         $probableEarning = $this->probableEarning($input);
+        $healthAssociationMember = $this->requiredBool($input, 'health_association_member', false);
+        if ($healthAssociationMember && in_array($relationType, ['dpp', 'dpc'], true)) {
+            throw new \InvalidArgumentException(
+                'Člen družstva nebo SVJ se pro zdravotní pojištění posuzuje jen u vztahu, '
+                . 'který není dohodou. U DPP a DPČ platí vlastní hranice příjmu.',
+            );
+        }
 
         return [
             'office_id' => $officeId,
@@ -395,6 +403,7 @@ final class PayrollEmploymentValidator
             'jmhz_relationship_detail_code' => $relationshipDetailCode,
             'social_insurance_participation' => $social,
             'health_insurance_participation' => $health,
+            'health_association_member' => $healthAssociationMember,
             'tax_regime' => $tax,
             'other_withholding_eligibility' => $this->otherWithholdingEligibility(
                 $input,

@@ -3145,6 +3145,8 @@
           "dpc_group_below_threshold": "Součet příjmů z dohod o pracovní činnosti nedosáhl rozhodné částky",
           "dpp_group_negative_income_requires_period_revision": "Záporný součet příjmů z dohod o provedení práce vyžaduje opravu mzdového období",
           "dependent_income_relationship": "Jde o zaměstnání, které zakládá účast na zdravotním pojištění",
+          "association_member_counting_income_met": "Člen družstva nebo SVJ dosáhl v měsíci započitatelného příjmu, je zaměstnancem pro zdravotní pojištění",
+          "association_member_below_counting_income": "Člen družstva nebo SVJ nedosáhl v měsíci započitatelného příjmu, zaměstnancem pro zdravotní pojištění není",
           "participation_component_manual_review": "U mzdové složky {component} je nutné ověřit zařazení do účasti na pojištění",
           "manual_review": "Účast na pojištění nelze bez kontroly podkladů určit",
           "unknown": "Výpočet účasti vyžaduje kontrolu vstupních podkladů"
@@ -5558,6 +5560,8 @@
       "activity_code": "Druh činnosti",
       "social_mode": "Účast na sociálním pojištění",
       "health_mode": "Účast na zdravotním pojištění",
+      "health_association_member": "Člen družstva nebo SVJ, který pro ně pracuje za odměnu",
+      "health_association_member_hint": "Zaměstnancem pro zdravotní pojištění je jen v měsíci, kdy dosáhne započitatelného příjmu (§ 5 písm. a) zákona č. 48/1997 Sb.). V ostatních měsících se nepočítá do přehledu o platbě ani do minima.",
       "tax_regime_label": "Daňový režim",
       "foreign_country": "Stát cizích předpisů",
       "a1_certificate_until": "Potvrzení A1 platné do",
@@ -5751,6 +5755,7 @@
           "minimum_pension_age_declaration": "Prohlášení o dosažení důchodového věku bez nároku na důchod",
           "minimum_osvc_advance_confirmation": "Potvrzení pojišťovny o zálohách OSVČ alespoň z minima",
           "minimum_foster_reward_decision": "Rozhodnutí o odměně pěstouna",
+          "minimum_child_under_7_confirmation": "Potvrzení zdravotní pojišťovny o péči o dítě do 7 let",
           "minimum_sickness_certificate": "Potvrzení o pracovní neschopnosti, karanténě nebo ošetřování",
           "pension_age_statutory_table": "Výpočet podle přílohy zákona č. 155/1995 Sb.",
           "pension_age_cssz_information": "Informativní osobní list důchodového pojištění nebo sdělení ČSSZ",
@@ -5952,6 +5957,7 @@
             "pension_age_without_pension": "Důchodový věk bez nároku na důchod",
             "osvc_minimum_advance": "OSVČ platí zálohy alespoň z minima",
             "foster_reward_only": "Jen odměna pěstouna",
+            "child_under_7_care": "Péče o dítě do 7 let (potvrzená pojišťovnou)",
             "sickness_care_or_quarantine": "Nemoc, karanténa nebo ošetřování",
             "unverified": "Neověřeno"
           },
@@ -6190,6 +6196,7 @@
         "activity_code": "Druh činnosti",
         "social_insurance_participation": "Sociální pojištění",
         "health_insurance_participation": "Zdravotní pojištění",
+        "health_association_member": "Člen družstva nebo SVJ (zdravotní pojištění)",
         "tax_regime": "Daňový režim",
         "foreign_legislation_country_code": "Stát cizích předpisů",
         "a1_certificate_until": "A1 platné do",
@@ -12049,7 +12056,14 @@
       "zp_date_invalid": "Datum oznamované skutečnosti musí mít tvar RRRR-MM-DD.",
       "zp_document_type_unknown": "Jednotná datová věta zdravotních pojišťoven tento dokument nemá.",
       "zp_duty_rule_unavailable": "Oznamovací povinnost nemá pro zvolený den účinné pravidlo.",
+      "zp_employer_city_missing": "Adresa sídla firmy nemá vyplněnou obec. Doplňte ji v Nastavení, Firma - datová věta zdravotní pojišťovny ji vyžaduje.",
+      "zp_employer_city_too_long": "Obec v adrese sídla firmy přesahuje šedesát znaků, které datová věta dovoluje.",
+      "zp_employer_house_number_missing": "Adresa sídla firmy nemá vyplněné číslo popisné. Doplňte ho v Nastavení, Firma - adresu bez ulice určuje právě číslo popisné a obec.",
+      "zp_employer_house_number_too_long": "Číslo popisné v adrese sídla firmy přesahuje šedesát znaků, které datová věta dovoluje.",
+      "zp_employer_name_missing": "Firma nemá vyplněný název. Doplňte ho v Nastavení, Firma.",
+      "zp_employer_name_too_long": "Název firmy přesahuje osmdesát znaků, které datová věta dovoluje.",
       "zp_employer_phone_invalid": "Telefon plátce má po odstranění oddělovačů víc číslic, než datová věta dovoluje (max. třicet).",
+      "zp_employer_street_too_long": "Ulice v adrese sídla firmy přesahuje šedesát znaků, které datová věta dovoluje.",
       "zp_employment_not_notifiable": "Zrušený nástup ani archivovaný pracovní vztah nezakládá oznamovací povinnost vůči zdravotní pojišťovně.",
       "zp_insurance_number_invalid": "Číslo pojištěnce musí mít devět nebo deset číslic, u cizince bez přiděleného čísla tvar MDDMMRRRR nebo ZDDMMRRRR.",
       "zp_insurer_code_missing": "Zaměstnanec nemá evidovanou zdravotní pojišťovnu, takže oznámení nemá komu odejít. Doplňte ji v kartě zaměstnance.",
@@ -12074,6 +12088,7 @@
       "zp_payer_number_missing": "U platebního účtu účinného k danému datu chybí desetimístné číslo plátce. Doplňte ho v Mzdy, Nastavení zaměstnavatele, Platební účty institucí, do pole VS zaměstnavatele - pojišťovna ho přidělila při registraci a má přesně deset číslic.",
       "zp_pdf_artifact_mismatch": "Otisk uloženého PDF neodpovídá zmrazenému přehledu. Zkuste přípravu podání zopakovat.",
       "zp_period_contains_unresolved_employments": "Povinnosti nelze zpracovat: u několika pracovních vztahů chybí údaje potřebné k určení zdravotní pojišťovny.",
+      "zp_period_in_future": "Přehled o platbě pojistného za budoucí měsíc pojišťovna odmítne. Připravte ho nejdříve v měsíci, za který se podává.",
       "zp_period_invalid": "Mzdové období musí mít tvar RRRR-MM.",
       "zp_portal_gateway_description_on_request": "Pro tuto zdravotní pojišťovnu není k dnešnímu dni popis portálového rozhraní veřejně dostupný, jen na vyžádání. Automatizované odeslání proto aplikace nenabízí - soubor odešlete ručně datovou schránkou nebo portálem.",
       "zp_postal_code_invalid": "PSČ musí mít přesně pět číslic bez mezery.",
@@ -27487,7 +27502,8 @@
         "downtime": "Prostoj",
         "weather_interruption": "Přerušení práce kvůli počasí nebo živelní události",
         "other_employer_obstacle": "Jiná překážka na straně zaměstnavatele",
-        "partial_unemployment": "Částečná nezaměstnanost"
+        "partial_unemployment": "Částečná nezaměstnanost",
+        "partial_work": "Částečná práce s příspěvkem státu"
       },
       "hints": {
         "medical_examination": "NV č. 590/2006 Sb., bod 1: náhrada 100 % průměru jen za nezbytně nutnou dobu u nejbližšího smluvního lékaře, pokud to nešlo mimo pracovní dobu. Na část směny vyplňte zameškané hodiny prvního dne.",
@@ -27509,7 +27525,8 @@
         "downtime": "§ 207 písm. a) ZP: porucha stroje, výpadek surovin nebo energie, chybné podklady. Náhrada nejméně 80 % průměru, pokud zaměstnanec nebyl převeden na jinou práci.",
         "weather_interruption": "§ 207 písm. b) ZP: přerušení práce kvůli nepříznivému počasí nebo živelní události. Náhrada nejméně 60 % průměru.",
         "other_employer_obstacle": "§ 208 ZP: jiné překážky na straně zaměstnavatele (nedostatek práce, uzavření provozu, prostoje nad rámec § 207). Náhrada 100 % průměru.",
-        "partial_unemployment": "§ 209 ZP: dočasné omezení odbytu nebo poptávky. Náhrada nejméně 60 % jen podle dohody s odbory nebo vnitřního předpisu; bez něj jde o jinou překážku se 100 %."
+        "partial_unemployment": "§ 209 ZP: dočasné omezení odbytu nebo poptávky. Náhrada nejméně 60 % jen podle dohody s odbory nebo vnitřního předpisu; bez něj jde o jinou překážku se 100 %.",
+        "partial_work": "§ 120a a násl. zákona o zaměstnanosti: částečná práce, za kterou zaměstnavatel žádá příspěvek. Náhrada nejméně 80 % průměru. Zaměstnanec je v měsíčním přehledu nákladů, takže za něj za tento měsíc nenáleží sleva na pojistném (§ 7a odst. 3 písm. e) zákona č. 589/1992 Sb.)."
       }
     },
     "status": {

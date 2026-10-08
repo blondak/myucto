@@ -3145,6 +3145,8 @@
           "dpc_group_below_threshold": "Combined income from agreements to perform work did not reach the participation threshold",
           "dpp_group_negative_income_requires_period_revision": "Negative combined income from agreements to complete a job requires a payroll period correction",
           "dependent_income_relationship": "This employment relationship participates in health insurance",
+          "association_member_counting_income_met": "The cooperative or owners' association member reached the counting income this month and is an employee for health insurance",
+          "association_member_below_counting_income": "The cooperative or owners' association member did not reach the counting income this month and is not an employee for health insurance",
           "participation_component_manual_review": "Insurance participation treatment must be reviewed for payroll component {component}",
           "manual_review": "Insurance participation cannot be determined without reviewing the evidence",
           "unknown": "The insurance participation calculation requires review of its input evidence"
@@ -5558,6 +5560,8 @@
       "activity_code": "Activity type",
       "social_mode": "Social insurance participation",
       "health_mode": "Health insurance participation",
+      "health_association_member": "Member of a cooperative or owners' association working for it for remuneration",
+      "health_association_member_hint": "An employee for health insurance only in a month in which the counting income is reached (Section 5(a) of Act No. 48/1997 Coll.). In other months the person is left out of the payment statement and the minimum.",
       "tax_regime_label": "Tax regime",
       "foreign_country": "Foreign legislation country",
       "a1_certificate_until": "A1 certificate valid until",
@@ -5751,6 +5755,7 @@
           "minimum_pension_age_declaration": "Declaration of reaching pension age without pension entitlement",
           "minimum_osvc_advance_confirmation": "Insurer confirmation of self-employed advances at least from the minimum",
           "minimum_foster_reward_decision": "Foster carer reward decision",
+          "minimum_child_under_7_confirmation": "Health insurer confirmation of caring for a child under 7",
           "minimum_sickness_certificate": "Certificate of sickness, quarantine or caring for a family member",
           "pension_age_statutory_table": "Calculated from the annex to Act No. 155/1995 Coll.",
           "pension_age_cssz_information": "Pension insurance statement or notice from the CSSA (ČSSZ)",
@@ -5952,6 +5957,7 @@
             "pension_age_without_pension": "Pension age without pension entitlement",
             "osvc_minimum_advance": "Self-employed paying advances at least from the minimum",
             "foster_reward_only": "Foster carer reward only",
+            "child_under_7_care": "Caring for a child under 7 (confirmed by the insurer)",
             "sickness_care_or_quarantine": "Sickness, quarantine or caring",
             "unverified": "Unverified"
           },
@@ -6190,6 +6196,7 @@
         "activity_code": "Activity type",
         "social_insurance_participation": "Social insurance",
         "health_insurance_participation": "Health insurance",
+        "health_association_member": "Cooperative or owners' association member (health insurance)",
         "tax_regime": "Tax regime",
         "foreign_legislation_country_code": "Foreign legislation country",
         "a1_certificate_until": "A1 valid until",
@@ -12049,7 +12056,14 @@
       "zp_date_invalid": "The date of the reported fact must be in the format YYYY-MM-DD.",
       "zp_document_type_unknown": "The unified health insurer data record does not have this document type.",
       "zp_duty_rule_unavailable": "There is no rule in effect for the notification duty on the selected date.",
+      "zp_employer_city_missing": "The company's registered address has no municipality. Fill it in under Settings, Company - the health insurer data record requires it.",
+      "zp_employer_city_too_long": "The municipality of the company's registered address exceeds the sixty characters the data record allows.",
+      "zp_employer_house_number_missing": "The company's registered address has no house number. Fill it in under Settings, Company - an address without a street is identified by the house number and municipality.",
+      "zp_employer_house_number_too_long": "The house number of the company's registered address exceeds the sixty characters the data record allows.",
+      "zp_employer_name_missing": "The company has no name. Fill it in under Settings, Company.",
+      "zp_employer_name_too_long": "The company name exceeds the eighty characters the data record allows.",
       "zp_employer_phone_invalid": "The payer's phone number has more digits than the data record allows (max thirty) after removing separators.",
+      "zp_employer_street_too_long": "The street of the company's registered address exceeds the sixty characters the data record allows.",
       "zp_employment_not_notifiable": "A cancelled start of employment or an archived employment does not create a notification duty toward the health insurer.",
       "zp_insurance_number_invalid": "The insured person's number must have nine or ten digits, or for a foreigner without an assigned number the format MDDMMYYYY or ZDDMMYYYY.",
       "zp_insurer_code_missing": "The employee has no health insurer on record, so the notification has nowhere to go. Fill it in on the employee's record.",
@@ -12074,6 +12088,7 @@
       "zp_payer_number_missing": "The payment account effective on that date is missing the ten-digit payer number. Fill it in under Payroll, Employer settings, Institution payment accounts, in the employer VS field - the insurer assigned it at registration and it has exactly ten digits.",
       "zp_pdf_artifact_mismatch": "The stored PDF's fingerprint does not match the frozen statement. Try preparing the submission again.",
       "zp_period_contains_unresolved_employments": "Duties cannot be processed: several employments are missing the data needed to determine their health insurer.",
+      "zp_period_in_future": "The health insurer rejects a payment statement for a future month. Prepare it no earlier than in the month it covers.",
       "zp_period_invalid": "The payroll period must be in the format YYYY-MM.",
       "zp_portal_gateway_description_on_request": "The description of this health insurer's portal gateway is not currently published, only available on request. Automated dispatch is therefore not offered - send the file manually via data box or the insurer's portal.",
       "zp_postal_code_invalid": "The postal code must have exactly five digits with no space.",
@@ -27487,7 +27502,8 @@
         "downtime": "Downtime",
         "weather_interruption": "Work interrupted by weather or natural disaster",
         "other_employer_obstacle": "Other employer-side obstacle",
-        "partial_unemployment": "Partial unemployment"
+        "partial_unemployment": "Partial unemployment",
+        "partial_work": "Partial work with a state contribution"
       },
       "hints": {
         "medical_examination": "Government Decree 590/2006, item 1: 100 % compensation only for the necessary time at the nearest contracted doctor, if it could not be done outside working hours. For part of a shift, fill in the missed hours of the first day.",
@@ -27509,7 +27525,8 @@
         "downtime": "§ 207(a) of the Labour Code: machine breakdown, missing materials or energy, faulty documents. At least 80 % of average if the employee was not moved to other work.",
         "weather_interruption": "§ 207(b) of the Labour Code: work interrupted by bad weather or a natural disaster. At least 60 % of average.",
         "other_employer_obstacle": "§ 208 of the Labour Code: other employer-side obstacles (lack of work, closed operations). 100 % of average.",
-        "partial_unemployment": "§ 209 of the Labour Code: temporary drop in sales or demand. At least 60 % only under an agreement with the union or an internal regulation; otherwise it is another obstacle at 100 %."
+        "partial_unemployment": "§ 209 of the Labour Code: temporary drop in sales or demand. At least 60 % only under an agreement with the union or an internal regulation; otherwise it is another obstacle at 100 %.",
+        "partial_work": "Section 120a et seq. of the Employment Act: partial work for which the employer claims a contribution. At least 80 % of average. The employee is listed in the monthly cost statement, so no social security discount is due for them in that month (Section 7a(3)(e) of Act No. 589/1992 Coll.)."
       }
     },
     "status": {

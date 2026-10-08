@@ -28,6 +28,27 @@ final class PayrollEmploymentValidatorTest extends TestCase
         self::assertTrue($result['terms']['is_primary']);
     }
 
+    /**
+     * Příznak člena družstva nebo SVJ (§ 5 písm. a) body 4 a 5 zákona
+     * č. 48/1997 Sb.) se uloží u pracovního vztahu i u člena orgánu; dohody
+     * mají vlastní hranici příjmu a příznak u nich nedává smysl.
+     */
+    public function testAssociationMemberFlagIsStoredButNotForAgreements(): void
+    {
+        $terms = $this->terms();
+        self::assertFalse($this->validator()->terms($terms)['health_association_member']);
+        $terms['activity_code'] = null;
+        $terms['jmhz_relationship_detail_code'] = null;
+        $terms['health_association_member'] = true;
+        self::assertTrue(
+            $this->validator()->terms($terms, relationType: 'statutory_body')['health_association_member'],
+        );
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('DPP a DPČ');
+        $this->validator()->terms($terms, relationType: 'dpc');
+    }
+
     public function testLeaveAllowanceOverrideIsOptionalAndMustRespectStatutoryMinimum(): void
     {
         $terms = $this->terms();

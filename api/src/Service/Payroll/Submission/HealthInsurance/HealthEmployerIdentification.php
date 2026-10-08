@@ -77,16 +77,20 @@ final readonly class HealthEmployerIdentification
                 'PSČ musí mít přesně pět číslic bez mezery.',
             );
         }
+        // Ulice povinná NENÍ: prvek `adresaPlatceUlice` se vypisuje vždy
+        // (minOccurs=1), ale `string60Typ` připouští prázdný řetězec a sídlo
+        // v obci bez ulic má jen číslo popisné. Adresu pak nese číslo a obec,
+        // které zůstávají povinné.
         foreach ([
             'zp_employer_name_missing' => $this->name,
-            'zp_employer_street_missing' => $this->street,
             'zp_employer_house_number_missing' => $this->houseNumber,
             'zp_employer_city_missing' => $this->city,
         ] as $code => $value) {
             if (trim($value) === '') {
                 throw new HealthNotificationException(
                     $code,
-                    'Identifikace zaměstnavatele není pro podání úplná.',
+                    'Identifikace zaměstnavatele není pro podání úplná: '
+                    . 'v nastavení firmy chybí název, číslo popisné nebo obec sídla.',
                 );
             }
         }

@@ -584,6 +584,58 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
         self::assertFalse($relationship?->employerOnProtectedLaborMarket);
     }
 
+    /**
+     * Částečná práce s příspěvkem v měsíci (překážka `partial_work`) znamená,
+     * že je zaměstnanec v přehledu nákladů podle § 120e odst. 5 zákona
+     * o zaměstnanosti; jiná překážka zaměstnavatele ani částečná práce mimo
+     * měsíc takový příznak nedávají.
+     */
+    public function testPartialWorkAbsenceInTheMonthMarksTheRelationship(): void
+    {
+        $snapshot = $this->acceptedIntentSnapshot('not_applicable');
+        $absence = static fn (string $kind, string $from, string $to): array => [
+            'id' => 9100,
+            'absence_type' => 'employer_obstacle',
+            'obstacle_kind' => $kind,
+            'date_from' => $from,
+            'date_to' => $to,
+            'compensation_rate_basis_points' => 8_000,
+        ];
+        $assemble = static fn (array $snapshot) => (new PayrollRunStatutoryInputAssembler())
+            ->assemble($snapshot)->socialInsurance?->people[0]->relationships[0];
+        $period = substr((string) $snapshot['period_start'], 0, 7);
+
+        $snapshot['people'][0]['employments'][0]['absences'] = [
+            $absence('partial_work', $period . '-10', $period . '-12'),
+        ];
+        self::assertTrue($assemble($snapshot)?->listedInPartialWorkOverview);
+
+        $snapshot['people'][0]['employments'][0]['absences'] = [
+            $absence('downtime', $period . '-10', $period . '-12'),
+            $absence('partial_work', '2000-01-01', '2000-01-31'),
+        ];
+        self::assertFalse($assemble($snapshot)?->listedInPartialWorkOverview);
+    }
+
+    /**
+     * Příznak člena družstva nebo SVJ jde ze zmrazených podmínek vztahu do
+     * vstupu výpočtu ZP. Revize bez klíče se počítají jako dřív.
+     */
+    public function testAssociationMemberFlagReachesTheHealthRelationshipInput(): void
+    {
+        $snapshot = $this->acceptedIntentSnapshot('not_applicable');
+        $snapshot['people'][0]['employments'][0]['term']['health_association_member'] = true;
+
+        $relationship = (new PayrollRunStatutoryInputAssembler())
+            ->assemble($snapshot)->healthInsurance?->people[0]->relationships[0];
+        self::assertTrue($relationship?->associationMember);
+
+        unset($snapshot['people'][0]['employments'][0]['term']['health_association_member']);
+        $relationship = (new PayrollRunStatutoryInputAssembler())
+            ->assemble($snapshot)->healthInsurance?->people[0]->relationships[0];
+        self::assertFalse($relationship?->associationMember);
+    }
+
     public function testAgeConditionMetKeepsTheDiscount(): void
     {
         $bundle = (new PayrollRunStatutoryInputAssembler())

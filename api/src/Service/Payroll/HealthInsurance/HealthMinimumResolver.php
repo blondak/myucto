@@ -107,10 +107,19 @@ final class HealthMinimumResolver
                 $issues[] = 'foster_reward_only_exception_relationships_mismatch';
                 continue;
             }
+            $reductionFrom = $reduction->from;
+            if (
+                $reduction->reason === HealthMinimumReductionReason::ChildUnder7Care
+                && $reductionFrom < HealthMinimumReductionReason::CHILD_UNDER_7_CARE_EFFECTIVE_FROM
+            ) {
+                // Do 31. 12. 2025 platila jiná výjimka (péče bez zdanitelných
+                // příjmů), na zaměstnance se nevztahovala.
+                $reductionFrom = HealthMinimumReductionReason::CHILD_UNDER_7_CARE_EFFECTIVE_FROM;
+            }
             $intervalDays = [];
             $this->addIntervalDays(
                 $intervalDays,
-                new DateTimeImmutable($reduction->from),
+                new DateTimeImmutable($reductionFrom),
                 new DateTimeImmutable($reduction->to),
                 $monthStart,
                 $monthEnd,

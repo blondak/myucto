@@ -48,6 +48,7 @@ final class PayrollEmploymentTermsBody
         'jmhz_relationship_detail_code',
         'social_insurance_participation',
         'health_insurance_participation',
+        'health_association_member',
         'tax_regime',
         'other_withholding_eligibility',
         'foreign_legislation_country_code',

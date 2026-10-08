@@ -25,7 +25,21 @@ final readonly class HealthInsuranceRelationshipInput
         public ?string $employmentTo,
         public HealthIncomeAttribution $incomeAttribution,
         array $components,
+        /**
+         * Člen družstva nebo společenství vlastníků jednotek, který pro ně
+         * pracuje za odměnu. Zaměstnancem pro ZP není v měsíci, ve kterém
+         * nedosáhl započitatelného příjmu (§ 5 písm. a) body 4 a 5 zákona
+         * č. 48/1997 Sb. ve znění zákona č. 289/2025 Sb.).
+         */
+        public bool $associationMember = false,
     ) {
+        if ($associationMember
+            && ($kind === HealthEmploymentKind::Dpp || $kind === HealthEmploymentKind::Dpc)
+        ) {
+            throw new InvalidArgumentException(
+                'Association member income test does not apply to DPP and DPČ.',
+            );
+        }
         if (preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/D', $relationshipId) !== 1) {
             throw new InvalidArgumentException('Health insurance relationship ID is not canonical.');
         }

@@ -50,6 +50,12 @@ final readonly class SocialInsuranceRelationshipInput
          * za zaměstnance s postižením (§ 7a odst. 1 písm. f) nenáleží.
          */
         public bool $employerOnProtectedLaborMarket = false,
+        /**
+         * Zaměstnanec byl v měsíci v částečné práci s příspěvkem a je uveden
+         * v měsíčním přehledu nákladů na náhrady mezd (§ 120e odst. 5 zákona
+         * o zaměstnanosti). Podle § 7a odst. 3 písm. e) za něj sleva nenáleží.
+         */
+        public bool $listedInPartialWorkOverview = false,
     ) {
         if (preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/D', $relationshipId) !== 1) {
             throw new InvalidArgumentException('Social insurance relationship ID is not canonical.');

@@ -23,7 +23,9 @@ use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Psr\Clock\ClockInterface;
 use Smalot\PdfParser\Parser;
+use Symfony\Component\Clock\MockClock;
 
 /**
  * Životní cyklus podání přehledu o platbě zdravotní pojišťovně: povinnost →
@@ -720,6 +722,86 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
                 $issue['issue_code'],
             );
         }
+    }
+
+    /**
+     * E-přepážka ČPZP odmítne přehled za budoucí období (klíč `invalidDates`),
+     * běžný měsíc povolí. Přehled za červen 2026 tedy v květnu nevznikne ani
+     * jako soubor ke stažení, v červnu už ano.
+     */
+    public function testPaymentOverviewForFutureMonthIsRefusedButCurrentMonthPasses(): void
+    {
+        try {
+            $this->serviceAt('2026-05-20 12:00:00')->paymentOverviewDownload(
+                $this->supplierId,
+                $this->revisionId,
+                '111',
+            );
+            self::fail('Přehled za budoucí měsíc nesmí vzniknout.');
+        } catch (HealthNotificationException $e) {
+            self::assertSame('zp_period_in_future', $e->errorCode);
+        }
+        try {
+            $this->serviceAt('2026-05-20 12:00:00')->preparePaymentOverview(
+                $this->supplierId,
+                'production',
+                $this->revisionId,
+                '111',
+            );
+            self::fail('Přehled za budoucí měsíc nesmí vzniknout.');
+        } catch (HealthNotificationException $e) {
+            self::assertSame('zp_period_in_future', $e->errorCode);
+        }
+
+        $download = $this->serviceAt('2026-06-10 12:00:00')
+            ->paymentOverviewDownload($this->supplierId, $this->revisionId, '111');
+        self::assertSame('text_pdf', $download['format']);
+        self::assertStringStartsWith('%PDF-', $download['bytes']);
+    }
+
+    /**
+     * Po konci přechodného období (31. 12. 2026) VZP nedostane PDF tiskopis,
+     * ale jednotnou datovou větu. Dřív tu příprava i stažení končily
+     * chybou `zp_isds_attachment_undocumented`.
+     */
+    public function testVzpOverviewAfterTheTransitionPeriodIsTheSharedXml(): void
+    {
+        $service = $this->serviceAt('2027-01-15 12:00:00');
+        $download = $service->paymentOverviewDownload(
+            $this->supplierId,
+            $this->revisionId,
+            '111',
+        );
+        self::assertSame('xml', $download['format']);
+        self::assertStringContainsString(
+            '<kodZdravotniPojistovny>111</kodZdravotniPojistovny>',
+            $download['bytes'],
+        );
+
+        $prepared = $service->preparePaymentOverview(
+            $this->supplierId,
+            'production',
+            $this->revisionId,
+            '111',
+        );
+        self::assertTrue($prepared['created']);
+        $catalogVersion = $this->db->pdo()->prepare(
+            'SELECT catalog_version FROM payroll_submission_artifacts
+              WHERE supplier_id = ? AND id = ?',
+        );
+        $catalogVersion->execute([$this->supplierId, $prepared['artifact_id']]);
+        self::assertStringEndsWith('xml', (string) $catalogVersion->fetchColumn());
+    }
+
+    private function serviceAt(string $now): HealthInsuranceSubmissionService
+    {
+        $container = Bootstrap::buildContainer();
+        $container->set(Connection::class, $this->db);
+        $container->set(ClockInterface::class, new MockClock($now));
+        $service = $container->get(HealthInsuranceSubmissionService::class);
+        self::assertInstanceOf(HealthInsuranceSubmissionService::class, $service);
+
+        return $service;
     }
 
     public function testPreparingTheSameOverviewTwiceReplaysInsteadOfDuplicating(): void

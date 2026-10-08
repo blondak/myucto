@@ -664,8 +664,11 @@ final class SocialInsuranceMonthCalculator
         $weeklyMillihours = 0;
         $employmentDays = 0;
         $monthDays = 0;
+        $listedInPartialWorkOverview = false;
         foreach ($facts as $fact) {
             $relationship = $fact->relationship;
+            $listedInPartialWorkOverview = $listedInPartialWorkOverview
+                || $relationship->listedInPartialWorkOverview;
             if ($relationship->kind !== SocialEmploymentKind::Employment) {
                 continue;
             }
@@ -684,7 +687,12 @@ final class SocialInsuranceMonthCalculator
 
         $averageWage = $this->moneyParameter($ruleset, 'average_wage.monthly');
         $outcome = SocialPartTimeDiscountOutcome::Applied;
-        if (
+        if ($listedInPartialWorkOverview) {
+            // § 7a odst. 3 písm. e): zaměstnanec uvedený v měsíčním přehledu
+            // nákladů na náhrady mezd pro příspěvek v době částečné práce
+            // (§ 120e odst. 5 zákona o zaměstnanosti).
+            $outcome = SocialPartTimeDiscountOutcome::PartialWorkContribution;
+        } elseif (
             // § 7a odst. 3 písm. d): zaměstnanec s postižením (odst. 1 písm. f)
             // v pracovním poměru k zaměstnavateli na chráněném trhu práce.
             $reason === SocialPartTimeDiscountReason::DisabledPerson

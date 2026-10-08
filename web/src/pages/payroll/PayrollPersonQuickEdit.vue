@@ -515,6 +515,7 @@ function termsPayload(employment: PayrollEmployment): PayrollEmploymentTermsPayl
     jmhz_relationship_detail_code: terms.jmhz_relationship_detail_code,
     social_insurance_participation: terms.social_insurance_participation,
     health_insurance_participation: terms.health_insurance_participation,
+    health_association_member: terms.health_association_member ?? false,
     tax_regime: terms.tax_regime,
     foreign_legislation_country_code: terms.foreign_legislation_country_code,
     a1_certificate_until: terms.a1_certificate_until,

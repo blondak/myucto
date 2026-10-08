@@ -7,9 +7,24 @@ namespace MyInvoice\Service\Payroll;
 use DateTimeImmutable;
 use InvalidArgumentException;
 use MyInvoice\Service\Codebook\HealthInsurers;
+use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumReductionReason;
 
 final class PayrollPersonStatutoryEvidenceValidator
 {
+    /**
+     * Důvody výjimky z minima ZP. Jediný zdroj je enum, aby nový důvod
+     * nemusel nikdo dopisovat na dvě místa validátoru.
+     *
+     * @return list<string>
+     */
+    private static function healthMinimumReductionReasons(): array
+    {
+        return array_map(
+            static fn (HealthMinimumReductionReason $reason): string => $reason->value,
+            HealthMinimumReductionReason::cases(),
+        );
+    }
+
     /** @param array<string,mixed> $raw
      *  @return array<string,mixed>
      */
@@ -36,15 +51,7 @@ final class PayrollPersonStatutoryEvidenceValidator
             fn (array $row): string => $this->enum(
                 $row,
                 'reason',
-                [
-                    'state_insured',
-                    'ztp_or_ztp_p',
-                    'pension_age_without_pension',
-                    'sickness_care_or_quarantine',
-                    'osvc_minimum_advance',
-                    'foster_reward_only',
-                    'unverified',
-                ],
+                self::healthMinimumReductionReasons(),
             ),
         );
         $monthEvidence = $this->monthRows(
@@ -324,20 +331,21 @@ final class PayrollPersonStatutoryEvidenceValidator
         $reason = $this->enum(
             $row,
             'reason',
-            [
-                'state_insured',
-                'ztp_or_ztp_p',
-                'pension_age_without_pension',
-                'sickness_care_or_quarantine',
-                'osvc_minimum_advance',
-                'foster_reward_only',
-                'unverified',
-            ],
+            self::healthMinimumReductionReasons(),
         );
         $evidence = $this->nullableCanonical($row, 'evidence_reference');
         $this->assertEvidenceAllowed($reason !== 'unverified', $evidence, 'redukce minima');
+        $interval = $this->baseInterval($row);
+        if ($reason === HealthMinimumReductionReason::ChildUnder7Care->value
+            && $interval['effective_from'] < HealthMinimumReductionReason::CHILD_UNDER_7_CARE_EFFECTIVE_FROM
+        ) {
+            throw new \InvalidArgumentException(
+                'Výjimku z minima pro péči o dítě do 7 let zná zákon až od 1. 1. 2026 '
+                . '(zákon č. 289/2025 Sb.). Zadejte den, od kterého ji pojišťovna potvrdila.',
+            );
+        }
 
-        return $this->baseInterval($row) + [
+        return $interval + [
             'reason' => $reason,
             'evidence_reference' => $evidence,
         ];
