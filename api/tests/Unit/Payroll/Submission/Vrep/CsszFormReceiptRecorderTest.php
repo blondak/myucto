@@ -64,6 +64,34 @@ final class CsszFormReceiptRecorderTest extends TestCase
     }
 
     /**
+     * NEMPRI25-*.potv.prevedenaNaJinouPraci-2: druhé oznámení ke dni převedení
+     * je vlastní podání případu a jeho protokol se zapíše k němu, ne k prvnímu
+     * oznámení. Dřív součást `sickness:<případ>:nempri_transfer` neznal
+     * a výsledek se nezapsal vůbec.
+     */
+    public function testAcceptedTransferNoticeIsRecordedOnItsOwnDocument(): void
+    {
+        $cases = $this->cases(['nempri_transfer_submission_id' => self::SUBMISSION]);
+        $cases->expects(self::once())->method('recordReceipt')->with(
+            self::SUPPLIER,
+            'test',
+            self::CASE_ID,
+            SicknessDocumentKind::NempriTransfer,
+            'accepted',
+            self::DELIVERED_ON,
+            null,
+        )->willReturn([]);
+
+        $outcome = $this->recorder('sickness:' . self::CASE_ID . ':nempri_transfer', $cases)
+            ->record(self::SUPPLIER, 'test', self::SUBMISSION, self::report(
+                CsszFormProtocolSample::accepted('CSSZ_NEM_PRI', 'NEMPRI25'),
+            ));
+
+        self::assertSame('recorded', $outcome);
+        self::assertSame([], $this->issues);
+    }
+
+    /**
      * Chyba 103: HZUPN se u případu vede jako odmítnuté s důvodem, který říká,
      * že vada je v pověření u OSSZ, ne v podání. Podání dostane nález.
      */

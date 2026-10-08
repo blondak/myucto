@@ -94,7 +94,7 @@ final readonly class CsszFormReceiptRecorder
         $reason = self::rejectionReason($report);
 
         try {
-            if (preg_match('/^sickness:([1-9][0-9]*):(nempri|hzupn)$/D', $target['part_reference'], $match) === 1) {
+            if (preg_match('/^sickness:([1-9][0-9]*):(nempri_transfer|nempri|hzupn)$/D', $target['part_reference'], $match) === 1) {
                 return $this->recordSickness(
                     $supplierId,
                     $environment,

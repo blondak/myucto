@@ -10722,6 +10722,7 @@
         "predecessor": "filed by the previous program"
       },
       "documents": {
+        "nempri_transfer": "NEMPRI as of the transfer date",
         "nempri": "NEMPRI",
         "hzupn": "HZUPN"
       },
@@ -10735,6 +10736,13 @@
         "edit": "Edit",
         "save": "Save",
         "cancel": "Discard changes",
+        "previewNempriTransfer": "Preview NEMPRI as of the transfer date",
+        "prepareNempriTransfer": "Prepare NEMPRI as of the transfer date",
+        "dispatchNempriTransfer": "Send NEMPRI as of the transfer date via data box",
+        "recordAcceptedNempriTransfer": "Record acceptance of NEMPRI as of the transfer date",
+        "recordRejectedNempriTransfer": "Record rejection of NEMPRI as of the transfer date",
+        "recordPredecessorNempriTransfer": "NEMPRI as of the transfer date filed by the previous program",
+        "reopenPredecessorNempriTransfer": "NEMPRI as of the transfer date not filed by the previous program",
         "previewNempri": "Preview NEMPRI",
         "prepareNempri": "Prepare NEMPRI",
         "previewHzupn": "Preview HZUPN",
@@ -10773,6 +10781,7 @@
       },
       "dispatch": {
         "title": {
+          "nempri_transfer": "NEMPRI as of the transfer date — sending via data box",
           "nempri": "NEMPRI — sending via data box",
           "hzupn": "HZUPN — sending via data box"
         },
@@ -10862,7 +10871,7 @@
         "transferredOtherWork": "Transferred to other work",
         "transferredOn": "Transfer date",
         "transferReason": "Reason for the transfer",
-        "transferReasonHint": "If the employee was transferred because of pregnancy, maternity or breastfeeding, the decisive period may be set to the transfer date when that is more favourable (section 19(6) of Act No. 187/2006 Coll.). The application sends one notice with the more favourable period. It does not yet build the second notice with the decisive period as of the transfer date, which ČSSZ requires at the same time: file it through the ČSSZ ePortal.",
+        "transferReasonHint": "If the employee was transferred because of pregnancy, maternity or breastfeeding, the decisive period may be set to the transfer date when that is more favourable (section 19(6) of Act No. 187/2006 Coll.). When the transfer date falls in an earlier month than the social event, the case carries two NEMPRI notices: the first with the decisive period as of the event and the second as of the transfer date. Both are filed at the same time with the same deadline, ČSSZ picks the more favourable period.",
         "transferReasons": {
           "pregnancy": "Pregnancy",
           "maternity": "Maternity",
@@ -11756,6 +11765,7 @@
       }
     },
     "server_codes": {
+      "nempri_transfer_not_required": "The second NEMPRI notice as of the transfer date is not filed for this case: the employee was not transferred because of pregnancy, maternity or breastfeeding in an earlier month than the social event. Check the transfer and its reason in the case.",
       "nempri_decision_number_missing": "The decision number is missing (for an e-sick-note or eOČR, the number from the doctor's decision). ČSSZ uses it to match the notice to the decision. Fill it in on the benefit case.",
       "nempri_relationship_code_invalid": "The relationship to the cared-for person is not a ČSSZ code-list value for this benefit type. Select it from the list on the benefit case.",
       "nempri_relationship_code_not_in_kind": "The relationship to the cared-for person is only filled in for care benefit and long-term care benefit.",

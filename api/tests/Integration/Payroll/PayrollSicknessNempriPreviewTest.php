@@ -8,6 +8,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
+use MyInvoice\Service\Payroll\Submission\Sickness\NempriTransferNotice;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseService;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessDocumentKind;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessException;
@@ -700,6 +701,114 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
         // skončení: nejdřív 1. 3. (neděle), termín pondělí 2. 3.
         self::assertSame('2026-03-01', $preview['window']['earliest_notification_on']);
         self::assertSame('2026-03-02', $preview['window']['due_on']);
+    }
+
+    /**
+     * NEMPRI25-*.potv.prevedenaNaJinouPraci-2 (Všeobecné zásady NEMPRI, § 19
+     * odst. 6): zaměstnankyně převedená 10. 2. 2026 kvůli těhotenství, nemoc od
+     * 7. 4. 2026. Případ nese dvě oznámení: první s obdobím k rozhodnému dni
+     * (10/2025–3/2026), druhé ke dni převedení (10/2025–1/2026). Každé se
+     * připraví jako samostatné podání se stejnou lhůtou a vlastním výsledkem.
+     * Dřív se sestavilo jen jedno oznámení s výhodnějším obdobím.
+     */
+    public function testTransferredEmployeeGetsSecondNoticeWithTransferDecisivePeriod(): void
+    {
+        [, $employmentId] = $this->employee();
+        $cases = $this->service(SicknessCaseService::class);
+        $case = $cases->create(
+            $this->supplierId,
+            'test',
+            $employmentId,
+            'NEM',
+            [
+                'incapacity_from' => '2026-04-07',
+                'decision_number' => 'E1234567',
+                'daily_working_hours' => '8',
+                'transferred_other_work' => true,
+                'transferred_on' => '2026-02-10',
+                'transfer_reason' => 'pregnancy',
+                'decisive_months' => self::months(['2025-10', '2025-11', '2025-12', '2026-01', '2026-02', '2026-03']),
+            ],
+            $this->userId,
+        );
+        self::assertSame('pending', $case['nempri_transfer_status']);
+        $submissions = $this->service(SicknessSubmissionService::class);
+
+        $first = $submissions->preview($this->supplierId, 'test', (int) $case['id'], SicknessDocumentKind::Nempri);
+        $second = $submissions->preview($this->supplierId, 'test', (int) $case['id'], SicknessDocumentKind::NempriTransfer);
+
+        self::assertStringContainsString('<rozhodneObdobiDo>2026-03-31</rozhodneObdobiDo>', (string) $first['xml']);
+        self::assertSame(6, substr_count((string) $first['xml'], '<zapocitatelnyPrijem>'));
+        self::assertStringNotContainsString('<dalsiSdeleni>', (string) $first['xml']);
+        self::assertStringContainsString('<rozhodneObdobiOd>2025-10-06</rozhodneObdobiOd>', (string) $second['xml']);
+        self::assertStringContainsString('<rozhodneObdobiDo>2026-01-31</rozhodneObdobiDo>', (string) $second['xml']);
+        self::assertSame(4, substr_count((string) $second['xml'], '<zapocitatelnyPrijem>'));
+        foreach ([$first, $second] as $preview) {
+            self::assertStringContainsString('<prevedenaNaJinouPraci>true</prevedenaNaJinouPraci>', (string) $preview['xml']);
+            self::assertStringContainsString('<datumNaJinouPraci>2026-02-10</datumNaJinouPraci>', (string) $preview['xml']);
+            self::assertStringContainsString('<cisloRozhodnuti>E1234567</cisloRozhodnuti>', (string) $preview['xml']);
+        }
+        self::assertStringContainsString('<dalsiSdeleni>' . NempriTransferNotice::NOTE . '</dalsiSdeleni>', (string) $second['xml']);
+        self::assertSame($first['window'], $second['window']);
+        self::assertSame('nempri_transfer', $second['document_kind']);
+
+        $preparedFirst = $submissions->prepare($this->supplierId, 'test', (int) $case['id'], SicknessDocumentKind::Nempri, $this->userId);
+        $preparedSecond = $submissions->prepare($this->supplierId, 'test', (int) $case['id'], SicknessDocumentKind::NempriTransfer, $this->userId);
+        self::assertNotSame($preparedFirst['submission_id'], $preparedSecond['submission_id']);
+        $row = $cases->requireCase($this->supplierId, 'test', (int) $case['id']);
+        self::assertSame($preparedSecond['submission_id'], (int) $row['nempri_transfer_submission_id']);
+        self::assertSame('prepared', $row['status']);
+
+        $row = $cases->recordReceipt($this->supplierId, 'test', (int) $case['id'], SicknessDocumentKind::Nempri, 'accepted', '2026-04-22', null);
+        self::assertSame('submitted', $row['status']);
+        $row = $cases->recordReceipt($this->supplierId, 'test', (int) $case['id'], SicknessDocumentKind::NempriTransfer, 'rejected', null, 'Chyba 06');
+        self::assertSame('rejected', $row['status']);
+        self::assertSame('accepted', $row['nempri_status']);
+    }
+
+    /**
+     * Druhé oznámení se nepodává, když převedení chybí, nemá důvod podle
+     * § 19 odst. 6, nebo leží ve stejném měsíci jako událost (obě oznámení by
+     * nesla totéž období a ČSSZ by druhé odmítla jako duplicitu).
+     */
+    public function testTransferNoticeIsNotRequiredWithoutEarlierQualifyingTransfer(): void
+    {
+        [, $employmentId] = $this->employee();
+        $cases = $this->service(SicknessCaseService::class);
+        $case = $cases->create(
+            $this->supplierId,
+            'test',
+            $employmentId,
+            'NEM',
+            [
+                'incapacity_from' => '2026-04-07',
+                'decision_number' => 'E1234567',
+                'daily_working_hours' => '8',
+                'transferred_other_work' => true,
+                'transferred_on' => '2026-04-01',
+                'transfer_reason' => 'pregnancy',
+                'decisive_months' => self::months(['2025-10', '2025-11', '2025-12', '2026-01', '2026-02', '2026-03']),
+            ],
+            $this->userId,
+        );
+        self::assertNull($case['nempri_transfer_status']);
+        try {
+            $this->service(SicknessSubmissionService::class)
+                ->preview($this->supplierId, 'test', (int) $case['id'], SicknessDocumentKind::NempriTransfer);
+            self::fail('Druhé oznámení ve stejném měsíci jako událost se nepodává.');
+        } catch (SicknessException $exception) {
+            self::assertSame('nempri_transfer_not_required', $exception->validationCode);
+        }
+
+        $case = $cases->update($this->supplierId, 'test', (int) $case['id'], (int) $case['row_version'], [
+            'transferred_on' => '2026-01-15',
+        ]);
+        self::assertSame('pending', $case['nempri_transfer_status']);
+        $case = $cases->update($this->supplierId, 'test', (int) $case['id'], (int) $case['row_version'], [
+            'transferred_other_work' => false,
+        ]);
+        self::assertNull($case['nempri_transfer_status']);
+        self::assertSame('draft', $case['status']);
     }
 
     /**

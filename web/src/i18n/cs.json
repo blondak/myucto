@@ -10722,6 +10722,7 @@
         "predecessor": "podal předchozí program"
       },
       "documents": {
+        "nempri_transfer": "NEMPRI ke dni převedení",
         "nempri": "NEMPRI",
         "hzupn": "HZUPN"
       },
@@ -10735,6 +10736,13 @@
         "edit": "Upravit",
         "save": "Uložit",
         "cancel": "Zrušit úpravy",
+        "previewNempriTransfer": "Náhled NEMPRI ke dni převedení",
+        "prepareNempriTransfer": "Připravit NEMPRI ke dni převedení",
+        "dispatchNempriTransfer": "Odeslat NEMPRI ke dni převedení datovou schránkou",
+        "recordAcceptedNempriTransfer": "Zapsat přijetí NEMPRI ke dni převedení",
+        "recordRejectedNempriTransfer": "Zapsat odmítnutí NEMPRI ke dni převedení",
+        "recordPredecessorNempriTransfer": "NEMPRI ke dni převedení podal předchozí program",
+        "reopenPredecessorNempriTransfer": "Předchozí program NEMPRI ke dni převedení nepodal",
         "previewNempri": "Náhled NEMPRI",
         "prepareNempri": "Připravit NEMPRI",
         "previewHzupn": "Náhled HZUPN",
@@ -10773,6 +10781,7 @@
       },
       "dispatch": {
         "title": {
+          "nempri_transfer": "NEMPRI ke dni převedení — odeslání datovou schránkou",
           "nempri": "NEMPRI — odeslání datovou schránkou",
           "hzupn": "HZUPN — odeslání datovou schránkou"
         },
@@ -10862,7 +10871,7 @@
         "transferredOtherWork": "Převedena na jinou práci",
         "transferredOn": "Den převedení",
         "transferReason": "Důvod převedení",
-        "transferReasonHint": "Byla-li zaměstnankyně převedena kvůli těhotenství, mateřství nebo kojení, může se rozhodné období určit ke dni převedení, je-li to pro ni výhodnější (§ 19 odst. 6 zákona č. 187/2006 Sb.). Aplikace pošle jedno oznámení s výhodnějším obdobím. Druhé oznámení s rozhodným obdobím ke dni převedení, které ČSSZ vyžaduje současně, zatím nesestaví: podejte ho přes ePortál ČSSZ.",
+        "transferReasonHint": "Byla-li zaměstnankyně převedena kvůli těhotenství, mateřství nebo kojení, může se rozhodné období určit ke dni převedení, je-li to pro ni výhodnější (§ 19 odst. 6 zákona č. 187/2006 Sb.). Leží-li den převedení v dřívějším měsíci, než vznikla sociální událost, nese případ dvě oznámení NEMPRI: první s rozhodným obdobím ke dni vzniku události a druhé ke dni převedení. Obě se podávají současně a se stejnou lhůtou, výhodnější období vybere ČSSZ.",
         "transferReasons": {
           "pregnancy": "Těhotenství",
           "maternity": "Mateřství",
@@ -11756,6 +11765,7 @@
       }
     },
     "server_codes": {
+      "nempri_transfer_not_required": "Druhé oznámení NEMPRI ke dni převedení se u tohoto případu nepodává: zaměstnankyně nebyla převedena z důvodu těhotenství, mateřství nebo kojení v dřívějším měsíci, než vznikla sociální událost. Zkontrolujte převedení a jeho důvod u případu.",
       "nempri_decision_number_missing": "Chybí číslo rozhodnutí (u eNeschopenky a eOČR číslo z rozhodnutí lékaře). ČSSZ podle něj oznámení páruje s rozhodnutím. Doplňte ho v případu dávky.",
       "nempri_relationship_code_invalid": "Vztah ošetřované osoby není kód z číselníku ČSSZ pro tento druh dávky. Vyberte ho v případu dávky ze seznamu.",
       "nempri_relationship_code_not_in_kind": "Vztah ošetřované osoby se vyplňuje jen u ošetřovného a dlouhodobého ošetřovného.",

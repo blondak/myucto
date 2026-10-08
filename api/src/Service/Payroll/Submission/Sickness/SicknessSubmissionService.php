@@ -289,10 +289,8 @@ final readonly class SicknessSubmissionService
     ): array {
         $this->channels->assertDispatchable($this->channels->dispatchChannel());
         $row = $this->caseService->requireCase($supplierId, $environment, $caseId);
-        $column = $document === SicknessDocumentKind::Nempri
-            ? 'nempri_submission_id'
-            : 'hzupn_submission_id';
-        $submissionId = $row[$column] === null ? 0 : (int) $row[$column];
+        $column = $document->submissionColumn();
+        $submissionId = ($row[$column] ?? null) === null ? 0 : (int) $row[$column];
         if ($submissionId <= 0) {
             throw new SicknessException(
                 'sickness_submission_not_prepared',
@@ -375,10 +373,19 @@ final readonly class SicknessSubmissionService
                 'Ze zrušeného případu se podání nepřipravuje.',
             );
         }
+        if ($document === SicknessDocumentKind::NempriTransfer && !SicknessCaseService::transferNoticeRequired($row)) {
+            throw new SicknessException(
+                'nempri_transfer_not_required',
+                'Druhé oznámení NEMPRI ke dni převedení se u tohoto případu nepodává. Podává se jen '
+                . 'u zaměstnankyně převedené na jinou práci z důvodu těhotenství, mateřství nebo kojení '
+                . 'v dřívějším kalendářním měsíci, než vznikla sociální událost (§ 19 odst. 6 zákona '
+                . 'č. 187/2006 Sb.). Převedení a jeho důvod se vyplňují u případu.',
+            );
+        }
         if (SicknessCaseService::documentStatus($row, $document) === SicknessDocumentStatus::Predecessor) {
             throw new SicknessException(
                 'sickness_document_handled_by_predecessor',
-                $document->agendaCode() . ' k této události podal předchozí mzdový program, '
+                $document->shortLabel() . ' k této události podal předchozí mzdový program, '
                 . 'MyÚčto ho znovu nepodává. Druhé podání téže věci by ČSSZ odmítla. Nepodal-li '
                 . 'ho předchozí program, vraťte ho u případu tlačítkem Předchozí program nepodal.',
             );
@@ -406,7 +413,7 @@ final readonly class SicknessSubmissionService
         // a tím okno 14 dnů i lhůty, stejně jako v seznamu případů a v hlídači.
         $workedFirstDay = SicknessDeadlinePolicy::firstDayShiftDefersSupport($kind)
             && SicknessCaseService::firstDayFullyWorked($row);
-        if ($document === SicknessDocumentKind::Nempri) {
+        if ($document->isNempri()) {
             if (!$this->deadlines->nempriRequired($kind, $incapacityFrom, $incapacityTo, 0, $workedFirstDay)) {
                 throw new SicknessException(
                     'nempri_within_wage_compensation_window',
@@ -435,6 +442,7 @@ final readonly class SicknessSubmissionService
                     $kind,
                     $context,
                     $identity,
+                    $document,
                 );
             } catch (SicknessException $exception) {
                 $missing[] = $exception;
@@ -549,6 +557,7 @@ final readonly class SicknessSubmissionService
         SicknessBenefitKind $kind,
         array $context,
         array $identity,
+        SicknessDocumentKind $document = SicknessDocumentKind::Nempri,
     ): NempriXmlPayload {
         $manifest = $this->schemas->manifestFor(CsszSchemaCatalog::NEMPRI25);
         $employeeId = (int) $row['employee_id'];
@@ -558,6 +567,27 @@ final readonly class SicknessSubmissionService
         // je u nich zakazuje. Způsob výplaty se proto ani nezjišťuje — dřív
         // podání zaměstnance bez účtu spadlo na údaji, který věta nesmí mít.
         $startsClaim = !$kind->hasActions() || (bool) ($row['action_start'] ?? true);
+        // Druhé oznámení ke dni převedení je táž věta s jiným rozhodným dnem
+        // a s větou pro územní správu v dalším sdělení (NempriTransferNotice).
+        $transferredOn = null;
+        if ($document === SicknessDocumentKind::NempriTransfer) {
+            $transferredOn = NempriTransferNotice::transferDate(
+                $kind,
+                $row,
+                $this->nullableText($context['end_date'] ?? null),
+            );
+            if ($transferredOn === null) {
+                throw new SicknessException(
+                    'nempri_transfer_not_required',
+                    'Druhé oznámení ke dni převedení se podle údajů případu nepodává: chybí převedení '
+                    . 'z důvodu těhotenství, mateřství nebo kojení, nebo leží ve stejném měsíci jako '
+                    . 'rozhodný den, takže by neslo totéž rozhodné období jako první oznámení.',
+                );
+            }
+            $row['additional_note'] = NempriTransferNotice::note(
+                $this->nullableText($row['additional_note'] ?? null),
+            );
+        }
 
         return $this->payloads->nempri(
             $row,
@@ -571,7 +601,7 @@ final readonly class SicknessSubmissionService
                 ? $this->caredPerson($supplierId, $employeeId, $row)
                 : null,
             $startsClaim
-                ? $this->decisivePeriod($supplierId, $environment, $caseId, $row, $context)
+                ? $this->decisivePeriod($supplierId, $environment, $caseId, $row, $context, $transferredOn)
                 : null,
             $startsClaim
                 ? $this->paymentConnection($supplierId, $employeeId, $eventOn)
@@ -656,13 +686,14 @@ final readonly class SicknessSubmissionService
 
     /**
      * Rozhodné období věty. Rozhodný den je den vzniku sociální události,
-     * u události v ochranné lhůtě den po skončení zaměstnání (§ 19 odst. 11)
-     * a u převedené těhotné, matky nebo kojící zaměstnankyně také den
-     * převedení, je-li to výhodnější (§ 19 odst. 6). Platební spojení se
-     * dál řídí dnem události.
+     * u události v ochranné lhůtě den po skončení zaměstnání (§ 19 odst. 11).
+     * Druhé oznámení převedené těhotné, matky nebo kojící zaměstnankyně nese
+     * období ke dni převedení (§ 19 odst. 6); výhodnější z obou vybere územní
+     * správa. Platební spojení se dál řídí dnem události.
      *
      * @param array<string,mixed> $row
      * @param array<string,mixed> $context
+     * @param ?string $transferredOn den převedení u druhého oznámení
      */
     private function decisivePeriod(
         int $supplierId,
@@ -670,9 +701,10 @@ final readonly class SicknessSubmissionService
         int $caseId,
         array $row,
         array $context,
+        ?string $transferredOn = null,
     ): NempriDecisivePeriod {
         $employmentStart = SicknessPayloadFactory::employmentFrom($context);
-        $decisiveDate = NempriDecisivePeriodResolver::decisiveDate(
+        $decisiveDate = $transferredOn ?? NempriDecisivePeriodResolver::decisiveDate(
             (string) $row['incapacity_from'],
             $this->nullableText($context['end_date'] ?? null),
         );
@@ -696,11 +728,6 @@ final readonly class SicknessSubmissionService
             $this->cases->decisiveMonths($supplierId, $environment, $caseId),
         );
         $probable = $row['probable_income_czk'] ?? null;
-        $transferredOn = in_array(
-            $row['transfer_reason'] ?? null,
-            NempriDecisivePeriodResolver::TRANSFER_REASONS,
-            true,
-        ) ? $this->nullableText($row['transferred_on'] ?? null) : null;
 
         return $this->decisivePeriods->resolve(
             $decisiveDate,
@@ -708,7 +735,6 @@ final readonly class SicknessSubmissionService
             $this->historical->startPeriod($supplierId),
             $sources,
             $probable === null || $probable === '' ? null : (int) $probable,
-            $transferredOn,
         );
     }
 

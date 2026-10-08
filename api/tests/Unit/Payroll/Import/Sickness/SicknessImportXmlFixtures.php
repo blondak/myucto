@@ -38,12 +38,16 @@ final class SicknessImportXmlFixtures
             'to' => '2026-09-20',
             'withActivity' => true,
             'doctype' => '',
+            'transferredOn' => null,
         ];
         $decision = $o['decision'] === null ? '' : "<cisloRozhodnuti>{$o['decision']}</cisloRozhodnuti>";
         $activity = $o['withActivity'] ? '<druhCinnosti>1</druhCinnosti>' : '';
+        $transfer = $o['transferredOn'] === null
+            ? '<prevedenaNaJinouPraci>false</prevedenaNaJinouPraci>'
+            : "<prevedenaNaJinouPraci>true</prevedenaNaJinouPraci><datumNaJinouPraci>{$o['transferredOn']}</datumNaJinouPraci>";
         $body = match ($kind) {
             'NEM' => <<<XML
-<nem><potvrzeniZamestnavatele><pracoval>false</pracoval><pocetOdpracovanychHodin>0</pocetOdpracovanychHodin><pracovniDoba>8</pracovniDoba><pobiraDuchod>false</pobiraDuchod><jeStudentem>false</jeStudentem><dobaVolnaPrvniZamestnani>false</dobaVolnaPrvniZamestnani><volnoBezNahrady>false</volnoBezNahrady><prevedenaNaJinouPraci>false</prevedenaNaJinouPraci><exekuce>false</exekuce><insolvence>false</insolvence></potvrzeniZamestnavatele></nem>
+<nem><potvrzeniZamestnavatele><pracoval>false</pracoval><pocetOdpracovanychHodin>0</pocetOdpracovanychHodin><pracovniDoba>8</pracovniDoba><pobiraDuchod>false</pobiraDuchod><jeStudentem>false</jeStudentem><dobaVolnaPrvniZamestnani>false</dobaVolnaPrvniZamestnani><volnoBezNahrady>false</volnoBezNahrady>{$transfer}<exekuce>false</exekuce><insolvence>false</insolvence></potvrzeniZamestnavatele></nem>
 XML,
             'OSE' => <<<XML
 <ose><oseVznik>true</oseVznik><oseTrvani>false</oseTrvani><oseUkonceni>true</oseUkonceni><potvrzeniZamestnavatele><pracoval>false</pracoval><pocetOdpracovanychHodin>0</pocetOdpracovanychHodin><pracovniDoba>8</pracovniDoba><jeStudentem>false</jeStudentem><prevedenaNaJinouPraci>false</prevedenaNaJinouPraci><volnoBezNahrady>false</volnoBezNahrady></potvrzeniZamestnavatele><zadostODavku><odeDne>{$o['from']}</odeDne><doDne>{$o['to']}</doDne><osetrovanaOsoba><jmeno>Zkušební</jmeno><prijmeni>Dítě</prijmeni><rodneCislo>1234567890</rodneCislo><datumNarozeni>2020-02-02</datumNarozeni></osetrovanaOsoba><onemocnela>true</onemocnela><spolecnaDomacnost>true</spolecnaDomacnost><jeOsamely>false</jeOsamely><vPeciDiteDo16Let>true</vPeciDiteDo16Let><narokNaPPMjinouOsobou>false</narokNaPPMjinouOsobou><pecovalOsobne>false</pecovalOsobne><pecovalVeDnech><obdobi><od>{$o['from']}</od><do>{$o['to']}</do></obdobi></pecovalVeDnech><kodRodVztah>PL</kodRodVztah></zadostODavku><podkladyProVyplatDavky><pracovalPoslDenPD>false</pracovalPoslDenPD><planovaneSmeny>false</planovaneSmeny></podkladyProVyplatDavky></ose>

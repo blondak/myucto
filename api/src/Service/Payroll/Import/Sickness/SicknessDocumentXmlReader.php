@@ -226,7 +226,9 @@ final class SicknessDocumentXmlReader
             documentType: $documentType,
             position: $position,
             sequence: $sequence,
-            document: SicknessDocumentKind::Nempri,
+            document: self::transferNotice($fields, $decisiveTo, $incapacityFrom)
+                ? SicknessDocumentKind::NempriTransfer
+                : SicknessDocumentKind::Nempri,
             kind: $kind,
             firstName: $this->text($xpath, $node, 'n:pojistenec/n:jmeno'),
             lastName: $this->text($xpath, $node, 'n:pojistenec/n:prijmeni'),
@@ -247,6 +249,31 @@ final class SicknessDocumentXmlReader
             workDays: $workDays,
             notes: $notes,
         );
+    }
+
+    /**
+     * Je věta druhé oznámení s rozhodným obdobím ke dni převedení (§ 19 odst. 6,
+     * Všeobecné zásady NEMPRI)? Vazební prvek DV nemá, pozná se podle období:
+     * končí posledním dnem měsíce před převedením (§ 18 odst. 3), nebo dnem před
+     * převedením u pravděpodobného příjmu (§ 18 odst. 5). Leží-li převedení ve
+     * stejném měsíci jako událost, je období obou oznámení stejné a věta se
+     * bere jako první oznámení.
+     *
+     * @param array<string,mixed> $fields
+     */
+    private static function transferNotice(array $fields, ?string $decisiveTo, ?string $incapacityFrom): bool
+    {
+        $transferredOn = $fields['transferred_on'] ?? null;
+        if (!is_string($transferredOn) || $decisiveTo === null) {
+            return false;
+        }
+        if ($incapacityFrom !== null && substr($transferredOn, 0, 7) >= substr($incapacityFrom, 0, 7)) {
+            return false;
+        }
+        $day = new \DateTimeImmutable($transferredOn);
+
+        return $decisiveTo === $day->modify('first day of this month')->modify('-1 day')->format('Y-m-d')
+            || $decisiveTo === $day->modify('-1 day')->format('Y-m-d');
     }
 
     /**

@@ -210,6 +210,12 @@ final readonly class PayrollSicknessCaseRepository
                     sickness.hzupn_status,
                     sickness.nempri_submission_id,
                     sickness.hzupn_submission_id,
+                    sickness.nempri_transfer_status,
+                    sickness.nempri_transfer_submission_id,
+                    sickness.transferred_other_work,
+                    sickness.transferred_on,
+                    sickness.transfer_reason,
+                    sickness.action_start,
                     sickness.returned_on,
                     sickness.lone_caregiver,
                     sickness.payroll_payment_date,
@@ -231,6 +237,7 @@ final readonly class PayrollSicknessCaseRepository
                 AND sickness.environment = ?
                 AND sickness.cancelled = 0
                 AND (sickness.nempri_status IN ("pending", "rejected")
+                     OR sickness.nempri_transfer_status IN ("pending", "rejected")
                      OR (sickness.benefit_kind = "NEM"
                          AND sickness.hzupn_status IN ("pending", "rejected")))
               ORDER BY sickness.incapacity_from, sickness.id'

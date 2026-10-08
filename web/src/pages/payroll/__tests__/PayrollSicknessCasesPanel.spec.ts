@@ -264,6 +264,39 @@ describe('PayrollSicknessCasesPanel', () => {
   })
 
   /**
+   * Převedená zaměstnankyně (§ 19 odst. 6, Všeobecné zásady NEMPRI): případ
+   * nese druhé oznámení ke dni převedení s vlastním náhledem, přípravou,
+   * odesláním a výsledkem. Bez převedení se nenabízí vůbec.
+   */
+  it('nabídne druhé oznámení NEMPRI ke dni převedení jen u převedené zaměstnankyně', async () => {
+    m.list.mockResolvedValue(listResponse(
+      [sicknessCase({
+        transferred_other_work: 1,
+        transferred_on: '2026-05-10',
+        transfer_reason: 'pregnancy',
+        nempri_transfer_status: 'pending',
+        nempri_transfer_submission_id: 45,
+        status: 'prepared',
+      })],
+      { ready_submissions: [readySubmission({ submission_id: 45 })] },
+    ))
+    m.prepare.mockResolvedValue({})
+    const wrapper = await mountPanel()
+
+    expect(actionsOf(wrapper, 'preview-nempri_transfer')?.show).toBe(true)
+    expect(actionsOf(wrapper, 'prepare-nempri_transfer')?.disabled).toBe(true)
+    expect(actionsOf(wrapper, 'dispatch-nempri_transfer')?.show).toBe(true)
+    expect(actionsOf(wrapper, 'accept-nempri_transfer')).toBeDefined()
+    expect(wrapper.text()).toContain('payroll.sicknessCases.documents.nempri_transfer')
+    expect(wrapper.find('[data-test="sickness-case-dispatch-7-nempri_transfer"]').exists()).toBe(true)
+
+    m.list.mockResolvedValue(listResponse([sicknessCase({ nempri_transfer_status: null })]))
+    const plain = await mountPanel()
+    expect(actionsOf(plain, 'preview-nempri_transfer')?.show).toBe(false)
+    expect(actionsOf(plain, 'accept-nempri_transfer')).toBeUndefined()
+  })
+
+  /**
    * Celá žádost o ošetřovné jde zadat v editoru a uloží se jedním voláním:
    * akce, dny péče, ruční měsíc rozhodného období (Kč → haléře)
    * i příjem z malého rozsahu.

@@ -222,6 +222,39 @@ final class PayrollDeadlineOverviewTest extends TestCase
         self::assertSame(['NEMPRI'], $titles);
     }
 
+    /**
+     * NEMPRI25-*.potv.prevedenaNaJinouPraci-2: druhé oznámení ke dni převedení
+     * se podává současně s prvním, takže ho hlídač drží se stejnou lhůtou
+     * a zvlášť; přijaté první oznámení ho neschová.
+     */
+    public function testTransferNoticeIsWatchedWithTheNempriDeadline(): void
+    {
+        $this->sicknessCase('OSE', '2026-08-03', '2026-08-05', null);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_sickness_cases
+                SET transferred_other_work = 1, transferred_on = "2026-06-15",
+                    transfer_reason = "breastfeeding", nempri_transfer_status = "pending"
+              WHERE supplier_id = ?',
+        )->execute([$this->supplierId]);
+
+        $items = static fn (array $overview): array => array_values(array_filter(
+            $overview['items'],
+            static fn (array $item): bool => $item['source'] === 'sickness_case',
+        ));
+        $watched = $items($this->service->overview($this->supplierId, 'production'));
+        self::assertSame(['nempri', 'nempri_transfer'], array_column($watched, 'document_kind'));
+        self::assertSame($watched[0]['due_on'], $watched[1]['due_on']);
+
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_sickness_cases
+                SET nempri_status = "accepted", nempri_accepted_on = "2026-08-17"
+              WHERE supplier_id = ?',
+        )->execute([$this->supplierId]);
+        $watched = $items($this->service->overview($this->supplierId, 'production'));
+        self::assertSame(['nempri_transfer'], array_column($watched, 'document_kind'));
+        self::assertSame('NEMPRI ke dni převedení', $watched[0]['title']);
+    }
+
     /** Odmítnuté podání hlídač ukazuje dál a říká, že je odmítnuté. */
     public function testRejectedNempriStaysWatchedWithItsStatus(): void
     {

@@ -1151,6 +1151,14 @@ final readonly class PayrollDeadlineOverviewService
                     'submitted' => $this->sicknessDocumentDone($row, SicknessDocumentKind::Nempri),
                 ],
             ];
+            // Druhé oznámení ke dni převedení se podává současně s prvním
+            // (Všeobecné zásady NEMPRI), takže má tutéž lhůtu.
+            if (SicknessCaseService::transferNoticeRequired($row)) {
+                $documents['nempri_transfer'] = [
+                    'agenda' => SicknessDocumentKind::NempriTransfer->shortLabel(),
+                    'submitted' => $this->sicknessDocumentDone($row, SicknessDocumentKind::NempriTransfer),
+                ];
+            }
             // HZUPN hlásí nástup po skončení neschopnosti — jen u nemocenského
             // a ne, když zaměstnání skončilo v jejím průběhu nebo vznikla až
             // v ochranné lhůtě. Totéž pravidlo jako při přípravě hlášení.
@@ -1171,7 +1179,7 @@ final readonly class PayrollDeadlineOverviewService
                     continue;
                 }
                 try {
-                    $window = $document === 'nempri'
+                    $window = $document !== 'hzupn'
                         ? $this->sicknessDeadlines->forNempri(
                             $kind,
                             $incapacityFrom,
@@ -1217,7 +1225,7 @@ final readonly class PayrollDeadlineOverviewService
                     'status' => (string) $row['status'],
                     'document_status' => SicknessCaseService::documentStatus(
                         $row,
-                        $document === 'nempri' ? SicknessDocumentKind::Nempri : SicknessDocumentKind::Hzupn,
+                        SicknessDocumentKind::from($document),
                     )->value,
                     'deadline_source' => $window->legalReference,
                     'deadline_source_status' => $window->sourceStatus,

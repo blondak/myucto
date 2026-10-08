@@ -46,11 +46,11 @@ use MyInvoice\Service\Tax\TaxConstants;
  *  - § 19 odst. 11: událost v ochranné lhůtě → rozhodný den je den po
  *    skončení pojištění ({@see decisiveDate()}),
  *  - § 19 odst. 6: převedená těhotná, matka nebo kojící zaměstnankyně →
- *    období ke dni převedení, je-li výhodnější. Všeobecné zásady NEMPRI
- *    chtějí v tom případě současně DRUHÉ oznámení s obdobím ke dni
- *    převedení a výhodnější určí ÚSSZ. Případ dávky zatím nese jen jedno
- *    oznámení NEMPRI, a tak se do něj dává výhodnější z obou období; druhé
- *    oznámení k případu je otevřený dluh (vlastní stav podání a lhůta).
+ *    období ke dni převedení, je-li výhodnější. Výhodnější NEurčuje
+ *    zaměstnavatel: Všeobecné zásady NEMPRI chtějí současně DRUHÉ oznámení
+ *    s obdobím ke dni převedení a vybere územní správa. První oznámení proto
+ *    nese období k rozhodnému dni, druhé ({@see NempriTransferNotice}) se
+ *    zjišťuje tímtéž výpočtem s rozhodným dnem = den převedení.
  *
  * ## Částky
  *
@@ -75,10 +75,9 @@ final class NempriDecisivePeriodResolver
     public function __construct(private ?\Closure $annualMaximumMinor = null) {}
 
     /**
-     * @param string $decisiveDate den, ke kterému se období zjišťuje
-     *        (den vzniku sociální události, upravený {@see decisiveDate()})
-     * @param ?string $transferredOn den převedení podle § 19 odst. 6, jen
-     *        u převedení z důvodu těhotenství, mateřství nebo kojení
+     * @param string $decisiveDate den, ke kterému se období zjišťuje: den
+     *        vzniku sociální události upravený {@see decisiveDate()}, u druhého
+     *        oznámení podle § 19 odst. 6 den převedení na jinou práci
      */
     public function resolve(
         string $decisiveDate,
@@ -86,15 +85,8 @@ final class NempriDecisivePeriodResolver
         ?string $payrollStartPeriod,
         NempriDecisiveSources $sources,
         ?int $probableIncomeCzk,
-        ?string $transferredOn = null,
     ): NempriDecisivePeriod {
-        $primary = $this->resolveFor($decisiveDate, $employmentStart, $payrollStartPeriod, $sources, $probableIncomeCzk);
-        if ($transferredOn === null || $transferredOn >= $decisiveDate || $transferredOn < $employmentStart) {
-            return $primary;
-        }
-        $transfer = $this->resolveFor($transferredOn, $employmentStart, $payrollStartPeriod, $sources, $probableIncomeCzk);
-
-        return self::higherDailyBase($transfer, $primary) ? $transfer : $primary;
+        return $this->resolveFor($decisiveDate, $employmentStart, $payrollStartPeriod, $sources, $probableIncomeCzk);
     }
 
     /**
@@ -407,31 +399,6 @@ final class NempriDecisivePeriodResolver
         }
 
         return is_numeric($maximum) ? (int) round((float) $maximum * 100) : null;
-    }
-
-    /**
-     * Vyšší denní vyměřovací základ? Pravděpodobný příjem se dělí 30
-     * (§ 18 odst. 5, § 19 odst. 7), úplné období počtem nevyloučených dnů.
-     */
-    private static function higherDailyBase(NempriDecisivePeriod $candidate, NempriDecisivePeriod $current): bool
-    {
-        [$candidateIncome, $candidateDays] = self::dailyBaseFraction($candidate);
-        [$currentIncome, $currentDays] = self::dailyBaseFraction($current);
-
-        return $candidateIncome * $currentDays > $currentIncome * $candidateDays;
-    }
-
-    /** @return array{0:int,1:int} [příjem v haléřích, dny] */
-    private static function dailyBaseFraction(NempriDecisivePeriod $period): array
-    {
-        if ($period->probableIncomeCzk !== null) {
-            return [$period->probableIncomeCzk * 100, 30];
-        }
-
-        return [
-            $period->incomeMinor(),
-            max(1, self::inclusiveDays($period->from, $period->to) - $period->excludedDays()),
-        ];
     }
 
     /** Haléře na celé koruny nahoru (NEMPRI přijímá jen celé Kč). */

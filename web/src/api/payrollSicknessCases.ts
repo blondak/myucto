@@ -30,8 +30,12 @@ export type PayrollSicknessCaseStatus =
   | 'rejected'
   | 'cancelled'
 
-/** Který ze dvou tiskopisů se z případu staví. */
-export type PayrollSicknessDocumentKind = 'nempri' | 'hzupn'
+/**
+ * Který tiskopis se z případu staví. `nempri_transfer` je druhé oznámení
+ * NEMPRI s rozhodným obdobím ke dni převedení na jinou práci (§ 19 odst. 6,
+ * Všeobecné zásady NEMPRI); podává se jen u převedené zaměstnankyně.
+ */
+export type PayrollSicknessDocumentKind = 'nempri' | 'nempri_transfer' | 'hzupn'
 
 /**
  * Stav jednoho podání. NEMPRI a HZUPN mají vlastní lhůty (§ 97 odst. 1–3),
@@ -115,12 +119,17 @@ export interface PayrollSicknessCase {
   /** Den DORUČENÍ HZUPN ČSSZ z protokolu. */
   hzupn_accepted_on: string | null
   hzupn_rejection_reason: string | null
+  /** Druhé oznámení ke dni převedení; `null` = nepodává se. */
+  nempri_transfer_status: PayrollSicknessDocumentStatus | null
+  nempri_transfer_accepted_on: string | null
+  nempri_transfer_rejection_reason: string | null
   cancelled: number
   source: PayrollSicknessCaseSource
   /** Odkaz na převzatý záznam předchozího programu. */
   external_reference: string | null
   nempri_submission_id: number | null
   hzupn_submission_id: number | null
+  nempri_transfer_submission_id: number | null
   row_version: number
   work_days: PayrollSicknessWorkInterval[]
   // ── žádost o dávku (OSE, DLO, OPP, PPM) ──
@@ -295,11 +304,15 @@ export type PayrollSicknessCaseInput = Partial<
     | 'hzupn_status'
     | 'hzupn_accepted_on'
     | 'hzupn_rejection_reason'
+    | 'nempri_transfer_status'
+    | 'nempri_transfer_accepted_on'
+    | 'nempri_transfer_rejection_reason'
     | 'cancelled'
     | 'source'
     | 'external_reference'
     | 'nempri_submission_id'
     | 'hzupn_submission_id'
+    | 'nempri_transfer_submission_id'
     | 'row_version'
     | 'probable_income_suggestion_minor'
     | 'absence_id'

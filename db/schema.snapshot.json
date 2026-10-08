@@ -955,7 +955,8 @@
         "1971_payroll_sickness_case_slovak.sql",
         "1972_payroll_health_coverage_employee_notice.sql",
         "1973_payroll_eldp_deducted_days.sql",
-        "1974_payroll_person_pension_evidence.sql"
+        "1974_payroll_person_pension_evidence.sql",
+        "1975_payroll_sickness_case_transfer_notice.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -15823,6 +15824,10 @@
                 "nempri_rejection_reason": "varchar(190) NULL DEFAULT NULL",
                 "nempri_status": "enum('pending','accepted','rejected','predecessor') NOT NULL DEFAULT 'pending'",
                 "nempri_submission_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "nempri_transfer_accepted_on": "date NULL DEFAULT NULL",
+                "nempri_transfer_rejection_reason": "varchar(190) NULL DEFAULT NULL",
+                "nempri_transfer_status": "enum('pending','accepted','rejected','predecessor') NULL DEFAULT NULL",
+                "nempri_transfer_submission_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "ossz_code": "smallint(5) unsigned NOT NULL",
                 "other_maternity_claim": "tinyint(1) NULL DEFAULT NULL",
                 "other_parental_claim": "tinyint(1) NULL DEFAULT NULL",
@@ -15847,7 +15852,7 @@
                 "small_scope_income_minor": "bigint(20) unsigned NULL DEFAULT NULL",
                 "source": "enum('myucto','predecessor') NOT NULL DEFAULT 'myucto'",
                 "starts_maternity": "tinyint(1) NULL DEFAULT NULL",
-                "status": "enum('draft','prepared','submitted','accepted','rejected','cancelled') NULL DEFAULT NULL VIRTUAL GENERATED AS (case when `cancelled` = 1 then 'cancelled' when `nempri_status` = 'rejected' or `hzupn_status` = 'rejected' then 'rejected' when `nempri_status` in ('accepted','predecessor') and (`benefit_kind` <> 'NEM' or `hzupn_status` in ('accepted','predecessor')) then 'accepted' when `nempri_status` in ('accepted','predecessor') or `hzupn_status` in ('accepted','predecessor') then 'submitted' when `nempri_submission_id` is not null or `hzupn_submission_id` is not null then 'prepared' else 'draft' end)",
+                "status": "enum('draft','prepared','submitted','accepted','rejected','cancelled') NULL DEFAULT NULL VIRTUAL GENERATED AS (case when `cancelled` = 1 then 'cancelled' when `nempri_status` = 'rejected' or `hzupn_status` = 'rejected' or `nempri_transfer_status` = 'rejected' then 'rejected' when `nempri_status` in ('accepted','predecessor') and (`benefit_kind` <> 'NEM' or `hzupn_status` in ('accepted','predecessor')) and (`nempri_transfer_status` is null or `nempri_transfer_status` in ('accepted','predecessor')) then 'accepted' when `nempri_status` in ('accepted','predecessor') or `hzupn_status` in ('accepted','predecessor') or `nempri_transfer_status` in ('accepted','predecessor') then 'submitted' when `nempri_submission_id` is not null or `hzupn_submission_id` is not null or `nempri_transfer_submission_id` is not null then 'prepared' else 'draft' end)",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "transfer_reason": "varchar(16) NULL DEFAULT NULL",
                 "transferred_on": "date NULL DEFAULT NULL",
@@ -15868,9 +15873,11 @@
                 "fk_payroll_sickness_case_employment": "BTREE (supplier_id, employment_id)",
                 "fk_payroll_sickness_case_hzupn_submission": "BTREE (supplier_id, environment, hzupn_submission_id)",
                 "fk_payroll_sickness_case_nempri_submission": "BTREE (supplier_id, environment, nempri_submission_id)",
+                "fk_payroll_sickness_case_nempri_transfer_submission": "BTREE (supplier_id, environment, nempri_transfer_submission_id)",
                 "idx_payroll_sickness_case_absence": "BTREE (supplier_id, absence_id)",
                 "idx_payroll_sickness_case_documents": "BTREE (supplier_id, environment, cancelled, nempri_status, hzupn_status)",
                 "idx_payroll_sickness_case_employee": "BTREE (supplier_id, environment, employee_id, incapacity_from)",
+                "idx_payroll_sickness_case_transfer_notice": "BTREE (supplier_id, environment, cancelled, nempri_transfer_status)",
                 "uq_payroll_sickness_case_environment_id": "UNIQUE BTREE (supplier_id, environment, id)",
                 "uq_payroll_sickness_case_scope": "UNIQUE BTREE (supplier_id, environment, employment_id, benefit_kind, incapacity_from)",
                 "uq_payroll_sickness_case_supplier_id": "UNIQUE BTREE (supplier_id, id)"
@@ -15882,7 +15889,8 @@
                 "fk_payroll_sickness_case_employee": "(supplier_id, employee_id) -> payroll_employees (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "fk_payroll_sickness_case_employment": "(supplier_id, employment_id) -> payroll_employments (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "fk_payroll_sickness_case_hzupn_submission": "(supplier_id, environment, hzupn_submission_id) -> payroll_submissions (supplier_id, environment, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "fk_payroll_sickness_case_nempri_submission": "(supplier_id, environment, nempri_submission_id) -> payroll_submissions (supplier_id, environment, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "fk_payroll_sickness_case_nempri_submission": "(supplier_id, environment, nempri_submission_id) -> payroll_submissions (supplier_id, environment, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_sickness_case_nempri_transfer_submission": "(supplier_id, environment, nempri_transfer_submission_id) -> payroll_submissions (supplier_id, environment, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "chk_payroll_sickness_case_application": "`application_to` is null or `application_from` is null or `application_to` >= `application_from`",
@@ -15896,6 +15904,7 @@
                 "chk_payroll_sickness_case_hzupn_receipt": "`hzupn_status` = 'accepted' and `hzupn_accepted_on` is not null and `hzupn_rejection_reason` is null or `hzupn_status` = 'rejected' and `hzupn_accepted_on` is null and `hzupn_rejection_reason` is not null or `hzupn_status` = 'predecessor' and `hzupn_rejection_reason` is null or `hzupn_status` = 'pending' and `hzupn_accepted_on` is null and `hzupn_rejection_reason` is null",
                 "chk_payroll_sickness_case_ltc_consent": "`long_term_care_consent` is null and `long_term_care_consent_on` is null and `long_term_care_refusal_reason` is null or `benefit_kind` = 'DLO' and `long_term_care_consent_on` is not null and (`long_term_care_consent` = 'granted' and `long_term_care_refusal_reason` is null or `long_term_care_consent` = 'refused' and `long_term_care_refusal_reason` is not null)",
                 "chk_payroll_sickness_case_nempri_receipt": "`nempri_status` = 'accepted' and `nempri_accepted_on` is not null and `nempri_rejection_reason` is null or `nempri_status` = 'rejected' and `nempri_accepted_on` is null and `nempri_rejection_reason` is not null or `nempri_status` = 'predecessor' and `nempri_rejection_reason` is null or `nempri_status` = 'pending' and `nempri_accepted_on` is null and `nempri_rejection_reason` is null",
+                "chk_payroll_sickness_case_nempri_transfer_receipt": "`nempri_transfer_status` is null and `nempri_transfer_accepted_on` is null and `nempri_transfer_rejection_reason` is null or `nempri_transfer_status` = 'accepted' and `nempri_transfer_accepted_on` is not null and `nempri_transfer_rejection_reason` is null or `nempri_transfer_status` = 'rejected' and `nempri_transfer_accepted_on` is null and `nempri_transfer_rejection_reason` is not null or `nempri_transfer_status` = 'predecessor' and `nempri_transfer_rejection_reason` is null or `nempri_transfer_status` = 'pending' and `nempri_transfer_accepted_on` is null and `nempri_transfer_rejection_reason` is null",
                 "chk_payroll_sickness_case_ossz": "`ossz_code` between 100 and 999",
                 "chk_payroll_sickness_case_payment_date": "`payroll_payment_date` is null or `benefit_kind` = 'VPM'",
                 "chk_payroll_sickness_case_period": "`incapacity_to` is null or `incapacity_to` >= `incapacity_from`",

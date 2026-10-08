@@ -406,6 +406,47 @@ final class SicknessDocumentImportTest extends TestCase
         self::assertSame('2026-09-14', $this->singleCase()['incapacity_from']);
     }
 
+    /**
+     * NEMPRI25-*.potv.prevedenaNaJinouPraci-2: předchozí program podal k převedené
+     * zaměstnankyni obě oznámení (k rozhodnému dni a ke dni převedení). Import
+     * zapíše každé k jeho vlastnímu podání případu; druhé oznámení nesmí přepsat
+     * první ani skončit jako „neznámá událost" v měsíci převedení.
+     */
+    public function testTransferNoticeOfPredecessorIsRecordedAsTheSecondNotice(): void
+    {
+        $caseId = $this->predecessorSicknessCase('2026-09-17', '2026-10-14', self::DECISION);
+        $files = [
+            $this->file('nem.xml', SicknessImportXmlFixtures::nempri25('NEM', $this->birthNumber, [
+                'decision' => self::DECISION,
+                'transferredOn' => '2026-07-10',
+            ])),
+            $this->file('nem-prevedeni.xml', SicknessImportXmlFixtures::nempri25('NEM', $this->birthNumber, [
+                'decision' => self::DECISION,
+                'transferredOn' => '2026-07-10',
+                'roFrom' => '2025-07-01',
+                'roTo' => '2026-06-30',
+            ])),
+        ];
+
+        $records = $this->imports->preview($this->supplierId, self::ENVIRONMENT, $files)['records'];
+        self::assertCount(2, $records);
+        foreach ($records as $record) {
+            self::assertSame('update_case', $record['operation'], json_encode($record, JSON_UNESCAPED_UNICODE) ?: '');
+            self::assertSame($caseId, $record['benefit']['case_id']);
+        }
+        self::assertStringContainsString('ke dni převedení', (string) $records[1]['action_label']);
+        self::assertStringNotContainsString('ke dni převedení', (string) $records[0]['action_label']);
+
+        $applied = $this->apply($files, [$records[0]['key'], $records[1]['key']]);
+        foreach ($applied['results'] as $result) {
+            self::assertSame('applied', $result['status'], (string) $result['message']);
+        }
+        $case = $this->caseRow($caseId);
+        self::assertSame('predecessor', $case['nempri_status']);
+        self::assertSame('predecessor', $case['nempri_transfer_status']);
+        self::assertSame('2026-07-10', $case['transferred_on']);
+    }
+
     public function testOldNempri20OfMoneyMarksTheCaseByDecisionNumber(): void
     {
         $caseId = $this->predecessorSicknessCase('2026-08-20', null, '103600000000000001');

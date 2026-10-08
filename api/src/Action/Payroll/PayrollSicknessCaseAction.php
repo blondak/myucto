@@ -30,7 +30,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *
  * Endpoint záměrně NEUMÍ nastavit stav `accepted` přímo. Povinnost splní až
  * PŘEDÁNÍ územní správě sociálního zabezpečení, takže přijetí se zapisuje jen
- * přes `receipt`, vždy u konkrétního tiskopisu (`document` = nempri | hzupn)
+ * přes `receipt`, vždy u konkrétního tiskopisu (`document` = nempri | nempri_transfer | hzupn)
  * a vždy se dnem doručení z protokolu.
  *
  * `dispatch` zařadí připravené podání do fronty datové schránky. Je tady, a ne
@@ -260,7 +260,7 @@ final class PayrollSicknessCaseAction
             : null;
         if ($kind === null) {
             throw new \InvalidArgumentException(
-                'Tiskopis musí být nempri nebo hzupn.',
+                'Tiskopis musí být nempri, nempri_transfer nebo hzupn.',
             );
         }
 

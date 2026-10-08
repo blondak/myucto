@@ -24,17 +24,23 @@ use MyInvoice\Service\Payroll\Cssz\CsszSchemaCatalog;
  *
  * Každý má vlastní XSD, vlastní kořen a vlastní verzi payloadu; otisky drží
  * {@see CsszSchemaCatalog}.
+ *
+ * Třetí tiskopis, **NEMPRI ke dni převedení**, je týž formulář NEMPRI podaný
+ * podruhé s rozhodným obdobím ke dni převedení na jinou práci (§ 19 odst. 6,
+ * Všeobecné zásady NEMPRI). Podává se jen u převedené zaměstnankyně
+ * ({@see NempriTransferNotice}); jinak má případ jeho stav `NULL`.
  */
 enum SicknessDocumentKind: string
 {
     case Nempri = 'nempri';
     case Hzupn = 'hzupn';
+    case NempriTransfer = 'nempri_transfer';
 
     /** Klíč do {@see CsszSchemaCatalog}. */
     public function documentType(): string
     {
         return match ($this) {
-            self::Nempri => CsszSchemaCatalog::NEMPRI25,
+            self::Nempri, self::NempriTransfer => CsszSchemaCatalog::NEMPRI25,
             self::Hzupn => CsszSchemaCatalog::HZUPN20,
         };
     }
@@ -43,9 +49,24 @@ enum SicknessDocumentKind: string
     public function agendaCode(): string
     {
         return match ($this) {
-            self::Nempri => 'NEMPRI',
+            self::Nempri, self::NempriTransfer => 'NEMPRI',
             self::Hzupn => 'HZUPN',
         };
+    }
+
+    /** Krátký název do hlášek („NEMPRI ke dni převedení"). */
+    public function shortLabel(): string
+    {
+        return match ($this) {
+            self::NempriTransfer => 'NEMPRI ke dni převedení',
+            default => $this->agendaCode(),
+        };
+    }
+
+    /** Je to oznámení NEMPRI (první nebo druhé ke dni převedení)? */
+    public function isNempri(): bool
+    {
+        return $this !== self::Hzupn;
     }
 
     public function label(): string
@@ -53,6 +74,7 @@ enum SicknessDocumentKind: string
         return match ($this) {
             self::Nempri => 'Oznámení zaměstnavatele o žádosti zaměstnance o dávku',
             self::Hzupn => 'Hlášení zaměstnavatele při ukončení pracovní neschopnosti',
+            self::NempriTransfer => 'Oznámení zaměstnavatele o žádosti zaměstnance o dávku s rozhodným obdobím ke dni převedení',
         };
     }
 

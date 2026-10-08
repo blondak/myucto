@@ -137,11 +137,13 @@ final class PayrollEmploymentDeletionRepository
      * odpovídá podání mimo aplikaci. Protějšek {@see self::SICKNESS_DRAFT}.
      */
     private const SICKNESS_SUBMITTED = "({t}.nempri_submission_id IS NOT NULL"
+        . " OR {t}.nempri_transfer_submission_id IS NOT NULL"
         . " OR {t}.hzupn_submission_id IS NOT NULL"
         . " OR {t}.status NOT IN ('draft', 'cancelled'))";
 
     /** Rozpracovaný nebo zrušený případ bez jakéhokoli podání. */
     private const SICKNESS_DRAFT = "({t}.nempri_submission_id IS NULL"
+        . " AND {t}.nempri_transfer_submission_id IS NULL"
         . " AND {t}.hzupn_submission_id IS NULL"
         . " AND {t}.status IN ('draft', 'cancelled'))";
 

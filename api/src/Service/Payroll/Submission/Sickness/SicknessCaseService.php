@@ -333,6 +333,11 @@ final readonly class SicknessCaseService
             $incapacityFrom,
         );
         $this->protection->assess($kind, $incapacityFrom, $context, $values);
+        $values = [...$values, ...self::transferNoticeChanges(
+            $kind,
+            $values,
+            self::employmentEnd($context),
+        )];
         $overlapping = $this->cases->overlappingForEmployment(
             $supplierId,
             $environment,
@@ -435,6 +440,19 @@ final readonly class SicknessCaseService
         $this->assertCaredDependant($supplierId, (int) $row['employee_id'], $values);
         $decisiveMonths = $this->decisiveMonthsInput($input);
         if ($values !== []) {
+            $merged = [...$row, ...$values];
+            try {
+                $employmentEnd = self::employmentEnd($this->requireContext(
+                    $supplierId,
+                    (int) $row['employment_id'],
+                    (string) $merged['incapacity_from'],
+                ));
+            } catch (SicknessException) {
+                $employmentEnd = null;
+            }
+            $values = [...$values, ...self::transferNoticeChanges($kind, $merged, $employmentEnd)];
+        }
+        if ($values !== []) {
             if (!$this->cases->update(
                 $supplierId,
                 $environment,
@@ -466,6 +484,61 @@ final readonly class SicknessCaseService
         }
 
         return $this->requireCase($supplierId, $environment, $caseId);
+    }
+
+    /**
+     * Stav druhého oznámení NEMPRI ke dni převedení podle výsledného stavu
+     * případu ({@see NempriTransferNotice}). Vzniká jako „čeká na podání", jakmile
+     * ho norma chce; zmizí, když převedení zmizí nebo se přesune do měsíce
+     * rozhodného dne — ale jen dokud k němu nic nebylo podáno. Vyřízené nebo
+     * připravené druhé oznámení zůstává, evidence musí odpovídat tomu, co ČSSZ
+     * dostala.
+     *
+     * @param array<string,mixed> $merged uložený řádek s měněnými hodnotami
+     * @return array<string,mixed> změny sloupců druhého oznámení
+     */
+    public static function transferNoticeChanges(
+        SicknessBenefitKind $kind,
+        array $merged,
+        ?string $employmentEnd,
+    ): array {
+        $document = SicknessDocumentKind::NempriTransfer;
+        $status = $merged[$document->statusColumn()] ?? null;
+        if (NempriTransferNotice::required($kind, $merged, $employmentEnd)) {
+            return $status === null
+                ? [$document->statusColumn() => SicknessDocumentStatus::Pending->value]
+                : [];
+        }
+        if (($status === SicknessDocumentStatus::Pending->value || $status === SicknessDocumentStatus::Rejected->value)
+            && ($merged[$document->submissionColumn()] ?? null) === null
+        ) {
+            return [
+                $document->statusColumn() => null,
+                $document->acceptedOnColumn() => null,
+                $document->rejectionReasonColumn() => null,
+            ];
+        }
+
+        return [];
+    }
+
+    /**
+     * Podává se u případu druhé oznámení NEMPRI ke dni převedení? Rozhoduje
+     * uložený stav: `NULL` znamená, že se nepodává.
+     *
+     * @param array<string,mixed> $row
+     */
+    public static function transferNoticeRequired(array $row): bool
+    {
+        return ($row[SicknessDocumentKind::NempriTransfer->statusColumn()] ?? null) !== null;
+    }
+
+    /** @param array<string,mixed> $context */
+    private static function employmentEnd(array $context): ?string
+    {
+        $end = $context['end_date'] ?? null;
+
+        return is_string($end) && $end !== '' ? $end : null;
     }
 
     /**
@@ -611,8 +684,22 @@ final readonly class SicknessCaseService
                 . 'u tohoto druhu dávky se jeho výsledek nezapisuje.',
             );
         }
+        // Vyřízení předchozím programem se zapsat smí vždy: převzaté podání
+        // nenese důvod převedení, takže z něj povinnost odvodit nejde, ale
+        // doklad, že druhé oznámení odešlo, je.
+        if ($document === SicknessDocumentKind::NempriTransfer
+            && $outcome !== 'predecessor'
+            && !self::transferNoticeRequired($row)
+        ) {
+            throw new SicknessException(
+                'nempri_transfer_not_required',
+                'Druhé oznámení NEMPRI ke dni převedení se u tohoto případu nepodává (zaměstnankyně '
+                . 'nebyla převedena z důvodu těhotenství, mateřství nebo kojení v dřívějším měsíci, '
+                . 'než vznikla sociální událost), takže se k němu výsledek nezapisuje.',
+            );
+        }
         $current = self::documentStatus($row, $document);
-        $label = $document->agendaCode();
+        $label = $document->shortLabel();
         $correction = (int) ($row['correction'] ?? 0) === 1;
         $changes = match ($outcome) {
             'accepted' => (function () use ($current, $correction, $label, $acceptedOn): array {
@@ -819,7 +906,11 @@ final readonly class SicknessCaseService
         if ($correction) {
             return;
         }
-        $nempriSettled = self::documentStatus($row, SicknessDocumentKind::Nempri)->isSettled();
+        // Druhé oznámení ke dni převedení nese tytéž údaje jako první, takže
+        // jeho vyřízení zamyká stejná pole.
+        $nempriSettled = self::documentStatus($row, SicknessDocumentKind::Nempri)->isSettled()
+            || (self::transferNoticeRequired($row)
+                && self::documentStatus($row, SicknessDocumentKind::NempriTransfer)->isSettled());
         $hasHzupn = $kind->hasEndOfIncapacityReport();
         $hzupnSettled = $hasHzupn
             && self::documentStatus($row, SicknessDocumentKind::Hzupn)->isSettled();
@@ -977,7 +1068,7 @@ final readonly class SicknessCaseService
     private function systemValues(SicknessBenefitKind $kind, array $system): array
     {
         $values = [];
-        foreach ([SicknessDocumentKind::Nempri, SicknessDocumentKind::Hzupn] as $document) {
+        foreach (SicknessDocumentKind::cases() as $document) {
             $status = $system[$document->statusColumn()] ?? null;
             if ($status === null) {
                 continue;
