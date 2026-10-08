@@ -74,6 +74,9 @@ final class PayrollEnumContractTest extends TestCase
      * @var array<string,string>
      */
     private const UNION_DOMAIN = [
+        // Varianta ručního potvrzení přijetí podání (beze změny / upraveno ČSSZ)
+        'payroll.ts::PayrollSubmissionManualAcceptanceVariant'
+            => 'const:MyInvoice\Service\Payroll\Submission\PayrollSubmissionManualAcceptanceService::VARIANTS',
         // Druh dokumentu personálního spisu
         'payrollPersonnel.ts::PersonnelDocumentCategory'
             => 'const:MyInvoice\Repository\Payroll\PayrollPersonnelFileRepository::CATEGORIES',
