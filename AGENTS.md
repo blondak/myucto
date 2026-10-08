@@ -113,6 +113,7 @@ php tools/generateManualHtml.php
 - **Pouze syntetická testovací data** — repo je veřejné. Žádné reálné doklady, výpisy, IBANy, čísla dokladů ani identifikátory skutečných protistran.
 - České bankovní účty v testech musí projít mod-11 validací; ověřený placeholder: `1000000005 / 0100`.
 - ISDOC export se validuje proti oficiálnímu XSD (`api/xsd/isdoc-invoice-6.0.2.xsd`).
+- **Normativní pokrytí podání mezd** (`api/resources/payroll/norms/`, brána `PayrollNormCoverageTest`): změna generátorů, importérů nebo validátorů podání (JMHZ, REGZEC, PREZEC, NEMPRI, HZUPN, ELDP, OZUSPOJ, HOZ, přehledy ZP) musí upravit `status` a `tests` dotčených požadavků a nesmí snížit `baseline.json` (snížení jen úpravou baseline ve stejném PR a s odůvodněním). Nová oficiální verze DV/EDV/XSD vyžaduje znovu vygenerovat matici požadavků, přemapovat pokrytí a spustit `tools/norms/build-norm-coverage.php` (postup v jeho hlavičce).
 
 ### Účetní a daňová vrstva — dvě tvrdá pravidla
 
