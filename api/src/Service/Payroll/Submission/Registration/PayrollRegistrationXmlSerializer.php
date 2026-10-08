@@ -548,9 +548,10 @@ final class PayrollRegistrationXmlSerializer
                 $this->eventObject($data, 'delta'),
             );
         }
-        if ($action === 8 && is_array($data['explanation_attachment'] ?? null)) {
-            // Storno z jiného důvodu než nenastoupení nese písemné
-            // zdůvodnění jako přílohu (zásady REGZEC, kód akce 8).
+        if (in_array($action, [4, 8], true) && is_array($data['explanation_attachment'] ?? null)) {
+            // Storno z jiného důvodu než nenastoupení (A8) a oprava dne
+            // nástupu (A4) nesou písemné vysvětlení jako přílohu (zásady
+            // REGZEC, kód akce 8 a specifický postup č. 10).
             $attachments = $this->element($document, $namespace, 'attachs');
             $node = $this->element($document, $namespace, 'attach');
             $this->setMappedAttributes($node, $data['explanation_attachment'], [

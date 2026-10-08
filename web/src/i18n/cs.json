@@ -6952,7 +6952,8 @@
             "tax_residency": "Daňová rezidence",
             "relationship_detail_code": "Bližší určení pracovního vztahu",
             "health_insurance_code": "Kód zdravotní pojišťovny",
-            "highest_education_code": "Kód nejvyššího vzdělání"
+            "highest_education_code": "Kód nejvyššího vzdělání",
+            "actual_start_on": "Skutečný den nástupu"
           },
           "address": {
             "street": "Ulice",
@@ -6979,6 +6980,9 @@
           "a8_attachment": "Přiložit zdůvodnění",
           "a8_attachment_missing": "Zdůvodnění zatím není přiložené.",
           "a8_attachment_description": "Popis přílohy (nepovinné)",
+          "a4_start_hint": "Přihláška byla podaná s předpokládaným dnem nástupu a zaměstnanec nastoupil jindy. Opravu skutečného dne nástupu ČSSZ zpracuje jen s průvodním dopisem v příloze, referentsky.",
+          "a4_attachment": "Přiložit průvodní dopis",
+          "a4_attachment_missing": "Průvodní dopis zatím není přiložený.",
           "identifiers_verified": "OIČ a ID PPV jsem ověřil(a) v Seznamu zaměstnanců na ePortálu ČSSZ",
           "identifiers_verified_hint": "Jen u zaměstnance převzatého z dřívějšího oznámení (ONZ), jehož čísla nejsou z protokolu ČSSZ, přijatého dohlášení A3 ani z importu exportu zaměstnanců ČSSZ. Odhlášku A2 pak jde podat i bez dohlášení A3; to zůstane jako samostatná povinnost.",
           "select_placeholder": "Vyberte…"
@@ -11879,6 +11883,8 @@
       "registration_a8_explanation_attachment_invalid": "Soubor se zdůvodněním storna se nepodařilo přečíst, nebo je větší než 15 MB. Přiložte ho ve formuláři znovu.",
       "registration_a8_explanation_attachment_required": "Storno potřebuje vědět, proč se podává: buď zaměstnanec vůbec nenastoupil (zaškrtněte to ve formuláři), nebo jde o jiný důvod a pak přiložte soubor s písemným zdůvodněním. Bez něj ČSSZ storno nezpracuje.",
       "registration_a5_variable_symbol_unchanged": "Nový variabilní symbol se shoduje s původním. ČSSZ takový převod zamítne, zadejte nový variabilní symbol přidělený ČSSZ.",
+      "registration_a4_start_attachment_required": "Opravu skutečného dne nástupu ČSSZ zpracuje jen s průvodním dopisem v příloze. Přiložte ve formuláři soubor, který opravu vysvětluje.",
+      "registration_a4_explanation_attachment_invalid": "Soubor s průvodním dopisem k opravě se nepodařilo přečíst nebo nesplňuje podmínky ČSSZ (přípona, velikost). Přiložte ho ve formuláři znovu.",
       "registration_a5_variable_symbol_invalid": "Nový variabilní symbol není platný: nesouhlasí kontrolní číslice nebo nezačíná kódem okresní správy sociálního zabezpečení. ČSSZ by převod odmítla, opište nový symbol přesně z oznámení ČSSZ.",
       "registration_event_before_start": "Oznámení se hlásí ke dni před nástupem zaměstnance. ČSSZ přijme jen změnu ke dni nástupu nebo pozdějšímu. Opravte datum ve formuláři, nebo zkontrolujte den nástupu na kartě pracovního vztahu.",
       "registration_event_czech_residence_forbidden": "Adresa pobytu v ČR se u zaměstnance s trvalým pobytem v ČR neposílá, ČSSZ by oznámení zamítla. Odeberte ji z oznámení; mění-li se trvalý pobyt do zahraničí, ohlaste novou trvalou adresu ve stejné změně.",

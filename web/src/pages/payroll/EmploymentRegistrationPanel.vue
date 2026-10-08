@@ -1209,7 +1209,7 @@ async function writeA1MasterData(fields: string[]): Promise<void> {
 }
 
 const deltaFieldOptions = computed(() => eventInteraction.value === 'correction'
-  ? ['title_prefix', 'tax_residency', 'relationship_detail_code', 'highest_education_code']
+  ? ['title_prefix', 'tax_residency', 'relationship_detail_code', 'highest_education_code', 'actual_start_on']
   : [
       'title_prefix', 'contact_address', 'tax_residency', 'relationship_detail_code',
       'health_insurance_code', 'highest_education_code',
@@ -1299,6 +1299,7 @@ const eventCanSave = computed(() => {
   if (eventInteraction.value === 'change') return deltaValueReady.value
   if (eventInteraction.value === 'correction') {
     return deltaValueReady.value
+      && (!correctionNeedsAttachment.value || cancellationAttachment.value !== null)
       && discoveredOn.value !== ''
       && sourceSubmissionId.value !== null
       && sourceSubmissionId.value > 0
@@ -1596,8 +1597,16 @@ function deltaPayload(): Record<string, unknown> {
       },
     }
   }
+  if (deltaField.value === 'actual_start_on') {
+    return { employment: { actual_start_on: deltaValue.value.trim() } }
+  }
   return { [deltaField.value]: deltaValue.value.trim() }
 }
+
+/** Oprava skutečného dne nástupu (A4) jde na ČSSZ jen s průvodním dopisem v příloze. */
+const correctionNeedsAttachment = computed(
+  () => eventInteraction.value === 'correction' && deltaField.value === 'actual_start_on',
+)
 
 /** Proč se čistý průměr nepředvyplnil (typicky daňové zvýhodnění na dítě). */
 const a2NetAverageNote = ref('')
@@ -1722,6 +1731,12 @@ function eventPayload(): PayrollRegistrationEventInput {
     payload.corrections = deltaPayload()
     payload.discovered_on = discoveredOn.value
     payload.source_submission_id = sourceSubmissionId.value ?? undefined
+    if (correctionNeedsAttachment.value && cancellationAttachment.value !== null) {
+      payload.explanation_attachment = {
+        ...cancellationAttachment.value,
+        description: optionalText(cancellationAttachmentDescription.value) ?? null,
+      }
+    }
   }
   if (eventInteraction.value === 'variable_symbol_transfer') {
     payload.new_variable_symbol = newVariableSymbol.value
@@ -4511,7 +4526,7 @@ async function copyXml(): Promise<void> {
             </label>
             <label class="text-xs font-medium text-neutral-700">
               {{ t('payroll.people.registration.event.discovered_on') }}
-              <DateInput v-model="discoveredOn" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" />
+              <DateInput v-model="discoveredOn" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" data-test="registration-event-discovered-on" />
             </label>
           </div>
           <label v-if="eventInteraction === 'change'" class="block text-xs font-medium text-neutral-700 sm:max-w-md">
@@ -4520,7 +4535,7 @@ async function copyXml(): Promise<void> {
           </label>
           <label class="block text-xs font-medium text-neutral-700">
             {{ t('payroll.people.registration.event.delta_field') }}
-            <select v-model="deltaField" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 sm:max-w-md">
+            <select v-model="deltaField" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 sm:max-w-md" data-test="registration-event-delta-field">
               <option v-for="field in deltaFieldOptions" :key="field" :value="field">
                 {{ t(`payroll.people.registration.event.delta.${field}`) }}
               </option>
@@ -4562,6 +4577,32 @@ async function copyXml(): Promise<void> {
               >{{ option.code }} · {{ option.label }}</option>
             </select>
           </label>
+          <template v-else-if="deltaField === 'actual_start_on'">
+            <label class="block text-xs font-medium text-neutral-700">
+              {{ t('payroll.people.registration.event.delta.actual_start_on') }}
+              <DateInput v-model="deltaValue" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 sm:max-w-md" data-test="registration-event-delta-actual-start" />
+            </label>
+            <p class="text-xs text-neutral-600" data-test="registration-event-a4-start-hint">
+              {{ t('payroll.people.registration.event.a4_start_hint') }}
+            </p>
+            <div class="flex flex-wrap items-center gap-2">
+              <label :class="btnOutline('primary')" class="cursor-pointer whitespace-nowrap">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
+                {{ t('payroll.people.registration.event.a4_attachment') }}
+                <input type="file" class="sr-only" data-test="registration-event-a4-attachment" @change="addCancellationAttachment" />
+              </label>
+              <span v-if="cancellationAttachment" class="text-xs text-neutral-700" data-test="registration-event-a4-attachment-name">
+                {{ cancellationAttachment.name }}
+              </span>
+              <span v-else class="text-xs text-warning-700">
+                {{ t('payroll.people.registration.event.a4_attachment_missing') }}
+              </span>
+            </div>
+            <label class="block text-xs font-medium text-neutral-700">
+              {{ t('payroll.people.registration.event.a8_attachment_description') }}
+              <input v-model="cancellationAttachmentDescription" maxlength="255" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 sm:max-w-md" />
+            </label>
+          </template>
           <label v-else class="block text-xs font-medium text-neutral-700">
             {{ t(`payroll.people.registration.event.delta.${deltaField}`) }}
             <input v-model="deltaValue" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 sm:max-w-md" />

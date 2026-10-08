@@ -1766,7 +1766,7 @@ final readonly class PayrollRegistrationEventService
             );
         }
         $allowed = $correction
-            ? ['title_prefix', 'tax_residency', 'relationship_detail_code', 'highest_education_code']
+            ? ['title_prefix', 'tax_residency', 'relationship_detail_code', 'highest_education_code', 'employment']
             : [
                 'title_prefix', 'contact_address', 'tax_residency',
                 'relationship_detail_code', 'health_insurance_code',
@@ -1823,6 +1823,17 @@ final readonly class PayrollRegistrationEventService
                 ),
             };
         }
+        if ($correction && is_array($result['employment'] ?? null)) {
+            // Oprava A4 z pracovních údajů nese jen skutečný den nástupu
+            // (zásady REGZEC, specifický postup č. 10 d), vždy s písemným
+            // vysvětlením v příloze.
+            $this->onlyKeys(
+                $result['employment'],
+                ['actual_start_on'],
+                'employment.',
+                'v podání „' . $this->actionName(4) . '“',
+            );
+        }
         return ['delta' => $result];
     }
 
@@ -1867,6 +1878,17 @@ final readonly class PayrollRegistrationEventService
         $data = $this->delta($input, true);
         $delta = $data['delta'];
         $this->assertTaxResidencyAddress($delta);
+        if (isset($delta['employment']['actual_start_on'])) {
+            // Zásady REGZEC, specifický postup č. 10 (d): přihláška A1 podaná
+            // s předpokládaným nástupem se při jiném skutečném nástupu opraví
+            // A4. Oprava 10223 jde jen s průvodním dopisem v příloze, ÚSSZ ji
+            // zpracuje referentsky.
+            $this->assertStartDateAge($supplierId, $context, $effectiveOn, $delta);
+            $data['explanation_attachment'] = $this->explanationAttachment(
+                $input['explanation_attachment'] ?? null,
+                4,
+            );
+        }
         if (array_key_exists('relationship_detail_code', $delta)) {
             $sourceActivity = $frozenSource['activity_code'];
             if (!is_string($sourceActivity) || $sourceActivity === '') {
@@ -2132,9 +2154,22 @@ final readonly class PayrollRegistrationEventService
      *
      * @return array{name:string,description:?string,data_base64:string}
      */
-    private function explanationAttachment(mixed $value): array
+    private function explanationAttachment(mixed $value, int $actionCode = 8): array
     {
         if (!is_array($value) || array_is_list($value)) {
+            if ($actionCode === 4) {
+                throw new PayrollRegistrationXmlException(
+                    'registration_a4_start_attachment_required',
+                    'Opravu skutečného dne nástupu přes ' . $this->actionName(4)
+                        . ' ČSSZ zpracuje jen s průvodním dopisem v příloze.'
+                        . ' Přiložte ve formuláři soubor, který opravu'
+                        . ' vysvětluje (například že zaměstnanec nastoupil'
+                        . ' jindy, než bylo v přihlášce).'
+                        . PayrollRegistrationFieldVocabulary::reference(
+                            'explanation_attachment',
+                        ),
+                );
+            }
             throw new PayrollRegistrationXmlException(
                 'registration_a8_explanation_attachment_required',
                 $this->actionName(8)
@@ -2148,6 +2183,9 @@ final readonly class PayrollRegistrationEventService
                     ),
             );
         }
+        $invalidCode = $actionCode === 4
+            ? 'registration_a4_explanation_attachment_invalid'
+            : 'registration_a8_explanation_attachment_invalid';
         $name = $this->requiredText(
             $value['name'] ?? null,
             'explanation_attachment.name',
@@ -2159,8 +2197,8 @@ final readonly class PayrollRegistrationEventService
             || base64_decode($data, true) === false
         ) {
             throw new PayrollRegistrationXmlException(
-                'registration_a8_explanation_attachment_invalid',
-                'Soubor se zdůvodněním storna se nepodařilo přečíst. Přiložte'
+                $invalidCode,
+                'Soubor s písemným vysvětlením se nepodařilo přečíst. Přiložte'
                     . ' ho ve formuláři znovu.'
                     . PayrollRegistrationFieldVocabulary::reference(
                         'explanation_attachment.data_base64',
@@ -2171,7 +2209,7 @@ final readonly class PayrollRegistrationEventService
             ['name' => $name, 'data_base64' => $data],
         ]) as $violation) {
             throw new PayrollRegistrationXmlException(
-                'registration_a8_explanation_attachment_invalid',
+                $invalidCode,
                 PayrollRegistrationAttachmentRules::message($violation)
                     . PayrollRegistrationFieldVocabulary::reference(
                         'explanation_attachment',

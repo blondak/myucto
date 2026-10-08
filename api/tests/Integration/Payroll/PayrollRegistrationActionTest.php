@@ -2099,6 +2099,97 @@ final class PayrollRegistrationActionTest extends TestCase
         );
     }
 
+    /**
+     * REGZEC25-PROC.A1.prereg-combos-01 (d): přihláška A1 s předpokládaným
+     * nástupem se při jiném skutečném nástupu opraví A4 na 10223, vždy
+     * s průvodním dopisem v příloze.
+     */
+    public function testA4CorrectsTheActualStartWithExplanationAttachment(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = "2026-08-16", actual_start_date = "2026-08-16",
+                    status = "active"
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('1', '1', '2026-08-16');
+        $sourceEvent = $this->json(($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'change',
+                'effective_on' => self::TODAY,
+                'source_reference' => 'synthetic-a4-start-source',
+                'changes' => ['title_prefix' => 'Bc.'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ));
+        $source = $this->json(($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $sourceEvent['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ));
+        $this->markRegistrationAccepted((int) $source['submission_id']);
+        $correction = [
+            'environment' => 'test',
+            'interaction' => 'correction',
+            'effective_on' => self::TODAY,
+            'discovered_on' => self::TODAY,
+            'source_reference' => 'synthetic-a4-actual-start',
+            'source_submission_id' => $source['submission_id'],
+            'corrections' => ['employment' => ['actual_start_on' => '2026-08-17']],
+        ];
+
+        $withoutLetter = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody($correction),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(422, $withoutLetter->getStatusCode(), (string) $withoutLetter->getBody());
+        self::assertSame(
+            'registration_a4_start_attachment_required',
+            $this->json($withoutLetter)['error']['code'],
+        );
+
+        $otherField = $correction;
+        $otherField['corrections'] = ['employment' => ['work_mode_code' => '1']];
+        $otherField['source_reference'] = 'synthetic-a4-other-employment';
+        $forbidden = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody($otherField),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(422, $forbidden->getStatusCode(), (string) $forbidden->getBody());
+
+        $correction['explanation_attachment'] = [
+            'name' => 'vysvetleni.pdf',
+            'description' => 'Skutečný nástup',
+            'data_base64' => base64_encode('%PDF-synthetic-explanation'),
+        ];
+        $approved = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody($correction),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $approved->getStatusCode(), (string) $approved->getBody());
+        $prepared = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $this->json($approved)['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $prepared->getStatusCode(), (string) $prepared->getBody());
+        $xml = $this->storedArtifactXml((int) $this->json($prepared)['submission_id']);
+        self::assertStringContainsString(' act="4"', $xml);
+        self::assertMatchesRegularExpression('/<job [^>]*fro="2026-08-17"/', $xml);
+        self::assertStringContainsString('<attach name="vysvetleni.pdf"', $xml);
+    }
+
     public function testAcceptedA5ReceiptRotatesIdPpvAndKeepsFrozenReplay(): void
     {
         $this->db->pdo()->prepare(
