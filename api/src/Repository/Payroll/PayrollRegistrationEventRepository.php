@@ -180,6 +180,7 @@ final class PayrollRegistrationEventRepository
                     employment.end_date, employment.row_version,
                     employment.relation_type,
                     supplier.company_name,
+                    supplier.city AS company_city,
                     office.social_security_variable_symbol,
                     office.test_social_security_variable_symbol,
                     settings.social_security_office_code,

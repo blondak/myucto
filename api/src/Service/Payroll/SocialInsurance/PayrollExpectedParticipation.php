@@ -50,11 +50,28 @@ final class PayrollExpectedParticipation
 
         return match ($group) {
             SocialParticipationAggregationGroup::RegularRelationship => true,
-            SocialParticipationAggregationGroup::SmallScaleCandidate => $agreedMonthlyMinor !== null
-                && $smallScaleThresholdMinor !== null
-                && $agreedMonthlyMinor >= $smallScaleThresholdMinor,
+            SocialParticipationAggregationGroup::SmallScaleCandidate => self::agreedIncomeMeetsThreshold(
+                $agreedMonthlyMinor,
+                $smallScaleThresholdMinor,
+            ) === true,
             default => false,
         };
+    }
+
+    /**
+     * Dosahuje SJEDNANÝ měsíční příjem rozhodného příjmu? `null`, když sjednaný
+     * příjem nebo rozhodný příjem k datu neznáme. Totéž porovnání rozhoduje
+     * o příznaku zaměstnání malého rozsahu u DPČ v registraci (REGZEC `sme`).
+     */
+    public static function agreedIncomeMeetsThreshold(
+        ?int $agreedMonthlyMinor,
+        ?int $smallScaleThresholdMinor,
+    ): ?bool {
+        if ($agreedMonthlyMinor === null || $smallScaleThresholdMinor === null) {
+            return null;
+        }
+
+        return $agreedMonthlyMinor >= $smallScaleThresholdMinor;
     }
 
     /** Rozhodný příjem k datu z pravidel sociálního pojištění; `null`, když pravidla pro datum nejsou. */

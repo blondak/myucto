@@ -721,7 +721,13 @@ podání. Uplynulou lhůtu náhled označí červeným upozorněním. Když už 
 existuje přihláška, karta to ukáže hned po otevření: připravenou nabídne
 tlačítkem **Otevřít ve frontě** místo nové přípravy, u odeslané nebo přijaté
 napíše její číslo a stav. Druhou přihlášku téhož vztahu aplikace nezaloží ani
-po změně údajů; změny se hlásí změnovým hlášením A3, chyby opravou A4.
+po změně údajů; změny se hlásí změnovým hlášením A3, chyby opravou A4. Totéž
+platí pro vztah, který už má od ČSSZ ID zaměstnání (ID PPV), třeba převzatý
+z jiného mzdového programu: je u ČSSZ přihlášený, takže plnou registraci A1
+aplikace nepřipraví a odkáže na dohlášení údajů nebo změnu A3, resp. opravu A4.
+
+Název zaměstnavatele jde do registrace REGZEC jako celý název a obec sídla
+z profilu firmy („Firma s.r.o., Obec"), jak to chtějí zásady REGZEC.
 
 **Přihlášení před nástupem.** Zaměstnance je nutné přihlásit před nástupem,
 nejdřív osm dnů předem (§ 19 odst. 1 písm. a) zákona č. 323/2025 Sb.).

@@ -195,6 +195,64 @@ final class RegistrationImportServiceTest extends TestCase
     }
 
     /**
+     * DPČ přihlášená jako zaměstnání malého rozsahu (`sme="A"`, druh činnosti
+     * A až J) zůstává DPČ, ale příznak se přenese do profilu A1, odkud ho
+     * čte příští věta. Dřív se ztratil a návrh poslal `sme="N"`.
+     */
+    public function testAgreementToCompleteWorkKeepsSmallScaleFlagInRegistrationProfile(): void
+    {
+        $birthNumber = RegistrationXmlFixtures::birthNumber('1993-05-06', 'male', 4);
+        $files = [$this->file('dpc.xml', RegistrationXmlFixtures::regzecA1([
+            'bno' => $birthNumber,
+            'birth_date' => '1993-05-06',
+            'sex' => 'M',
+            'first' => 'Pavel',
+            'last' => 'Zkušební',
+            'rel' => 'A',
+            'detail' => null,
+            'sme' => 'A',
+        ]))];
+
+        $record = $this->imports->preview($this->supplierId, 'test', $files)['records'][0];
+        self::assertSame('create_person', $record['operation'], json_encode($record, JSON_UNESCAPED_UNICODE));
+        self::assertSame('dpc', $record['employment']['relation_type']);
+
+        $applied = $this->apply($files, [$record['key']]);
+        self::assertSame('applied', $applied['results'][0]['status'], (string) $applied['results'][0]['message']);
+        $employmentId = (int) $applied['results'][0]['employment_id'];
+        $profile = $this->container->get(PayrollRegistrationIdentityService::class)
+            ->a1ProfileView($this->supplierId, $employmentId)['profile'];
+        self::assertIsArray($profile);
+        self::assertTrue($profile['employment']['small_scale'], json_encode($profile['employment'], JSON_UNESCAPED_UNICODE));
+    }
+
+    /**
+     * Obec bez ulic: věta nese jen `num` a `cit`. Profil A1 nesmí dostat
+     * ulici „Obec 424" z jednořádkové adresy, jinak by příští věta poslala
+     * číslo popisné dvakrát (zpětný převod Premier, 2 věty).
+     */
+    public function testAddressWithoutStreetDoesNotDuplicateHouseNumberInRegistrationProfile(): void
+    {
+        $birthNumber = RegistrationXmlFixtures::birthNumber('1988-02-03', 'female', 5);
+        $files = [$this->file('obec.xml', RegistrationXmlFixtures::regzecA1([
+            'bno' => $birthNumber,
+            'birth_date' => '1988-02-03',
+            'street' => null,
+            'num' => '424',
+            'city' => 'Testov',
+        ]))];
+
+        $record = $this->imports->preview($this->supplierId, 'test', $files)['records'][0];
+        $applied = $this->apply($files, [$record['key']]);
+        self::assertSame('applied', $applied['results'][0]['status'], (string) $applied['results'][0]['message']);
+        $profile = $this->container->get(PayrollRegistrationIdentityService::class)
+            ->a1ProfileView($this->supplierId, (int) $applied['results'][0]['employment_id'])['profile'];
+        self::assertIsArray($profile);
+        self::assertNull($profile['permanent_address']['street'] ?? null, json_encode($profile['permanent_address'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('424', $profile['permanent_address']['house_number']);
+    }
+
+    /**
      * Pobíraný důchod z přihlášky (`pens`) se propíše do zákonné evidence osoby,
      * odkud ho čte ELDP i JMHZ. Do vyplněné evidence import nesahá.
      */
@@ -366,6 +424,29 @@ final class RegistrationImportServiceTest extends TestCase
         $result = $this->apply($a3, [$record['key']])['results'][0];
         self::assertSame('skipped', $result['status']);
         self::assertSame($record['blocker'], $result['message']);
+    }
+
+    /**
+     * Soubor s jednou větou mimo schéma: věta se zablokuje s důvodem
+     * u souboru, ostatní věty se převezmou (ČSSZ dávku zpracuje po větách).
+     */
+    public function testSentenceOutsideSchemaIsBlockedWhileTheRestOfTheFileIsImported(): void
+    {
+        $files = [$this->file('davka.xml', RegistrationXmlFixtures::twoA1Sentences(true, false))];
+
+        $preview = $this->imports->preview($this->supplierId, 'test', $files);
+        self::assertNull($preview['files'][0]['error']);
+        self::assertSame(1, $preview['files'][0]['record_count']);
+        self::assertCount(1, $preview['files'][0]['warnings']);
+        self::assertStringContainsString('Věta 1 (sqnr 1)', $preview['files'][0]['warnings'][0]);
+        self::assertStringContainsString('nepřebírá', $preview['files'][0]['warnings'][0]);
+        self::assertCount(1, $preview['records']);
+        $record = $preview['records'][0];
+        self::assertSame('create_person', $record['operation'], json_encode($record, JSON_UNESCAPED_UNICODE));
+
+        $applied = $this->apply($files, [$record['key']]);
+        self::assertSame('applied', $applied['results'][0]['status'], (string) $applied['results'][0]['message']);
+        self::assertSame(1, $this->tableRows('payroll_employees'));
     }
 
     public function testUnreadableFilesAreReportedWhileOthersAreProcessed(): void

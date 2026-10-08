@@ -270,7 +270,12 @@ final readonly class PayrollRegistrationEventService
                     10,
                 ),
                 'name' => $this->requiredText(
-                    $context['company_name'] ?? null,
+                    PayrollRegistrationEmployerName::forSubmission(
+                        (string) ($context['company_name'] ?? ''),
+                        is_string($context['company_city'] ?? null)
+                            ? $context['company_city']
+                            : null,
+                    ),
                     'employer_name',
                     150,
                 ),

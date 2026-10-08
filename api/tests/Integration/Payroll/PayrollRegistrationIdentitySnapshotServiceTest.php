@@ -60,6 +60,7 @@ final class PayrollRegistrationIdentitySnapshotServiceTest extends TestCase
         $this->identities = new PayrollRegistrationIdentityService(
             $identityRepository,
             $sensitive,
+            \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetRegistry::defaults(),
         );
         $this->snapshotRepository =
             new PayrollRegistrationIdentitySnapshotRepository($db);

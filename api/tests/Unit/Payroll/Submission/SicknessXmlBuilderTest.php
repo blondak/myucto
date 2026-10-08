@@ -258,6 +258,24 @@ final class SicknessXmlBuilderTest extends TestCase
         self::assertStringContainsString('<pracovalOd>2026-08-10</pracovalOd>', $xml);
     }
 
+    /**
+     * DV_HZUPN20_v12 vede `opravnePodani` jako povinný (XSD ho připouští
+     * vynechat); ČSSZ přijala řádná hlášení Premier s „N". Píše se proto vždy.
+     */
+    public function testHzupnAlwaysCarriesCorrectionFlag(): void
+    {
+        $regular = $this->hzupnPayload();
+        $regularXml = $this->hzupn->serialize($regular);
+        $this->validator->validateHzupn($regular, $regularXml, '2026-08-03');
+        self::assertStringContainsString('<opravnePodani>N</opravnePodani>', $regularXml);
+
+        $correction = $this->hzupnPayload(['correction' => true]);
+        self::assertStringContainsString(
+            '<opravnePodani>A</opravnePodani>',
+            $this->hzupn->serialize($correction),
+        );
+    }
+
     public function testHzupnRejectsWorkIntervalBeforeIncapacity(): void
     {
         $payload = $this->hzupnPayload([

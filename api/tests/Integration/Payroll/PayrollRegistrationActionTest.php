@@ -41,6 +41,7 @@ use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistration
 use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationReportableProfileBuilder;
 use MyInvoice\Service\Payroll\Submission\Registration\EmployerRegistrationDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollEmployeeRegistrationDeadlinePolicy;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationEmployerName;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationEventService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshotBuilder;
@@ -2366,6 +2367,61 @@ final class PayrollRegistrationActionTest extends TestCase
     }
 
     /**
+     * Název zaměstnavatele (10120) je podle zásad REGZEC „celý název dle
+     * rejstříku a obec sídla"; Premier ho tak poslal ve všech 67 přijatých
+     * větách, aplikace dřív jen název.
+     */
+    public function testFullRegistrationCarriesEmployerNameWithSeatMunicipality(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE supplier SET company_name = ?, city = ? WHERE id = ?',
+        )->execute(['Syntetická firma s.r.o.', 'Testov', $this->supplierId]);
+        $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON, null, null, true);
+        $this->saveA1ProfileFor(self::START_ON, '1', '1');
+
+        $response = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'registration_mode' => 'full',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $xml = $this->storedArtifactXml((int) $this->json($response)['submission_id']);
+        self::assertStringContainsString(' nam="Syntetická firma s.r.o., Testov"', $xml);
+    }
+
+    /**
+     * Vztah s ID PPV od ČSSZ (převzatý z jiného programu, bez přihlášky
+     * z aplikace) už je u ČSSZ přihlášený. Plnou A1 k němu ČSSZ odmítla
+     * v zpětném převodu šestkrát (603/604 a duplicita); aplikace ji dřív
+     * připravila a zařadila do fronty bez varování.
+     */
+    public function testFullRegistrationIsRefusedForEmploymentWithIdPpvFromCssz(): void
+    {
+        $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON);
+        $this->saveA1ProfileFor(self::START_ON, '1', '1');
+
+        $response = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'registration_mode' => 'full',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        $error = $this->json($response)['error'];
+        self::assertSame('registration_already_registered', $error['code']);
+        self::assertStringContainsString('A3', (string) $error['message']);
+        self::assertStringContainsString('A4', (string) $error['message']);
+        self::assertSame(0, $this->countSubmissions());
+    }
+
+    /**
      * Protokol ČSSZ k přijaté A1 v tvaru, jaký vrací VREP (Item/@subtype
      * REGZEC25, sqnr = pořadí věty, identifier „RČ;OIČ;IDPPV"), projde
      * skutečným parserem i verifierem protokolů a z něj se převezme OIČ
@@ -2582,7 +2638,7 @@ final class PayrollRegistrationActionTest extends TestCase
      */
     public function testA8ForOtherReasonCarriesExplanationAndHasNoStatutoryDeadline(): void
     {
-        $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON);
+        $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON, null, null, true);
         $this->saveA1ProfileFor(self::START_ON, '1', '1');
         $a1 = $this->json(($this->action)->prepare(
             $this->request('POST')->withParsedBody([
@@ -2593,6 +2649,7 @@ final class PayrollRegistrationActionTest extends TestCase
             ['employmentId' => (string) $this->employmentId],
         ));
         $this->markRegistrationAccepted((int) $a1['submission_id']);
+        $this->assignIdentityFromAcceptedRegistration();
         $this->db->pdo()->prepare(
             'UPDATE payroll_employments
                 SET actual_start_date = ?, start_date = ?, status = "active"
@@ -3255,6 +3312,8 @@ final class PayrollRegistrationActionTest extends TestCase
      */
     public function testOnzEmployeeFullCompletionIsPreparedAndConfirmsIdentifiersForA2(): void
     {
+        $this->db->pdo()->prepare('UPDATE supplier SET city = ? WHERE id = ?')
+            ->execute(['Testov', $this->supplierId]);
         $this->startExistingEmployment('2026-02-15', '1', '1', null, true);
         $this->saveA1ProfileFor('2026-02-15', '1', '1');
         try {
@@ -3301,6 +3360,25 @@ final class PayrollRegistrationActionTest extends TestCase
         ] as $expected) {
             self::assertStringContainsString($expected, $xml, $expected);
         }
+        // Událost zmrazí název zaměstnavatele stejným pravidlem jako A1 (10120).
+        $supplier = $this->db->pdo()->prepare('SELECT company_name, city FROM supplier WHERE id = ?');
+        $supplier->execute([$this->supplierId]);
+        $employer = $supplier->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($employer);
+        self::assertStringEndsWith(', Testov', PayrollRegistrationEmployerName::forSubmission(
+            (string) $employer['company_name'],
+            'Testov',
+        ));
+        self::assertStringContainsString(
+            ' nam="' . htmlspecialchars(
+                PayrollRegistrationEmployerName::forSubmission(
+                    (string) $employer['company_name'],
+                    $employer['city'] === null ? null : (string) $employer['city'],
+                ),
+                ENT_XML1 | ENT_QUOTES,
+            ) . '"',
+            $xml,
+        );
 
         $this->acceptWithTrustedReceipt($body);
         $identity = $this->identities->sensitiveJmhzIdentityAt(
@@ -4486,7 +4564,7 @@ final class PayrollRegistrationActionTest extends TestCase
     /** REGZEC25-attachs.attach-02 u zdůvodnění storna A8. */
     public function testA8ExplanationAttachmentIsCheckedForExtensionAndSize(): void
     {
-        $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON);
+        $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON, null, null, true);
         $this->saveA1ProfileFor(self::START_ON, '1', '1');
         $a1 = $this->json(($this->action)->prepare(
             $this->request('POST')->withParsedBody([
@@ -4497,6 +4575,7 @@ final class PayrollRegistrationActionTest extends TestCase
             ['employmentId' => (string) $this->employmentId],
         ));
         $this->markRegistrationAccepted((int) $a1['submission_id']);
+        $this->assignIdentityFromAcceptedRegistration();
         $this->employmentActiveSince(self::TODAY);
         foreach ([
             'UPDATE payroll_employment_terms SET effective_from = ?
@@ -5288,6 +5367,25 @@ final class PayrollRegistrationActionTest extends TestCase
             $this->supplierId,
             $id,
         ]);
+    }
+
+    /**
+     * OIČ a ID PPV přidělí ČSSZ až přijatou přihláškou; dřív přidělené ID PPV
+     * by plnou A1 zablokovalo jako duplicitní registraci.
+     */
+    private function assignIdentityFromAcceptedRegistration(): void
+    {
+        $this->identities->assignManualJmhzIdentity(
+            $this->supplierId,
+            $this->employmentId,
+            'test',
+            '1000000001',
+            '200000000000000000002',
+            self::START_ON,
+            'synthetic-regzec-identity',
+            true,
+            $this->userId,
+        );
     }
 
     private function seedRegistrationEventPrerequisites(

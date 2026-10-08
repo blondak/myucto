@@ -468,6 +468,7 @@ final class PayrollImportedJmhzProtocolRepositoryTest extends TestCase
         (new PayrollRegistrationIdentityService(
             new PayrollRegistrationIdentityRepository($this->db),
             $this->sensitive,
+            \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetRegistry::defaults(),
         ))->assignEmploymentExternalId(
             $this->supplierId,
             $employmentId,

@@ -818,7 +818,21 @@ final class RegistrationImportService
                 $fileRows[$index] = $this->fileRow($file, null, 0, $e->getMessage());
                 continue;
             }
-            $fileRows[$index] = $this->fileRow($file, $read['document_type'], count($read['records']), null);
+            $fileRows[$index] = $this->fileRow(
+                $file,
+                $read['document_type'],
+                count($read['records']),
+                null,
+                array_map(
+                    static fn (array $sentence): string => 'Věta ' . $sentence['position']
+                        . ($sentence['sequence'] === null ? '' : ' (sqnr ' . $sentence['sequence'] . ')')
+                        . ' neodpovídá schématu ČSSZ ' . $read['document_type']
+                        . ($sentence['reason'] === '' ? '' : ' (' . $sentence['reason'] . ')')
+                        . ' a nepřebírá se, takže její údaje doplňte ručně. Ostatní věty'
+                        . ' souboru se převezmou, stejně jako je ČSSZ zpracuje po větách.',
+                    $read['rejected'],
+                ),
+            );
             foreach ($read['records'] as $record) {
                 $records[] = [
                     'record' => $record,

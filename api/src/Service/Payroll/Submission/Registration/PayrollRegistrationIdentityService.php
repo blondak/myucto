@@ -6,9 +6,11 @@ namespace MyInvoice\Service\Payroll\Submission\Registration;
 
 use MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
+use MyInvoice\Service\Payroll\SocialInsurance\PayrollExpectedParticipation;
 
 final readonly class PayrollRegistrationIdentityService
 {
@@ -51,7 +53,34 @@ final readonly class PayrollRegistrationIdentityService
     public function __construct(
         private PayrollRegistrationIdentityRepository $repository,
         private PayrollSensitiveData $sensitiveData,
+        private PayrollRulesetProvider $rulesets,
     ) {}
+
+    /**
+     * Zdroje návrhu A1 doplněné o rozhodný příjem k rozhodnému dni: podle
+     * něj návrh u DPČ pozná zaměstnání malého rozsahu (REGZEC `sme`).
+     *
+     * @return array<string,mixed>
+     */
+    private function a1DraftSources(
+        int $supplierId,
+        int $employeeId,
+        int $employmentId,
+        string $onDate,
+    ): array {
+        $sources = $this->repository->a1DraftSources(
+            $supplierId,
+            $employeeId,
+            $employmentId,
+            $onDate,
+        );
+        if (is_array($sources['terms'] ?? null)) {
+            $sources['terms']['small_scale_threshold_minor'] =
+                PayrollExpectedParticipation::smallScaleThreshold($this->rulesets, $onDate);
+        }
+
+        return $sources;
+    }
 
     /*
      * POZNÁMKA K \RuntimeException V TÉHLE TŘÍDĚ: hlášky o nesedícím otisku
@@ -182,7 +211,7 @@ final readonly class PayrollRegistrationIdentityService
                 $identityError = $exception->getMessage();
             }
             $draft = (new PayrollRegistrationA1DraftBuilder())->build(
-                $this->repository->a1DraftSources(
+                $this->a1DraftSources(
                     $supplierId,
                     $employeeId,
                     $employmentId,
@@ -261,7 +290,7 @@ final readonly class PayrollRegistrationIdentityService
                     false,
                 );
                 $draft = (new PayrollRegistrationA1DraftBuilder())->build(
-                    $this->repository->a1DraftSources(
+                    $this->a1DraftSources(
                         $supplierId,
                         $employeeId,
                         $employmentId,

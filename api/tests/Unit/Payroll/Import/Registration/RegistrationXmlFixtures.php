@@ -264,6 +264,34 @@ final class RegistrationXmlFixtures
         }
     }
 
+    /**
+     * Dávka A1 se dvěma větami (sqnr 1 a 2); vadná věta nese `cnt="Čes"`, jak ji
+     * poslal Premier (XSD chce dvoupísmenný kód).
+     */
+    public static function twoA1Sentences(bool $firstInvalid, bool $secondInvalid): string
+    {
+        $broken = static fn (string $xml): string => (string) preg_replace('/(<adr[^>]*) cnt="CZ"/', '$1 cnt="Čes"', $xml);
+        $first = self::regzecA1([
+            'bno' => self::birthNumber('1990-01-15', 'female', 1),
+        ]);
+        $second = self::regzecA1([
+            'bno' => self::birthNumber('1985-06-07', 'male', 2),
+            'birth_date' => '1985-06-07',
+            'sex' => 'M',
+            'first' => 'Petr',
+        ]);
+        if ($firstInvalid) {
+            $first = $broken($first);
+        }
+        if ($secondInvalid) {
+            $second = $broken($second);
+        }
+        preg_match('#<employee .*</employee>#s', $second, $match);
+        $employee = str_replace('<employee sqnr="1"', '<employee sqnr="2"', $match[0]);
+
+        return str_replace('</employees>', $employee . "\n  </employees>", $first);
+    }
+
     private static function regzec(string $employee): string
     {
         return <<<XML

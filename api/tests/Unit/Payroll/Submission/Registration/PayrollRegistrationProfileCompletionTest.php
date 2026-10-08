@@ -70,6 +70,32 @@ final class PayrollRegistrationProfileCompletionTest extends TestCase
         self::assertStringNotContainsString(' place=', $xml);
     }
 
+    /**
+     * Prvotní dohlášení rezidence (10459): nástup před 1. 1. 2026 dává
+     * 1. 1. 2026, pozdější nástup den nástupu (matice
+     * REGZEC25-PROC.tax-residency-01, FAQ chyba 243). Premier takhle ČSSZ
+     * přijala osm vět se starším nástupem.
+     */
+    public function testInitialTaxResidencyDateIsTheLaterOfStartAndJanuaryFirst2026(): void
+    {
+        foreach ([
+            '2024-05-06' => '2026-01-01',
+            '2025-12-31' => '2026-01-01',
+            '2026-01-01' => '2026-01-01',
+            '2026-03-01' => '2026-03-01',
+        ] as $startOn => $expected) {
+            foreach ([PayrollRegistrationProfileCompletion::FULL, PayrollRegistrationProfileCompletion::MINIMAL] as $mode) {
+                $xml = self::serialize($mode, null, '9152031234', $startOn);
+
+                self::assertStringContainsString(
+                    '<taxidrezid stat="CZ" statchang="' . $expected . '"/>',
+                    $xml,
+                    $startOn . ' ' . $mode,
+                );
+            }
+        }
+    }
+
     public function testMinimalCompletionCarriesOnlyTheDataOnzDidNotHave(): void
     {
         $xml = self::serialize(PayrollRegistrationProfileCompletion::MINIMAL, null);
@@ -123,9 +149,13 @@ final class PayrollRegistrationProfileCompletionTest extends TestCase
         );
     }
 
-    private static function serialize(string $mode, ?string $endOn, string $birthNumber = '9152031234'): string
-    {
-        $a1 = self::a1();
+    private static function serialize(
+        string $mode,
+        ?string $endOn,
+        string $birthNumber = '9152031234',
+        ?string $startOn = null,
+    ): string {
+        $a1 = self::a1($startOn);
         $delta = PayrollRegistrationProfileCompletion::delta(
             $a1,
             PayrollRegistrationA1SnapshotBuilderTest::identity(),
@@ -198,15 +228,22 @@ final class PayrollRegistrationProfileCompletionTest extends TestCase
         return $xml;
     }
 
-    private static function a1(): PayrollRegistrationA1Snapshot
+    private static function a1(?string $startOn = null): PayrollRegistrationA1Snapshot
     {
         $source = PayrollRegistrationA1SnapshotBuilderTest::source('1', '1');
         $source['employment']['required_education_code'] = 'T';
+        $scope = self::scope();
+        if ($startOn !== null) {
+            $source['employment']['actual_start_on'] = $startOn;
+            $source['employment']['contract_start_on'] = $startOn;
+            $source['source']['effective_on'] = $startOn;
+            $scope['effective_on'] = $startOn;
+        }
 
         return (new PayrollRegistrationA1SnapshotBuilder())->build(
             $source,
             PayrollRegistrationA1SnapshotBuilderTest::identity(),
-            self::scope(),
+            $scope,
         );
     }
 

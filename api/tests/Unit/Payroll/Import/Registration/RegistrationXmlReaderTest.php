@@ -68,6 +68,58 @@ final class RegistrationXmlReaderTest extends TestCase
         self::assertSame('CZ', $profile['permanent_address']['country_code']);
     }
 
+    /**
+     * Adresa obce bez ulic (`adr` bez `str`) nese ulici výslovně prázdnou:
+     * profil A1 jinak ponechal jednořádkovou ulici z návrhu („Obec 424")
+     * a příští věta poslala číslo popisné dvakrát.
+     */
+    public function testAddressWithoutStreetCarriesExplicitlyEmptyStreet(): void
+    {
+        $read = $this->reader->read(RegistrationXmlFixtures::regzecA1([
+            'street' => null,
+            'num' => '424',
+            'city' => 'Testov',
+        ]));
+
+        $address = $read['records'][0]->a1Profile['permanent_address'];
+        self::assertArrayHasKey('street', $address);
+        self::assertNull($address['street']);
+        self::assertArrayHasKey('orientation_number', $address);
+        self::assertNull($address['orientation_number']);
+        self::assertSame('424', $address['house_number']);
+        self::assertSame('Testov', $address['city']);
+    }
+
+    /**
+     * ČSSZ dávku zpracovává po větách (partialAccept): věta mimo schéma se
+     * odmítne, ostatní se přijmou. Import dřív kvůli jedné vadné větě
+     * (Premier `cnt="Čes"`) zahodil celý soubor i s devíti přijatými větami.
+     */
+    public function testSentenceOutsideSchemaIsRejectedAloneWhenTheRestOfTheFileIsValid(): void
+    {
+        $read = $this->reader->read(RegistrationXmlFixtures::twoA1Sentences(true, false));
+
+        self::assertCount(1, $read['records']);
+        self::assertSame(2, $read['records'][0]->sequence);
+        self::assertCount(1, $read['rejected']);
+        self::assertSame(1, $read['rejected'][0]['position']);
+        self::assertSame('1', $read['rejected'][0]['sequence']);
+        self::assertStringContainsString('cnt', $read['rejected'][0]['reason']);
+
+        $valid = $this->reader->read(RegistrationXmlFixtures::twoA1Sentences(false, false));
+        self::assertCount(2, $valid['records']);
+        self::assertSame([], $valid['rejected']);
+    }
+
+    /** Když vadu nejde přičíst jen některým větám, odmítne se soubor celý. */
+    public function testFileWithAllSentencesOutsideSchemaIsRejectedWhole(): void
+    {
+        $this->expectException(RegistrationImportFileException::class);
+        $this->expectExceptionMessage('neodpovídá schématu');
+
+        $this->reader->read(RegistrationXmlFixtures::twoA1Sentences(true, true));
+    }
+
     /** IMP-01, IMP-06, IMP-07: VS (starý i nový) zaměstnavatele, dřívější příjmení a VČP se čtou. */
     public function testEmployerSymbolsFormerSurnameAndVcpAreRead(): void
     {
