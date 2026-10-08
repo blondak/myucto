@@ -108,6 +108,45 @@ describe('TakeoverCheckSection', () => {
       .toContain('discount_intents')
   })
 
+  /** Hlášení podané před opravou mzdy: kdo, za který měsíc, rozdíly a tři prokliky. */
+  it('vypíše hlášení JMHZ s jinými údaji než konečná mzda s rozdíly a prokliky', () => {
+    const wrapper = mount(TakeoverCheckSection, {
+      props: {
+        check: {
+          takeover_months: [1, 2, 3, 4, 5, 6, 7],
+          missing_openings: [],
+          jmhz_form_differences: [{
+            employee_id: 9,
+            employee_name: 'Syntetická osoba',
+            period: '2026-06',
+            employment_ids: [12],
+            submission_id: 34,
+            submission_type: 'R',
+            submitted_at: '2026-07-14 06:49:00',
+            differences: [
+              { metric: 'gross', takeover_minor: 0, jmhz_minor: 3_216_400, difference_minor: 3_216_400 },
+              { metric: 'advance_tax', takeover_minor: 0, jmhz_minor: 226_000, difference_minor: 226_000 },
+            ],
+          }],
+          differences: [],
+          opening_only: [],
+          takeover_only: [],
+        },
+      },
+    })
+
+    expect(wrapper.find('[data-test="takeover-check-ok"]').exists()).toBe(false)
+    const section = wrapper.get('[data-test="takeover-check-jmhz-forms"]')
+    expect(section.text()).toContain('Syntetická osoba')
+    expect(section.find('[data-test="takeover-jmhz-form-9-2026-06-gross"]').exists()).toBe(true)
+    expect(section.find('[data-test="takeover-jmhz-form-9-2026-06-advance_tax"]').exists()).toBe(true)
+    expect(section.get('[data-test="takeover-jmhz-form-person-9-2026-06"]').attributes('data-to')).toContain('payroll-person')
+    expect(section.get('[data-test="takeover-jmhz-form-wage-9-2026-06"]').attributes('data-to')).toContain('"tab":"takeover"')
+    const submission = section.get('[data-test="takeover-jmhz-form-submission-9-2026-06"]').attributes('data-to')
+    expect(submission).toContain('"external":"34"')
+    expect(submission).toContain('external-submissions')
+  })
+
   it('nic nevykreslí, když rok převzaté měsíce nemá', () => {
     const wrapper = mount(TakeoverCheckSection, {
       props: {

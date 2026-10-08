@@ -60,6 +60,34 @@ export interface TakeoverMissingDiscountIntent {
   discount_reason: string
 }
 
+export type TakeoverJmhzFormMetric =
+  | 'gross'
+  | 'social_base'
+  | 'advance_tax'
+  | 'health_insurance'
+
+export interface TakeoverJmhzFormMetricDifference {
+  metric: TakeoverJmhzFormMetric
+  takeover_minor: number
+  jmhz_minor: number
+  difference_minor: number
+}
+
+/**
+ * Přijaté hlášení JMHZ předchozího programu, které za osobu a měsíc nese jiné
+ * údaje než převzatá (konečná) mzda — podnět k opravnému hlášení, ne chyba.
+ */
+export interface TakeoverJmhzFormDifference {
+  employee_id: number
+  employee_name: string
+  period: string
+  employment_ids: number[]
+  submission_id: number
+  submission_type: string | null
+  submitted_at: string | null
+  differences: TakeoverJmhzFormMetricDifference[]
+}
+
 export interface TakeoverCheck {
   takeover_months: number[]
   missing_openings: TakeoverGap[]
@@ -67,6 +95,8 @@ export interface TakeoverCheck {
   estimated_starts?: TakeoverEstimatedStart[]
   /** Volitelné kvůli starší odpovědi bez klíče. */
   missing_discount_intents?: TakeoverMissingDiscountIntent[]
+  /** Volitelné kvůli starší odpovědi bez klíče. */
+  jmhz_form_differences?: TakeoverJmhzFormDifference[]
   differences: TakeoverLayerDifference[]
   opening_only: TakeoverLayerOneSided[]
   takeover_only: TakeoverLayerOneSided[]

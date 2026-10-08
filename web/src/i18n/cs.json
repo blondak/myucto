@@ -1952,7 +1952,19 @@
       "opening_only_title": "Chybí převzaté mzdy",
       "opening_only_hint": "Počáteční stav měsíc má, převzatá mzda ne. Bez ní nevznikne evidenční list důchodového pojištění za rok přechodu.",
       "takeover_only_title": "Převzatá mzda bez počátečního stavu",
-      "takeover_only_hint": "Převzatá mzda měsíc má, počáteční stav ne — roční zúčtování ani vyúčtování daně s ním nepočítají."
+      "takeover_only_hint": "Převzatá mzda měsíc má, počáteční stav ne — roční zúčtování ani vyúčtování daně s ním nepočítají.",
+      "jmhz_form_title": "Hlášení JMHZ podané s jinými údaji, než má konečná mzda",
+      "jmhz_form_hint": "Předchozí program podal měsíční hlášení dřív, než se mzda opravila, a opravné hlášení už nepodal. Převzetí je správné, ČSSZ a finanční správa ale mají jiné údaje. Zvažte opravné hlášení za tyto osoby a měsíce. Převod ani uzávěrku to neblokuje; rozdíly menší než 1 Kč (u zdravotního pojistného do 2 Kč) jsou zaokrouhlení a nehlásí se.",
+      "jmhz_form_person": "{name}: hlášení JMHZ za {period} bylo podáno s jinými údaji, než má konečná mzda, zvažte opravné hlášení",
+      "jmhz_form_reported": "V hlášení",
+      "jmhz_form_open_wage": "Převzatá mzda",
+      "jmhz_form_open_submission": "Otevřít hlášení",
+      "jmhz_form_metric": {
+        "gross": "Zúčtovaný příjem / hrubá mzda",
+        "social_base": "Vyměřovací základ SP",
+        "advance_tax": "Záloha na daň po slevách",
+        "health_insurance": "Zdravotní pojistné (zaměstnanec + zaměstnavatel)"
+      }
     },
     "takeover_manual": {
       "title": "Ruční zadání převzatých mezd",

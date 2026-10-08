@@ -1952,7 +1952,19 @@
       "opening_only_title": "Taken-over wages missing",
       "opening_only_hint": "The opening balance has the month, the taken-over wages do not. Without them the pension insurance record sheet for the transition year cannot be produced.",
       "takeover_only_title": "Taken-over wages without an opening balance",
-      "takeover_only_hint": "The taken-over wages have the month, the opening balance does not — the annual settlement and the tax statement do not count it."
+      "takeover_only_hint": "The taken-over wages have the month, the opening balance does not — the annual settlement and the tax statement do not count it.",
+      "jmhz_form_title": "JMHZ report filed with different figures than the final wage",
+      "jmhz_form_hint": "The previous program filed the monthly report before the wage was corrected and never filed a corrective report. The takeover is correct, but the social security administration and the tax authority hold different figures. Consider a corrective report for these people and months. This blocks neither the takeover nor the year close; differences below CZK 1 (up to CZK 2 for health insurance) are rounding and are not reported.",
+      "jmhz_form_person": "{name}: the JMHZ report for {period} was filed with different figures than the final wage, consider a corrective report",
+      "jmhz_form_reported": "In the report",
+      "jmhz_form_open_wage": "Taken-over wage",
+      "jmhz_form_open_submission": "Open report",
+      "jmhz_form_metric": {
+        "gross": "Income accounted / gross wage",
+        "social_base": "Social insurance base",
+        "advance_tax": "Tax advance after credits",
+        "health_insurance": "Health insurance (employee + employer)"
+      }
     },
     "takeover_manual": {
       "title": "Manual entry of taken-over wages",

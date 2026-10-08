@@ -67,6 +67,9 @@ final class JmhzCodeCatalogCoverageTest extends TestCase
         'jmhz_external_codebook_manifest_sha256' => 'field',
         'jmhz_external_codebook_overlay_key' => 'field',
         'jmhz_external_codebooks_verified_for_period' => 'field',
+        // Kontrola převzetí: převzatá mzda proti přijatému hlášení předchozího programu.
+        'jmhz_form_differences' => 'field',
+        'jmhz_minor' => 'field',
         'jmhz_functional_benefits_status' => 'field',
         'jmhz_identity' => 'route',
         // Původ identifikátoru osoby (source_origin), ne kód blokace.
