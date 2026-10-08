@@ -21,6 +21,15 @@ namespace MyInvoice\Service\Payroll\Submission\Eldp;
  * | `ocr`,`long_term_care`| 10360 ošetřovné / dlouhodobé ošetř. |
  * | `ppm` (jen před porodem) | 10359 peněžitá pomoc v mateřství |
  * | `paternity`           | 10362 otcovská                      |
+ * | `invalid_termination` | 10536 § 16 odst. 4 písm. j)         |
+ *
+ * `invalid_termination` není omluvný důvod podle písm. a), ale doba, po kterou
+ * podle pravomocného rozhodnutí soudu nebo mimosoudní dohody uzavřené po podání
+ * žaloby trval vztah zakládající účast na pojištění po jeho neplatném skončení,
+ * aniž byla přiznána náhrada mzdy (§ 16 odst. 4 písm. j) zákona č. 155/1995 Sb.,
+ * datový slovník JMHZ 1.4.1.6 u 10536). Vztah po tu dobu trval a účast by bez
+ * neplatného skončení vznikla, proto měsíc zůstává dobou pojištění stejně jako
+ * u omluvného důvodu.
  *
  * Peněžitá pomoc v mateřství je vyloučenou dobou jen PŘED porodem: „doby před
  * porodem, po kterou nebyla vykonávána výdělečná činnost z důvodu
@@ -106,10 +115,11 @@ namespace MyInvoice\Service\Payroll\Submission\Eldp;
  * a všechny dny měsíce bez účasti („X"). Všeobecné zásady ELDP, údaj Doby
  * odečtené; Pokyny MPSV k vyplnění MH, ID 10375 až 10469.
  *
- * ## Co se z principu nevyplňuje
+ * ## 10536 jen z výslovného vstupu
  *
- * - **10536** (§ 16 odst. 4 písm. j)) — modul pro něj nemá žádný vstup,
- *   drží se na nule a je to vidět v součtovém pravidle.
+ * **10536** (§ 16 odst. 4 písm. j)) vzniká jedině z nepřítomnosti
+ * `invalid_termination`, kterou účetní zapíše podle rozhodnutí soudu. Nic jiného
+ * se do něj neodvozuje.
  */
 final class EldpExcludedPeriodDeriver
 {
@@ -122,6 +132,9 @@ final class EldpExcludedPeriodDeriver
         // Jen předporodní část, interval zužuje ppmPreBirthWindow().
         'ppm' => 'penezitaPomocMaterstvi',
         'paternity' => 'otcovska',
+        // § 16 odst. 4 písm. j): vztah trvající po neplatném skončení bez
+        // přiznané náhrady mzdy, viz docblock třídy.
+        'invalid_termination' => 'vyloucenePar16',
     ];
 
     /**

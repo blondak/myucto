@@ -27521,7 +27521,8 @@
       "unexcused": "Neomluvená absence",
       "other": "Jiná absence",
       "public_function": "Výkon veřejné funkce (volno bez náhrady)",
-      "employee_obstacle_unpaid": "Překážka na straně zaměstnance bez náhrady mzdy"
+      "employee_obstacle_unpaid": "Překážka na straně zaměstnance bez náhrady mzdy",
+      "invalid_termination": "Trvání vztahu po neplatném skončení (bez náhrady mzdy)"
     },
     "obstacle": {
       "kind": "Druh překážky",
@@ -27598,6 +27599,7 @@
       "new": "Nová absence",
       "new_needs_person": "Novou nepřítomnost lze založit až po výběru konkrétního zaměstnance — váže se k pracovnímu vztahu.",
       "unpaid_excused_hint": "Pracovní volno bez náhrady mzdy (§ 199 až 202 zákoníku práce). Náhrada se nepočítá a mzdový vstup nevznikne; hodiny jdou do měsíčního hlášení jen jako neodpracované (10275), v bloku neplaceného volna. Přiznává-li zákon za funkci náhradu, zadejte ji jako mzdový vstup.",
+      "invalid_termination_hint": "Doba, po kterou podle pravomocného rozhodnutí soudu (nebo mimosoudní dohody po podání žaloby) vztah trval po neplatném skončení a náhrada mzdy za ni přiznána nebyla. Mzda za ni nenáleží; v měsíčním hlášení i v ELDP je vyloučenou dobou podle § 16 odst. 4 písm. j) zákona č. 155/1995 Sb. (10536). Byla-li náhrada mzdy přiznána, tento druh nepoužívejte a náhradu zadejte jako mzdový vstup.",
       "list": "Evidované absence",
       "empty": "Ve zvoleném období nejsou žádné absence.",
       "type": "Druh absence",

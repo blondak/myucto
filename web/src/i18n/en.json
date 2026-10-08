@@ -27521,7 +27521,8 @@
       "unexcused": "Unexcused absence",
       "other": "Other absence",
       "public_function": "Holding a public office (unpaid leave)",
-      "employee_obstacle_unpaid": "Employee-side obstacle without wage compensation"
+      "employee_obstacle_unpaid": "Employee-side obstacle without wage compensation",
+      "invalid_termination": "Employment continuing after invalid termination (no wage compensation)"
     },
     "obstacle": {
       "kind": "Kind of obstacle",
@@ -27598,6 +27599,7 @@
       "new": "New absence",
       "new_needs_person": "A new absence can only be created for a specific employee — it is tied to an employment.",
       "unpaid_excused_hint": "Time off without wage compensation (Sections 199–202 of the Labour Code). No compensation input is created; the hours go to the monthly report only as unworked hours (10275), in the unpaid leave block. If the law grants compensation for the office, enter it as a payroll input.",
+      "invalid_termination_hint": "The period during which, under a final court decision (or an out-of-court settlement after the action was filed), the employment continued after an invalid termination and no wage compensation was awarded. No wage is due for it; the monthly report and the pension record report it as an excluded period under Section 16(4)(j) of Act No. 155/1995 Coll. (10536). If wage compensation was awarded, do not use this type and enter the compensation as a payroll input.",
       "list": "Recorded absences",
       "empty": "No absences in the selected period.",
       "type": "Absence type",

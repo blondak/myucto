@@ -65,6 +65,7 @@ final class JmhzEldpEvidenceBuilder
         // neplacené volno ({@see \MyInvoice\Service\Payroll\Time\PayrollJmhzAbsenceHoursDeriver}).
         'public_function' => ['unpaid_leave_millihours'],
         'employee_obstacle_unpaid' => ['unpaid_leave_millihours'],
+        'invalid_termination' => ['unpaid_leave_millihours'],
         'unexcused' => ['unexcused_millihours'],
         'employee_obstacle' => ['employee_obstacle_paid_millihours'],
         'employer_obstacle' => ['employer_obstacle_millihours'],
@@ -147,6 +148,21 @@ final class JmhzEldpEvidenceBuilder
      * péče trvají celou nepřítomnost.
      */
     private const ONE_WAY_EXCLUDED_ATTRIBUTES = ['penezitaPomocMaterstvi', 'osetrovaniClenaRodiny'];
+
+    /**
+     * Druhy nepřítomnosti, u kterých neodpracované hodiny být NEMUSÍ.
+     *
+     * Doba trvání vztahu po neplatném skončení (§ 16 odst. 4 písm. j) zákona
+     * č. 155/1995 Sb.) je právní stav, ne výpadek ze směn: u člena orgánu bez
+     * pracovní doby (formulář `cinnostKS`) ani u vztahu, kterému se na tu dobu
+     * směny nezveřejnily, žádné hodiny nevzniknou. Jsou-li, patří do bloku
+     * neplaceného volna. Vyloučená doba 10536 má doložený původ přímo v té
+     * nepřítomnosti, takže se příčně proti hodinám nekontroluje.
+     */
+    private const HOURS_OPTIONAL_ABSENCE_TYPES = ['invalid_termination'];
+
+    /** Vyloučená doba, jejímž jediným zdrojem je druh z {@see HOURS_OPTIONAL_ABSENCE_TYPES}. */
+    private const HOURS_OPTIONAL_EXCLUDED_ATTRIBUTE = 'vyloucenePar16';
 
     /** @var array{manifest_sha256:string,payload:array<string,mixed>}|null */
     private ?array $specManifest = null;
@@ -534,7 +550,12 @@ final class JmhzEldpEvidenceBuilder
                     $excluded,
                     $outsideInsurance,
                 );
-                if ($deducted['total'] > 0) {
+                // Dobu § 16 odst. 4 písm. j) žádná složka odečtených dob
+                // nenese a vyloučené doby musí ležet v odečtených (logické
+                // testy ELDP12 č. 39 a 48) — takový měsíc se proto nevykáže.
+                if ($deducted['total'] > 0
+                    || ($excluded['components'][self::HOURS_OPTIONAL_EXCLUDED_ATTRIBUTE] ?? 0) > 0
+                ) {
                     $this->invalid(
                         'jmhz_eldp_deducted_days_unsupported',
                         "Měsíc s kódem ELDP {$code} (po dovršení důchodového věku) má {$deducted['total']} "
@@ -1409,7 +1430,20 @@ final class JmhzEldpEvidenceBuilder
         $holidayHours = self::carriesHolidays($summaryVersion)
             && is_int($values['holiday_millihours'] ?? null)
             && $values['holiday_millihours'] > 0;
-        if ($absences !== []
+        // Měsíc jen s nepřítomností bez povinných hodin (§ 16 odst. 4 písm. j))
+        // a bez neodpracovaných hodin se souhrnem dokládá jako bezabsenční;
+        // 10536 má původ přímo v evidované nepřítomnosti.
+        $hoursOptionalOnly = $absences !== []
+            && array_filter(
+                $absences,
+                static fn (mixed $absence): bool => !in_array(
+                    is_array($absence) ? ($absence['absence_type'] ?? null) : null,
+                    self::HOURS_OPTIONAL_ABSENCE_TYPES,
+                    true,
+                ),
+            ) === []
+            && ($interactions['IN07'] ?? null) === false;
+        if (($absences !== [] && !$hoursOptionalOnly)
             || $holidayHours
             || (self::fromImportSummary($summaryVersion) && ($interactions['IN07'] ?? null) === true)
         ) {
@@ -1530,6 +1564,18 @@ final class JmhzEldpEvidenceBuilder
                 ['employee_obstacle', 'employer_obstacle'],
                 true,
             )) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** @param list<array<string,mixed>> $absences */
+    private static function hasHoursOptionalAbsence(array $absences): bool
+    {
+        foreach ($absences as $absence) {
+            if (in_array($absence['absence_type'] ?? null, self::HOURS_OPTIONAL_ABSENCE_TYPES, true)) {
                 return true;
             }
         }
@@ -1906,6 +1952,9 @@ final class JmhzEldpEvidenceBuilder
             }
         }
         foreach ($expected as $type => $fields) {
+            if (in_array($type, self::HOURS_OPTIONAL_ABSENCE_TYPES, true)) {
+                continue;
+            }
             $sum = 0;
             foreach ($fields as $field) {
                 $sum += $values[$field] ?? 0;
@@ -1940,9 +1989,14 @@ final class JmhzEldpEvidenceBuilder
             $days = $excluded['components'][$attribute] ?? 0;
             $fields = self::EXCLUDED_ATTRIBUTE_FIELDS[$attribute] ?? null;
             if ($fields === null) {
-                // 10536 § 16 odst. 4 písm. j) nemá v ordinary řezu povolený
-                // druh nepřítomnosti, takže sem nemá jak přitéct; nenulová
-                // hodnota by znamenala, že se výčty druhů rozešly.
+                // 10536 § 16 odst. 4 písm. j) přitéká jen z nepřítomnosti, u které
+                // hodiny nejsou povinné (HOURS_OPTIONAL_ABSENCE_TYPES); bez ní by
+                // nenulová hodnota znamenala, že se výčty druhů rozešly.
+                if ($attribute === self::HOURS_OPTIONAL_EXCLUDED_ATTRIBUTE
+                    && self::hasHoursOptionalAbsence($absences)
+                ) {
+                    continue;
+                }
                 if ($days !== 0) {
                     $this->invalid(
                         'jmhz_eldp_excluded_days_unsupported',

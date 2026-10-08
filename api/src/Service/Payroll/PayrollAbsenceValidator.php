@@ -28,12 +28,17 @@ final class PayrollAbsenceValidator
      * (10471 „s náhradou mzdy") i ELDP. Obě nové se proto vedou jako pracovní
      * volno bez náhrady příjmu, stejně jako neplacené volno
      * ({@see \MyInvoice\Service\Payroll\Submission\Eldp\EldpExcludedPeriodDeriver::UNPAID_EXCUSED_TYPES}).
+     *
+     * `invalid_termination` je doba, po kterou podle pravomocného rozhodnutí
+     * soudu (nebo mimosoudní dohody) vztah trval po neplatném skončení, aniž
+     * byla přiznána náhrada mzdy (§ 16 odst. 4 písm. j) zákona č. 155/1995 Sb.).
+     * Mzda za ni nenáleží; v hlášení je vyloučenou dobou 10536.
      */
     private const TYPES = [
         'vacation', 'dpn', 'quarantine', 'ocr', 'long_term_care', 'ppm',
         'paternity', 'parental', 'unpaid_leave', 'employee_obstacle',
         'employer_obstacle', 'compensatory_time_off', 'unexcused', 'other',
-        'public_function', 'employee_obstacle_unpaid',
+        'public_function', 'employee_obstacle_unpaid', 'invalid_termination',
     ];
 
     private const DOMAIN = PayrollRulesetDomain::CompensationAverages;
@@ -112,6 +117,9 @@ final class PayrollAbsenceValidator
             // tahle evidence nepočítá — takový případ zatím vede účetní ručním
             // mzdovým vstupem.
             'public_function', 'employee_obstacle_unpaid' => 'none',
+            // Náhrada mzdy za dobu po neplatném skončení přiznaná nebyla —
+            // jinak by nešlo o vyloučenou dobu § 16 odst. 4 písm. j).
+            'invalid_termination' => 'none',
             default => 'none',
         };
         if (in_array($type, self::TYPES_WITHIN_QUARTER, true)

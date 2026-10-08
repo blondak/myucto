@@ -957,7 +957,8 @@
         "1973_payroll_eldp_deducted_days.sql",
         "1974_payroll_person_pension_evidence.sql",
         "1975_import_jobs_report.sql",
-        "1976_payroll_submission_manual_acceptances.sql"
+        "1976_payroll_submission_manual_acceptances.sql",
+        "1977_payroll_absence_invalid_termination.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -7675,7 +7676,7 @@
             "engine": "InnoDB",
             "collation": "utf8mb4_unicode_ci",
             "columns": {
-                "absence_type": "enum('vacation','dpn','quarantine','ocr','long_term_care','ppm','paternity','parental','unpaid_leave','employee_obstacle','employer_obstacle','compensatory_time_off','unexcused','other','public_function','employee_obstacle_unpaid') NOT NULL",
+                "absence_type": "enum('vacation','dpn','quarantine','ocr','long_term_care','ppm','paternity','parental','unpaid_leave','employee_obstacle','employer_obstacle','compensatory_time_off','unexcused','other','public_function','employee_obstacle_unpaid','invalid_termination') NOT NULL",
                 "average_snapshot_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "childbirth_date": "date NULL DEFAULT NULL",
                 "childbirth_recorded_at": "datetime NULL DEFAULT NULL",
