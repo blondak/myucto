@@ -42,16 +42,17 @@ final class VendorConfigGuideTest extends TestCase
     {
         $guide = $this->guide();
         $src = dirname(__DIR__, 2) . '/src';
-        $haystack = $this->sourceText($src);
-
-        $missing = [];
-        foreach ($this->documentedKeys($guide) as $key) {
-            if (in_array($key, self::NOT_VIA_CONFIG_GET, true)) {
-                continue;
+        $missing = array_values(array_diff($this->documentedKeys($guide), self::NOT_VIA_CONFIG_GET));
+        foreach (SourceCorpus::files($src) as $file) {
+            if ($missing === []) {
+                break;
             }
-            if (!str_contains($haystack, "'" . $key . "'") && !str_contains($haystack, '"' . $key . '"')) {
-                $missing[] = $key;
-            }
+            $source = SourceCorpus::read($file);
+            $missing = array_values(array_filter(
+                $missing,
+                static fn (string $key): bool => !str_contains($source, "'" . $key . "'")
+                    && !str_contains($source, '"' . $key . '"'),
+            ));
         }
 
         self::assertSame(
@@ -121,14 +122,5 @@ final class VendorConfigGuideTest extends TestCase
             }
         }
         return array_values(array_unique($keys));
-    }
-
-    private function sourceText(string $dir): string
-    {
-        $out = '';
-        foreach (SourceCorpus::files($dir) as $file) {
-            $out .= SourceCorpus::read($file);
-        }
-        return $out;
     }
 }
