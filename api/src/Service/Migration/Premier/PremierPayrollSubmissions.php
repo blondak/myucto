@@ -5,25 +5,41 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Migration\Premier;
 
 /**
- * Registrace ČSSZ (REGZEC25, PREZEC26), které PREMIER odeslal a ČSSZ PŘIJALA, přečtené ze zálohy.
- * Nic nezapisuje.
+ * Podání ČSSZ, která PREMIER odeslal a ČSSZ PŘIJALA, přečtená ze zálohy: registrace (REGZEC25,
+ * PREZEC26) a podání nemocenských dávek (NEMPRI25, NEMPRI20, HZUPN20). Nic nezapisuje.
  *
  * PREMIER si každé odeslané podání ukládá doslova do tabulky `MZ_VREP`: tělo podání do memo
  * pole `POZNAMKA` (Windows-1250, před `<?xml` bývá zbytek po BOM) a odpověď příjemce do
- * `POZNAMKA2`. Odpověď nese příznak `<accepted>` celého podání a u každé věty (`employee@sqnr`)
- * položku `ProcessingResult/Details/Item` s výsledkem `OK` nebo `ERROR`. Podání, které ČSSZ
- * odmítla celé (`accepted` False), a věty s výsledkem `ERROR` v přijatém souboru se nepřebírají:
- * ČSSZ je neeviduje, takže by je převod nesměl vydávat za doložené.
+ * `POZNAMKA2`. Odpověď nese příznak `<accepted>` celého podání (po opakovaném dotazu na stav
+ * bývá v poli odpověď dvakrát, `False` a po ní `True`) a u každé věty (`employee@sqnr`,
+ * `datovaVeta@poradoveCislo`, `FormularHZUPN@poradoveCislo`) případně položku
+ * `ProcessingResult/Details/Item` s výsledkem `OK` nebo `ERROR`. Podání, které ČSSZ odmítla celé
+ * (`accepted` False), a věty s výsledkem `ERROR` v přijatém souboru se nepřebírají: ČSSZ je
+ * neeviduje, takže by je převod nesměl vydávat za doložené.
  *
- * Z každé přijaté věty vznikne samostatný soubor REGZEC / PREZEC s touto jedinou větou. Import
- * registrací odmítá soubor s jedinou vadnou větou celý a věty pak plánuje a zapisuje po jedné
- * nad aktuálním stavem evidence, což je přesně to, co se při ručním nahrání souborů za sebou
- * děje. Věty jsou seřazené podle času odeslání.
+ * Z každé přijaté věty vznikne samostatný soubor téhož druhu s touto jedinou větou. Import
+ * odmítá soubor s jedinou vadnou větou celý a věty pak plánuje a zapisuje po jedné nad aktuálním
+ * stavem evidence, což je přesně to, co se při ručním nahrání souborů za sebou děje. Věty jsou
+ * seřazené podle času odeslání.
  */
 final class PremierPayrollSubmissions
 {
-    /** Typy podání, které umí produktový import registrací. */
+    /** Registrace, které umí produktový import registrací. */
     public const TYPES = ['REGZEC25', 'PREZEC26'];
+    /** Podání nemocenských dávek předchozího programu, které umí týž import. */
+    public const SICKNESS_TYPES = ['NEMPRI25', 'NEMPRI20', 'HZUPN20'];
+
+    /**
+     * Kořen souboru a element věty podle druhu podání. Věta registrace nese den účinnosti
+     * (`employee@dat`); podání dávky ho nenese, převod pak bere den odeslání.
+     */
+    private const SHAPES = [
+        'REGZEC25' => ['roots' => ['REGZEC'], 'sentence' => 'employee', 'sqnr' => 'sqnr', 'date' => 'dat'],
+        'PREZEC26' => ['roots' => ['PREZEC'], 'sentence' => 'employee', 'sqnr' => 'sqnr', 'date' => 'dat'],
+        'NEMPRI25' => ['roots' => ['NEMPRI'], 'sentence' => 'datovaVeta', 'sqnr' => 'poradoveCislo', 'date' => null],
+        'NEMPRI20' => ['roots' => ['NEMPRI'], 'sentence' => 'datovaVeta', 'sqnr' => 'poradoveCislo', 'date' => null],
+        'HZUPN20' => ['roots' => ['PodaniHZUPN'], 'sentence' => 'FormularHZUPN', 'sqnr' => 'poradoveCislo', 'date' => null],
+    ];
 
     /**
      * @param list<array{name:string,content:string,type:string,vrep_id:string,key:string,sqnr:int,sent_at:string,date:?string}> $sentences
@@ -34,12 +50,14 @@ final class PremierPayrollSubmissions
         public readonly array $stats,
     ) {}
 
-    public static function fromBackup(PremierBackup $backup): self
+    /** @param list<string> $types druhy podání ({@see self::TYPES}, {@see self::SICKNESS_TYPES}) */
+    public static function fromBackup(PremierBackup $backup, array $types = self::TYPES): self
     {
+        $types = array_values(array_intersect($types, array_keys(self::SHAPES)));
         $stats = ['files' => 0, 'files_rejected' => 0, 'files_unreadable' => 0, 'sentences_rejected' => 0];
         $rows = [];
         foreach ($backup->rows('MZ_VREP') as $position => $row) {
-            if (in_array(trim((string) ($row['TYP_ZPRAVY'] ?? '')), self::TYPES, true)) {
+            if (in_array(trim((string) ($row['TYP_ZPRAVY'] ?? '')), $types, true)) {
                 $rows[] = ['position' => $position, 'row' => $row];
             }
         }
@@ -54,28 +72,30 @@ final class PremierPayrollSubmissions
                 continue;
             }
             $results = self::sentenceResults($response);
-            $document = self::document((string) ($row['POZNAMKA'] ?? ''));
+            $type = trim((string) $row['TYP_ZPRAVY']);
+            $shape = self::SHAPES[$type];
+            $document = self::document((string) ($row['POZNAMKA'] ?? ''), $shape['roots']);
             if ($document === null) {
                 $stats['files_unreadable']++;
                 continue;
             }
-            $type = trim((string) $row['TYP_ZPRAVY']);
             $fullId = strtolower((string) preg_replace('/[^0-9A-Za-z-]/', '', (string) ($row['ID'] ?? '')));
             $id = substr(str_replace('-', '', $fullId), 0, 8);
-            $employees = self::employees($document);
+            $sentAt = (string) ($row['DAT_ZPRAVY'] ?? '');
+            $employees = self::employees($document, $shape['sentence']);
             foreach ($employees as $index => $employee) {
-                $sqnr = (int) ($employee->getAttribute('sqnr') !== '' ? $employee->getAttribute('sqnr') : $index + 1);
+                $sqnr = (int) ($employee->getAttribute($shape['sqnr']) !== '' ? $employee->getAttribute($shape['sqnr']) : $index + 1);
                 // Odpověď bez položek po větách (starší tvar) přijímá celé podání; s položkami platí jen věta s výsledkem jiným než ERROR.
                 if ($results !== [] && (!isset($results[$sqnr]) || $results[$sqnr] === 'ERROR')) {
                     $stats['sentences_rejected']++;
                     continue;
                 }
-                $content = self::single($document, $index);
+                $content = self::single($document, $index, $shape['sentence']);
                 if ($content === null) {
                     $stats['files_unreadable']++;
                     continue;
                 }
-                $date = $employee->getAttribute('dat');
+                $date = $shape['date'] !== null ? $employee->getAttribute($shape['date']) : substr($sentAt, 0, 10);
                 $sentences[] = [
                     'name' => "premier-{$type}-{$id}-{$sqnr}.xml",
                     'content' => $content,
@@ -83,7 +103,7 @@ final class PremierPayrollSubmissions
                     'vrep_id' => $id,
                     'key' => $fullId . ':' . $sqnr,
                     'sqnr' => $sqnr,
-                    'sent_at' => (string) ($row['DAT_ZPRAVY'] ?? ''),
+                    'sent_at' => $sentAt,
                     'date' => preg_match('/^\d{4}-\d{2}-\d{2}$/D', $date) === 1 ? $date : null,
                 ];
             }
@@ -111,8 +131,12 @@ final class PremierPayrollSubmissions
         return $results;
     }
 
-    /** Tělo podání jako DOM; `null`, když to není dobře utvořené XML REGZEC / PREZEC. */
-    private static function document(string $body): ?\DOMDocument
+    /**
+     * Tělo podání jako DOM; `null`, když to není dobře utvořené XML s kořenem `$roots`.
+     *
+     * @param list<string> $roots
+     */
+    private static function document(string $body, array $roots): ?\DOMDocument
     {
         // Před deklarací zbývá po BOM otazník (PREMIER ho při uložení převede), deklarované kódování
         // neplatí: tělo už je převedené do UTF-8.
@@ -129,21 +153,21 @@ final class PremierPayrollSubmissions
             libxml_use_internal_errors($previous);
         }
         $root = $document->documentElement;
-        return $loaded && $root !== null && in_array($root->localName, ['REGZEC', 'PREZEC'], true) ? $document : null;
+        return $loaded && $root !== null && in_array($root->localName, $roots, true) ? $document : null;
     }
 
-    /** @return list<\DOMElement> */
-    private static function employees(\DOMDocument $document): array
+    /** @return list<\DOMElement> věty podání (element `$name` v libovolném jmenném prostoru) */
+    private static function employees(\DOMDocument $document, string $name): array
     {
         $out = [];
-        foreach ($document->getElementsByTagNameNS('*', 'employee') as $employee) {
+        foreach ($document->getElementsByTagNameNS('*', $name) as $employee) {
             $out[] = $employee;
         }
         return $out;
     }
 
     /** Soubor s jedinou větou `$index` (pořadí v původním souboru). */
-    private static function single(\DOMDocument $document, int $index): ?string
+    private static function single(\DOMDocument $document, int $index, string $name): ?string
     {
         $copy = new \DOMDocument();
         $copy->preserveWhiteSpace = false;
@@ -156,7 +180,7 @@ final class PremierPayrollSubmissions
             libxml_clear_errors();
             libxml_use_internal_errors($previous);
         }
-        $employees = self::employees($copy);
+        $employees = self::employees($copy, $name);
         foreach ($employees as $i => $employee) {
             if ($i !== $index) {
                 $employee->parentNode?->removeChild($employee);

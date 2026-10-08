@@ -7,10 +7,12 @@ namespace MyInvoice\Tests\Unit\Migration\Premier;
 use MyInvoice\Service\Migration\Premier\PremierBackup;
 use MyInvoice\Service\Migration\Premier\PremierPayrollSubmissions;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationXmlReader;
+use MyInvoice\Service\Payroll\Import\Sickness\SicknessDocumentXmlReader;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationSchemaCatalog;
 use MyInvoice\Tests\Fixtures\Premier\DbfWriter;
 use MyInvoice\Tests\Fixtures\Premier\SyntheticPremierBackup;
 use MyInvoice\Tests\Unit\Payroll\Import\Registration\RegistrationXmlFixtures;
+use MyInvoice\Tests\Unit\Payroll\Import\Sickness\SicknessImportXmlFixtures;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -73,6 +75,48 @@ final class PremierPayrollSubmissionsTest extends TestCase
         ]);
         $submissions = PremierPayrollSubmissions::fromBackup(PremierBackup::open($this->tmp));
         self::assertSame([[], 1], [$submissions->sentences, $submissions->stats['files_unreadable']]);
+    }
+
+    /**
+     * Podání dávek: věty NEMPRI a HZUPN po jedné, den věty je den odeslání (podání ho nenese),
+     * odpověď opakovaného dotazu (False, pak True) přijímá podání a registrace se k nim nepřimíchají.
+     */
+    public function testAcceptedSicknessSentencesOneFileEach(): void
+    {
+        $this->tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'premier_subm_' . bin2hex(random_bytes(5));
+        SyntheticPremierBackup::writeDir($this->tmp, false, []);
+        $birthNumber = RegistrationXmlFixtures::birthNumber('1990-01-01', 'male', 3);
+        $hzupn = SicknessImportXmlFixtures::hzupn20($birthNumber);
+        self::assertSame(1, preg_match('#<FormularHZUPN\b.*?</FormularHZUPN>#s', $hzupn, $form));
+        $twoForms = str_replace('</PodaniHZUPN>', str_replace('poradoveCislo="1"', 'poradoveCislo="2"', $form[0]) . '</PodaniHZUPN>', $hzupn);
+        $item = static fn (int $sqnr, string $result): string => '&lt;Item sqnr="' . $sqnr . '" subtype="HZUPN20" result="' . $result . '" /&gt;';
+        $polled = '<answer><result>False</result><accepted>False</accepted></answer><answer><result>True</result><accepted>True</accepted></answer>';
+
+        DbfWriter::write($this->tmp . DIRECTORY_SEPARATOR . 'MZ_VREP.DBF', self::fields(), [
+            ['ID' => 'DDDD0002-0000', 'TYP_ZPRAVY' => 'HZUPN20', 'DAT_ZPRAVY' => '2026-10-16 09:00:00', 'POZNAMKA' => '?' . $twoForms,
+                'POZNAMKA2' => '<answer><accepted>True</accepted><dataError>&lt;Details&gt;' . $item(1, 'OK') . $item(2, 'ERROR') . '&lt;/Details&gt;</dataError></answer>'],
+            ['ID' => 'DDDD0001-0000', 'TYP_ZPRAVY' => 'NEMPRI25', 'DAT_ZPRAVY' => '2026-09-21 09:00:00',
+                'POZNAMKA' => '?' . SicknessImportXmlFixtures::nempri25('OSE', $birthNumber), 'POZNAMKA2' => $polled],
+            ['ID' => 'DDDD0003-0000', 'TYP_ZPRAVY' => 'NEMPRI25', 'DAT_ZPRAVY' => '2026-09-22 09:00:00',
+                'POZNAMKA' => '?' . SicknessImportXmlFixtures::nempri25('OSE', $birthNumber), 'POZNAMKA2' => '<answer><accepted>False</accepted></answer>'],
+            ['ID' => 'DDDD0004-0000', 'TYP_ZPRAVY' => 'REGZEC25', 'DAT_ZPRAVY' => '2026-07-02 09:00:00', 'POZNAMKA' => '?' . RegistrationXmlFixtures::regzecA1(),
+                'POZNAMKA2' => '<answer><accepted>True</accepted></answer>'],
+        ]);
+        $backup = PremierBackup::open($this->tmp);
+        $submissions = PremierPayrollSubmissions::fromBackup($backup, PremierPayrollSubmissions::SICKNESS_TYPES);
+
+        self::assertSame(['premier-NEMPRI25-dddd0001-1.xml', 'premier-HZUPN20-dddd0002-1.xml'], array_column($submissions->sentences, 'name'));
+        self::assertSame(['files' => 3, 'files_rejected' => 1, 'files_unreadable' => 0, 'sentences_rejected' => 1], $submissions->stats);
+        self::assertSame(['2026-09-21', '2026-10-16'], array_column($submissions->sentences, 'date'));
+        self::assertSame('dddd0002-0000:1', $submissions->sentences[1]['key']);
+
+        $reader = new SicknessDocumentXmlReader();
+        foreach ($submissions->sentences as $sentence) {
+            $read = $reader->read($sentence['content']);
+            self::assertCount(1, $read['records'], 'Soubor nese jedinou větu a projde schématem.');
+            self::assertSame($sentence['type'], $read['document_type']);
+        }
+        self::assertCount(1, PremierPayrollSubmissions::fromBackup($backup)->sentences, 'Registrace se čtou zvlášť.');
     }
 
     private function backup(): PremierBackup

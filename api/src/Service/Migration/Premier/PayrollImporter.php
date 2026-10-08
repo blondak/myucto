@@ -102,6 +102,7 @@ final class PayrollImporter
         private readonly PayrollTakeoverDeductionsWriter $deductionsWriter,
         private readonly PayrollMigrationModuleSetup $moduleSetup,
         private readonly PremierPayrollRegistrations $registrations,
+        private readonly PremierPayrollSickness $sickness,
     ) {}
 
     public function import(PremierContext $ctx): void
@@ -218,6 +219,7 @@ final class PayrollImporter
         }
         if ($created !== []) {
             $this->submittedRegistrations($ctx);
+            $this->submittedSickness($ctx);
         }
         if ($afterStart > 0) {
             $p->count(self::STEP, 'months_after_start', $afterStart);
@@ -279,6 +281,44 @@ final class PayrollImporter
             $counts['registrations_files_rejected'],
             $counts['registrations_sentences_rejected'],
             $counts['registrations_files_unreadable'] > 0 ? sprintf(' (%d podání se nedalo přečíst)', $counts['registrations_files_unreadable']) : '',
+        ));
+    }
+
+    /**
+     * Podání dávek (NEMPRI, HZUPN) odeslaná z PREMIER a ČSSZ přijatá ({@see PremierPayrollSickness}): případy dávek
+     * vyřízené předchozím programem k vztahům a nepřítomnostem, které převod právě založil.
+     */
+    private function submittedSickness(PremierContext $ctx): void
+    {
+        $p = $ctx->protocol;
+        $result = $this->sickness->import($ctx);
+        $counts = $result['counts'];
+        foreach ($counts as $name => $count) {
+            if ($count > 0) {
+                $p->count(self::STEP, $name, $count);
+            }
+        }
+        foreach ($result['problems'] as $problem) {
+            $this->warn($p, $problem['code'], $problem['text'], $problem['context']);
+        }
+        if ($counts['benefits_files'] === 0) {
+            return;
+        }
+        $p->info(self::STEP, 'benefits_imported', sprintf(
+            'Podání dávek ČSSZ odeslaná z PREMIER (NEMPRI, HZUPN): přijatých vět %d, už dříve převzatých %d, zapsáno jako vyřízené '
+            . 'předchozím programem %d, beze změny %d, nezapsáno %d (zablokováno %d, selhalo %d), odeslaných po převáděném období %d. '
+            . 'ČSSZ odmítla %d podání a %d vět v přijatých podáních, ty se nepřebírají%s.',
+            $counts['benefits_sentences'],
+            $counts['benefits_done'],
+            $counts['benefits_applied'],
+            $counts['benefits_unchanged'],
+            $counts['benefits_blocked'] + $counts['benefits_failed'],
+            $counts['benefits_blocked'],
+            $counts['benefits_failed'],
+            $counts['benefits_later'],
+            $counts['benefits_files_rejected'],
+            $counts['benefits_sentences_rejected'],
+            $counts['benefits_files_unreadable'] > 0 ? sprintf(' (%d podání se nedalo přečíst)', $counts['benefits_files_unreadable']) : '',
         ));
     }
 

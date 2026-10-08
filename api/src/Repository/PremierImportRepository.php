@@ -40,6 +40,8 @@ final class PremierImportRepository extends AbstractMigrationImportRepository
     public const KIND_PAYROLL_MONTH = 'payroll_month';
     /** Registrace ČSSZ odeslaná z PREMIER, kterou převod už zapsal (`MZ_VREP.ID:sqnr`) => payroll_employments.id. */
     public const KIND_PAYROLL_REGISTRATION = 'payroll_registration';
+    /** Podání dávky (NEMPRI, HZUPN) odeslané z PREMIER, které převod už zapsal (`MZ_VREP.ID:sqnr`) => payroll_sickness_cases.id. */
+    public const KIND_PAYROLL_SICKNESS = 'payroll_sickness';
 
     protected function runsTable(): string
     {

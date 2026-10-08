@@ -306,6 +306,17 @@ a protokol to řekne; po zakoupení doplňku převod roku zopakujte a mzdy se do
   symbol zaměstnavatele: pokud je ve mzdové účtárně firmy vyplněný jiný,
   import větu zablokuje a protokol to řekne. Opakovaný převod už zapsané věty
   nepřepisuje.
+- **Podání dávek ČSSZ.** Oznámení o žádosti o dávku (NEMPRI) a hlášení při
+  ukončení pracovní neschopnosti (HZUPN), které PREMIER odeslal a ČSSZ přijala,
+  převod zapíše stejným importem jako Mzdy → Importy. K převzatému vztahu
+  vznikne případ dávky, ve kterém je podání vedené jako vyřízené předchozím
+  programem, takže ho hlídač lhůt znovu nepožaduje. HZUPN k neschopnosti,
+  ke které ho PREMIER neodeslal, zůstává v hlídači otevřené. Věty jdou po jedné
+  v pořadí odeslání a jen ty odeslané do konce převáděného roku. Podání
+  nemocenského se páruje se schválenou neschopností v měsíci události; podání,
+  ke kterému převod neschopnost nebo jednoznačný vztah nemá, se nezapíše
+  a protokol ho vypíše s důvodem. Podání odmítnutá ČSSZ se nepřebírají
+  a opakovaný převod zapsaná podání nepřepisuje.
 - **Evidence JMHZ.** OIČ a ID pracovněprávního vztahu z posledního hlášení
   JMHZ, které ČSSZ přijala, pracoviště (obec a stát), kód CZ-ISCO a doklady
   k Zákonným termínům (přihlášky a odhlášky ČSSZ a zdravotní pojišťovně,
@@ -345,7 +356,8 @@ Zkontrolujte po převodu:
 - výplatní účty: převod je založí jako neověřené, ověřte je na kartě osoby,
 - položky, které protokol označil k ověření (OIČ bez přijatého hlášení,
   děti s příznakem jiné vyživující osoby, důchodci bez slevy, neschopnost
-  bez známého konce, věty registrací bez odpovídajícího vztahu),
+  bez známého konce, věty registrací bez odpovídajícího vztahu, nezapsaná
+  podání dávek),
 - exekuční případy a dohody o srážkách,
 - mzdové složky a pravidelné předpisy pro první měsíc vedený v MyÚčtu,
 - upozornění rekonciliace mezd proti deníku (§ 109.8.5).
