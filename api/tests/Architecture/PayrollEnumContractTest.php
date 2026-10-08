@@ -66,6 +66,7 @@ final class PayrollEnumContractTest extends TestCase
      *  - `enum:FQCN`        — hodnoty řetězcového enumu (`::cases()`)
      *  - `enum-names:FQCN`  — JMÉNA případů (číselný enum, jehož jména jdou po drátě)
      *  - `const:FQCN::NAME` — pole v konstantě třídy
+     *  - `keys:FQCN::NAME`  — KLÍČE asociativního pole v konstantě třídy (i soukromé)
      *  - `consts:FQCN`      — všechny veřejné řetězcové konstanty třídy
      *  - `policy:klíč`      — položka katalogu {@see PayrollEmployerPolicyService}
      *  - `db:tabulka.sloupec` — finální podoba ENUM sloupce podle migrací
@@ -178,6 +179,10 @@ final class PayrollEnumContractTest extends TestCase
             => 'const:MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService::DUTY_KINDS',
         'payroll.ts::PayrollDeadlineSource'
             => 'const:MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService::SOURCES',
+        // Formuláře ČSSZ odesílané přes VREP mimo JMHZ a registrace. Agendu, kterou
+        // klient nezná, by stav odeslání nevykreslil vůbec.
+        'payroll.ts::PayrollCsszFormAgenda'
+            => 'keys:MyInvoice\Service\Payroll\Submission\Vrep\CsszFormVrepTransportService::DOCUMENTS',
         // Fronta odchozích podání: kudy umí aplikace agendu odeslat.
         'payroll.ts::PayrollSubmissionDispatchMode'
             => 'const:MyInvoice\Service\Payroll\Submission\PayrollDispatchCapabilityCatalog::MODES',
@@ -1193,6 +1198,7 @@ final class PayrollEnumContractTest extends TestCase
             'enum' => $this->enumValues($argument),
             'enum-names' => $this->enumNames($argument),
             'const' => $this->classConstant($argument),
+            'keys' => $this->classConstantKeys($argument),
             'consts' => $this->stringConstants($argument),
             'policy' => $this->policyDomain($argument),
             'db' => $this->columnDomain($argument),
@@ -1233,6 +1239,18 @@ final class PayrollEnumContractTest extends TestCase
         $value = (new \ReflectionClass($fqcn))->getConstant($name);
 
         return is_array($value) ? array_values(array_filter($value, 'is_string')) : [];
+    }
+
+    /** @return list<string> */
+    private function classConstantKeys(string $reference): array
+    {
+        [$fqcn, $name] = explode('::', $reference, 2);
+        if (!class_exists($fqcn)) {
+            return [];
+        }
+        $value = (new \ReflectionClass($fqcn))->getConstant($name);
+
+        return is_array($value) ? array_values(array_filter(array_keys($value), 'is_string')) : [];
     }
 
     /** @return list<string> */
