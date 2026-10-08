@@ -25651,11 +25651,35 @@
         "running": "Běží",
         "completed": "Dokončeno",
         "failed": "Selhalo",
-        "cancelled": "Zrušeno"
+        "cancelled": "Zrušeno",
+        "completed_with_warnings": "Dokončeno s chybami"
       },
       "include_bank_accounts": "Bankovní účty",
       "include_bank_transactions": "Bankovní pohyby",
       "include_bank_transactions_hint": "Importuje pohyby z iDokladu. GPC/PDF výpis zůstává autoritativním zdrojem a duplicitní úhrada se nezapočte."
+    },
+    "import_report": {
+      "dry_run_note": "Zkouška nanečisto: doklady prošly stejnými kontrolami jako při ostrém importu (sazby DPH, přepočet, shoda částek s Fakturoidem). Nic se nezapsalo, počty ukazují, co by import udělal.",
+      "agenda": "Agenda",
+      "created": "Přeneseno",
+      "skipped": "Přeskočeno",
+      "failed": "Nepřeneseno",
+      "review": "Ke kontrole",
+      "agendas": {
+        "subjects": "Subjekty",
+        "issued": "Vydané faktury",
+        "received": "Přijaté faktury"
+      },
+      "errors_title": "Nepřenesené doklady ({count})",
+      "review_title": "Doklady ke kontrole ({count})",
+      "fakturoid_id": "Fakturoid ID {id}",
+      "omitted": "Dalších {count} dokladů je jen v logu úlohy.",
+      "hints": {
+        "vat_rate": "Sazba DPH dokladu není v číselníku sazeb k datu plnění. Jinou sazbou se nenahrazuje. Doplňte sazbu v číselníku, nebo doklad opravte ve Fakturoidu, a spusťte import znovu. Přenesené doklady se přeskočí.",
+        "subject": "Doklad odkazuje na subjekt, který v systému není. Spusťte import znovu se zaškrtnutými subjekty.",
+        "amounts": "Doklad se přenesl, ale jeho rekapitulace DPH se liší od Fakturoidu a nešla věrně převzít. Porovnejte ho s originálem a případně opravte ručně.",
+        "generic": "Opravte příčinu a spusťte import znovu. Přenesené doklady se přeskočí."
+      }
     },
     "fakturoid": {
       "tab": "Fakturoid",
@@ -25684,7 +25708,8 @@
       "test_success": "Připojení k Fakturoid funguje — account {name}.",
       "delete_confirm": "Opravdu odebrat Fakturoid credentials?",
       "deleted": "Fakturoid credentials odebrány",
-      "coming_hint": "—"
+      "coming_hint": "—",
+      "dry_run_hint": "Zkouška nanečisto projde stejné kontroly jako ostrý import (subjekty, sazby DPH, přepočet a shoda částek s Fakturoidem) a vypíše chyby, ale nic nezapíše."
     },
     "ai": {
       "tab": "AI extrakce",

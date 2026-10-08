@@ -20,7 +20,7 @@ export interface ImportJob {
   id: number
   supplier_id: number
   source: 'idoklad' | 'fakturoid' | 'pdf_isdoc_inbox' | 'pdf_ai'
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+  status: 'queued' | 'running' | 'completed' | 'completed_with_warnings' | 'failed' | 'cancelled'
   params: Record<string, unknown> | null
   total_items: number | null
   processed: number
@@ -30,11 +30,43 @@ export interface ImportJob {
   current_step: string | null
   log_text: string | null
   last_error: string | null
+  /** Strukturovaný výsledek (zatím jen import z Fakturoidu), jinak null. */
+  report?: ImportJobReport | null
   cancel_requested: boolean
   started_at: string | null
   finished_at: string | null
   created_by: number
   created_at: string
+}
+
+export type ImportReportAgenda = 'subjects' | 'issued' | 'received'
+
+export interface ImportReportAgendaCounts {
+  processed: number
+  created: number
+  /** Jen subjekty: napojeno na existující kartu. */
+  linked?: number
+  skipped: number
+  failed: number
+  review: number
+}
+
+export interface ImportReportProblem {
+  agenda: ImportReportAgenda
+  fakturoid_id: number
+  number: string | null
+  /** Doklad v systému — jen u dokladu ke kontrole, nepřenesený doklad v systému není. */
+  local_id: number | null
+  severity: 'error' | 'review'
+  reason: string
+  hint: 'vat_rate' | 'subject' | 'amounts' | 'generic'
+}
+
+export interface ImportJobReport {
+  dry_run: boolean
+  agendas: Partial<Record<ImportReportAgenda, ImportReportAgendaCounts>>
+  problems: ImportReportProblem[]
+  problems_omitted: number
 }
 
 export interface IdokladStartParams {

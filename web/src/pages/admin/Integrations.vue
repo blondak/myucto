@@ -14,6 +14,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useSessionAwarePolling } from '@/composables/useSessionAwarePolling'
 import OllamaProviderFields from '@/components/admin/OllamaProviderFields.vue'
+import ImportJobReport from '@/components/admin/ImportJobReport.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -705,6 +706,7 @@ onMounted(() => {
                       'bg-neutral-100 text-neutral-600 border-neutral-200': currentJob.status === 'queued',
                       'bg-primary-50 text-primary-700 border-primary-500/40': currentJob.status === 'running',
                       'bg-success-50 text-success-600 border-success-500/40': currentJob.status === 'completed',
+                      'bg-warning-50 text-warning-600 border-warning-500/40 font-medium': currentJob.status === 'completed_with_warnings',
                       'bg-danger-50 text-danger-500 border-danger-500/40': currentJob.status === 'failed',
                       'bg-warning-50 text-warning-600 border-warning-500/40': currentJob.status === 'cancelled',
                     }">
@@ -753,6 +755,7 @@ onMounted(() => {
           <div v-if="currentJob.last_error" class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">
             {{ currentJob.last_error }}
           </div>
+          <ImportJobReport v-if="currentJob.report" :report="currentJob.report" />
 
           <details v-if="currentJob.log_text" class="text-xs">
             <summary class="cursor-pointer text-neutral-600 hover:text-neutral-900">{{ t('integrations.idoklad.log') }}</summary>
@@ -903,7 +906,7 @@ onMounted(() => {
             </label>
             <label class="flex items-center gap-2 text-sm">
               <input v-model="fakStartParams.dry_run" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
-              {{ t('integrations.idoklad.dry_run') }}
+              <span :title="t('integrations.fakturoid.dry_run_hint')">{{ t('integrations.idoklad.dry_run') }}</span>
             </label>
           </div>
           <button type="button" @click="startFakImport" :disabled="fakStarting"
@@ -921,6 +924,7 @@ onMounted(() => {
                       'bg-neutral-100 text-neutral-600 border-neutral-200': currentJob.status === 'queued',
                       'bg-primary-50 text-primary-700 border-primary-500/40': currentJob.status === 'running',
                       'bg-success-50 text-success-600 border-success-500/40': currentJob.status === 'completed',
+                      'bg-warning-50 text-warning-600 border-warning-500/40 font-medium': currentJob.status === 'completed_with_warnings',
                       'bg-danger-50 text-danger-500 border-danger-500/40': currentJob.status === 'failed',
                       'bg-warning-50 text-warning-600 border-warning-500/40': currentJob.status === 'cancelled',
                     }">
@@ -957,6 +961,7 @@ onMounted(() => {
           <div v-if="currentJob.last_error" class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">
             {{ currentJob.last_error }}
           </div>
+          <ImportJobReport v-if="currentJob.report" :report="currentJob.report" />
           <details v-if="currentJob.log_text" class="text-xs">
             <summary class="cursor-pointer text-neutral-600 hover:text-neutral-900">{{ t('integrations.idoklad.log') }}</summary>
             <pre class="mt-2 max-h-72 overflow-y-auto bg-neutral-900 text-neutral-100 p-3 rounded font-mono text-[11px] whitespace-pre-wrap">{{ currentJob.log_text }}</pre>
