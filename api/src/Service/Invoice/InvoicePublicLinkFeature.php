@@ -23,10 +23,12 @@ final class InvoicePublicLinkFeature
 
     public function isEnabled(): bool
     {
-        return filter_var(
-            $this->config->get('invoices.public_links', true),
-            FILTER_VALIDATE_BOOL,
-            FILTER_NULL_ON_FAILURE,
-        ) !== false;
+        $value = $this->config->get('invoices.public_links', true);
+        // filter_var bere null a prázdný řetězec jako „ne“; prázdná volba ale
+        // znamená výchozí stav, ne výslovné vypnutí.
+        if ($value === null || (is_string($value) && trim($value) === '')) {
+            return true;
+        }
+        return filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) !== false;
     }
 }
