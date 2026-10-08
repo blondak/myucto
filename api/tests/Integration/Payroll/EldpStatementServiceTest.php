@@ -616,6 +616,10 @@ final class EldpStatementServiceTest extends TestCase
             ]], 1_000_000],
         ]);
 
+        // Den dosažení důchodového věku je v zákonné evidenci osoby; potvrzení
+        // listu ho neopakuje (prázdné = podle evidence).
+        $this->insertPensionAge('2025-10-01');
+
         $result = $this->service->prepare(
             $this->supplierId,
             $this->employmentId,
@@ -623,7 +627,7 @@ final class EldpStatementServiceTest extends TestCase
             'test',
             [
                 'excluded_days_confirmed' => true,
-                'pension_status' => ['pension_age_reached_on' => '2025-10-01', 'early_pension_from' => null, 'full_pension_paid_from' => null, 'foreign_insurance' => false],
+                'pension_status' => ['pension_age_reached_on' => null, 'early_pension_from' => null, 'full_pension_paid_from' => null, 'foreign_insurance' => false],
                 'requested_by_authority' => false,
                 'note' => 'Syntetický evidenční list s kódem D pro integrační test.',
             ],
@@ -636,6 +640,55 @@ final class EldpStatementServiceTest extends TestCase
         $stored = $pdo->prepare('SELECT deducted_days_total FROM payroll_eldp_statements WHERE supplier_id = ? AND id = ?');
         $stored->execute([$this->supplierId, $result['statement_id']]);
         self::assertSame(36, (int) $stored->fetchColumn());
+    }
+
+    /**
+     * Potvrzení účetní je kontrola, ne druhý zdroj: den dosažení důchodového
+     * věku, který se s evidencí osoby neshoduje (nebo v ní chybí), list
+     * nesestaví.
+     */
+    public function testPensionStatusConfirmationMustMatchStatutoryEvidence(): void
+    {
+        $pdo = $this->db->pdo();
+        $this->supplierId = $this->createIsolatedSupplier(
+            $pdo,
+            (int) $pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn(),
+        );
+        $pdo->prepare('UPDATE supplier SET payroll_enabled = 1 WHERE id = ?')
+            ->execute([$this->supplierId]);
+        $this->employmentId = $this->source($pdo);
+        $this->insertPensionAge('2025-10-01');
+
+        try {
+            $this->service->prepare(
+                $this->supplierId,
+                $this->employmentId,
+                2025,
+                'test',
+                [
+                    'excluded_days_confirmed' => true,
+                    'pension_status' => ['pension_age_reached_on' => '2025-11-01', 'early_pension_from' => null, 'full_pension_paid_from' => null, 'foreign_insurance' => false],
+                    'requested_by_authority' => false,
+                    'note' => '',
+                ],
+                'synthetic-eldp-pension-mismatch',
+                $this->createdBy,
+            );
+            self::fail('Rozdílné potvrzení důchodových údajů musí list zastavit.');
+        } catch (EldpValidationException $exception) {
+            self::assertSame('eldp_pension_status_evidence_mismatch', $exception->validationCode);
+        }
+    }
+
+    private function insertPensionAge(string $reachedOn): void
+    {
+        $pdo = $this->db->pdo();
+        $employee = $pdo->prepare('SELECT employee_id FROM payroll_employments WHERE supplier_id = ? AND id = ?');
+        $employee->execute([$this->supplierId, $this->employmentId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_person_pension_age (supplier_id, employee_id, basis, effective_from)
+             VALUES (?, ?, "cssz_information", ?)',
+        )->execute([$this->supplierId, (int) $employee->fetchColumn(), $reachedOn]);
     }
 
     /** @param list<array{0:string,1:string,2:list<array<string,mixed>>,3:int}>|null $months */

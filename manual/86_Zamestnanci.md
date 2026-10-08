@@ -296,6 +296,7 @@ skutečnosti, ze kterých vychází zákonný výpočet:
   v podmínkách vztahu jí musí odpovídat, jinak výpočet ohlásí rozpor;
 
 - **sleva pro pracujícího poplatníka v důchodu**;
+- **důchodový věk** a **pobíraný důchod** (nepovinné, viz níže);
 - **příslušnost ke zdravotnímu pojištění** a zdravotní pojišťovna;
 - **měsíční evidence zdravotního minima** — kdo za daný měsíc doplácí do
   minimálního vyměřovacího základu;
@@ -342,6 +343,35 @@ neomluvená absence minimum nesnižují a doplatek za ně hradí zaměstnanec.
 Otcovská poporodní péče minimum také nesnižuje: zákon ji mezi důvody snížení
 v § 3 odst. 8 a 9 zákona č. 592/1992 Sb. nejmenuje a za jejího příjemce stát
 pojistné neplatí.
+
+#### Důchodový věk a pobíraný důchod
+
+Ze sekcí **Důchodový věk** a **Pobíraný důchod** čte kód `D` a odečítané doby
+roční evidenční list i měsíční hlášení JMHZ (podrobně v kapitole
+[Podání a hlášení](85_Podani_a_hlaseni.md)). Obě jsou nepovinné a výpočet mzdy
+je nečte, takže je nezamyká ani schválená mzda: den jde opravit i zpětně.
+Hlášení a listy, které už vznikly, se tím nemění.
+
+- **Důchodový věk** je jediný záznam: den, kdy zaměstnanec dosáhl nebo dosáhne
+  důchodového věku, a odkud ho víte (výpočet podle tabulky zákona, sdělení
+  ČSSZ, prohlášení zaměstnance). Vychází-li den z data narození a pohlaví
+  jednoznačně podle § 32 a přílohy č. 1 zákona č. 155/1995 Sb., sekce ho
+  nabídne a nový záznam jím předvyplní. U žen narozených do roku 1972 závisí
+  důchodový věk na počtu vychovaných dětí, které evidence nevede, a snížený
+  důchodový věk (například u horníků) výpočet nezná; tam den zapište sami.
+- **Pobíraný důchod** se vede od-do po dnech s druhem podle číselníku ČSSZ
+  (starobní, invalidní 3. stupně, invalidní 1. nebo 2. stupně, cizí důchody),
+  stejně jako v přihlášce REGZEC. U starobního důchodu se označí, zda je
+  **předčasný**, a u každého důchodu případný **snížený důchodový věk**. Každý
+  druh je vlastní řada, takže například cizí a český důchod mohou běžet
+  souběžně; překryv téhož druhu se odmítne už při uložení.
+
+Předčasný starobní důchod dává kód `D` od dne přiznání. Starobní důchod
+ukončuje odečítané doby od prvního celého měsíce výplaty (přiznaný uprostřed
+měsíce tedy od dalšího měsíce) a od roku 2025 i vedení ročního evidenčního
+listu. Invalidní a cizí důchody kód `D` nezakládají. Import přihlášek REGZEC
+doplní pobíraný důchod z přihlášky do prázdné evidence; vyplněnou evidenci
+nemění a rozdíl jen ohlásí.
 
 #### Výjimky z minima zdravotního pojištění
 

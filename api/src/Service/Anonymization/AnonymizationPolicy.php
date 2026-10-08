@@ -422,6 +422,8 @@ final class AnonymizationPolicy
         'payroll_person_health_other_employer_bases' => ['employer_reference' => 'text', 'evidence_note' => 'text', 'evidence_reference' => 'text'],
         'payroll_person_identifiers' => ['value_ciphertext' => 'sealed:@identifier_type:value_hash:value_masked:id', 'value_hash' => 'sealed_companion', 'value_masked' => 'sealed_companion'],
         'payroll_person_identity_history' => ['birth_country_code' => 'keep', 'birth_place' => 'city', 'birth_surname' => 'last_name', 'citizenship_country_code' => 'keep', 'first_name' => 'first_name', 'full_name' => 'person_name', 'last_name' => 'last_name', 'title_prefix' => 'keep', 'title_suffix' => 'keep'],
+        'payroll_person_pension_age' => ['evidence_note' => 'text', 'evidence_reference' => 'text'],
+        'payroll_person_pensions' => ['evidence_note' => 'text', 'evidence_reference' => 'text', 'pension_type_code' => 'keep'],
         'payroll_person_social_discount_claims' => ['evidence_note' => 'text', 'evidence_reference' => 'text'],
         'payroll_person_social_jurisdictions' => ['a1_certificate_reference' => 'text', 'evidence_note' => 'text', 'foreign_country_code' => 'keep', 'jurisdiction_evidence_reference' => 'text'],
         'payroll_person_tax_child_claims' => ['child_reference' => 'text', 'claim_reason' => 'text', 'evidence_note' => 'text', 'evidence_reference' => 'text', 'other_caregiver_family_name' => 'last_name', 'other_caregiver_given_name' => 'first_name'],

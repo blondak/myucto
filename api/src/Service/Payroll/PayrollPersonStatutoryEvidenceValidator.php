@@ -894,9 +894,7 @@ final class PayrollPersonStatutoryEvidenceValidator
     private function canonical(array $row, string $key): string
     {
         $value = $this->string($row, $key);
-        if (strlen($value) > 500
-            || preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:\/-]*$/D', $value) !== 1
-        ) {
+        if (!self::isCanonicalReference($value)) {
             // „Není kanonická reference" nikomu neřekne, co s tím. Tahle věta
             // je shodná s tou, kterou ukazuje formulář (`reference_invalid`).
             throw new InvalidArgumentException(
@@ -907,6 +905,13 @@ final class PayrollPersonStatutoryEvidenceValidator
         }
 
         return $value;
+    }
+
+    /** Kanonické označení dokladu; totéž pravidlo čte i evidence důchodových údajů. */
+    public static function isCanonicalReference(string $value): bool
+    {
+        return strlen($value) <= 500
+            && preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:\/-]*$/D', $value) === 1;
     }
 
     /** @param array<string,mixed> $row */

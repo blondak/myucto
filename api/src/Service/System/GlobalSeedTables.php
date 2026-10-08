@@ -423,6 +423,7 @@ final class GlobalSeedTables
         'payroll_person_health_coverage_history', 'payroll_person_health_minimum_reductions',
         'payroll_person_health_month_evidence', 'payroll_person_health_other_employer_bases',
         'payroll_person_identifiers', 'payroll_person_identity_history',
+        'payroll_person_pension_age', 'payroll_person_pensions',
         'payroll_person_social_discount_claims', 'payroll_person_social_jurisdictions',
         'payroll_person_tax_child_claims', 'payroll_person_tax_credit_claims',
         'payroll_person_tax_declarations', 'payroll_person_tax_residences', 'payroll_posting_allocations',

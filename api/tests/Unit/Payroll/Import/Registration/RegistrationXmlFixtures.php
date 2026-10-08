@@ -42,8 +42,11 @@ final class RegistrationXmlFixtures
             'vcp' => null,
             'sme' => 'N',
             'fdr' => null,
+            // Celý element `pens` (pobíraný důchod), např. `<pens typ="1" tak="2026-03-01" early="A"/>`.
+            'pens' => null,
         ];
         $fdr = $o['fdr'] === null ? '' : '<fdr str="Pobytová" num="7" pnu="' . $o['fdr'] . '" cit="Brno"/>';
+        $pens = $o['pens'] ?? '';
         $client = self::attributes(['bno' => $o['bno'], 'ikmpsv' => $o['ikmpsv'], 'vcp' => $o['vcp']]);
         $name = self::attributes(['sur' => $o['last'], 'ona' => $o['ona'], 'fir' => $o['first'], 'tit' => $o['tit']]);
         $birth = self::attributes([
@@ -86,6 +89,7 @@ final class RegistrationXmlFixtures
                 <prof clas="{$o['clas']}"/>
                 <position name="Účetní"/>
               </job>
+              {$pens}
               {$insurer}
               <fact highedu="M"/>
             </employee>

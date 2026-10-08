@@ -314,6 +314,9 @@ final class PayrollRetentionCatalog
                 'payroll_jmhz_ordinary_evidence_snapshots',
                 'payroll_jmhz_ordinary_evidence_idempotency_claims',
                 'payroll_person_social_jurisdictions',
+                // Důchodové údaje osoby: zdroj kódu D a odečtených dob ELDP.
+                'payroll_person_pension_age',
+                'payroll_person_pensions',
                 'payroll_person_foreign_permits',
                 'payroll_person_external_ids',
                 'payroll_employment_external_ids',

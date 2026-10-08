@@ -577,13 +577,24 @@ pracujícího důchodce aplikace považuje zaměstnance s ověřenou slevou
 pracujícího důchodce v zákonné evidenci osoby.
 
 **Zaměstnanec po dosažení důchodového věku** bez ověřené slevy pracujícího
-důchodce: důchodové údaje (den dosažení důchodového věku, předčasný starobní
-důchod) se potvrzují jen ve formuláři evidenčního listu a měsíční hlášení je
-zatím nepřebírá. Kód ELDP v hlášení proto vyjde bez druhého znaku `D`.
-U zaměstnance, který starobní důchod nepobírá, se navíc nevykážou odečítané
-doby (10375) za nemoc, ošetřování, mateřskou, otcovskou, neplacené volno
-nebo neomluvenou absenci. Hlášení za takový vztah podejte ručně přes ePortál
-ČSSZ, nebo vztah odložte.
+důchodce a **poživatel předčasného starobního důchodu**: kód ELDP v hlášení
+nese druhý znak `D` (například `1D+`) od dne dosažení důchodového věku nebo od
+přiznání předčasného důchodu, podle toho, co nastalo dřív. Údaje se berou ze
+zákonné evidence osoby (sekce **Důchodový věk** a **Pobíraný důchod**) k
+vykazovanému měsíci, stejně jako u evidenčního listu. Bez zapsaného dne
+dosažení věku kód `D` nevznikne. Měsíc, ve kterém zaměstnanec věk dovrší, se
+rozdělí na dvě sekce: do dne před dovršením bez `D` se základem 0, od dovršení
+s `D` a celým základem měsíce. Předčasný důchod přiznaný uprostřed měsíce
+hlášení zastaví, protože pravidla podání rozdělení základu nestanoví.
+Hlášení už připravené za dřívější měsíc se změnou evidence nemění; projeví se
+až v hlášení, které se teprve sestaví (i v opravném).
+
+Kdo dosáhl důchodového věku a starobní důchod nepobírá, má za nemoc,
+ošetřování, mateřskou, otcovskou, neplacené volno, neomluvenou absenci a měsíc
+bez účasti **odečítané doby** (10375). Ty aplikace do měsíčního hlášení zatím
+nesestaví: takový měsíc přípravu zastaví a hlášení za vztah podejte ručně přes
+ePortál ČSSZ, nebo vztah odložte. Předčasný důchod je důchod, takže u jeho
+poživatele se odečítané doby nevedou a hlášení se sestaví.
 
 Měsíc porodu, ve kterém zaměstnankyně pobírá peněžitou pomoc v mateřství a nemá
 žádný započitatelný příjem, se vykazuje jako měsíc účasti na pojištění, nikoli
@@ -1507,9 +1518,13 @@ a list nerozdělí, takový evidenční list proto podejte mimo aplikaci.
 
 ### Důchodové údaje zaměstnance
 
-Mzdová revize nenese údaje o důchodu, a přitom na nich stojí kód řádku i to,
-zda se list vůbec vede. Formulář je proto chce výslovně potvrdit, i když
-nic z toho nenastalo (prázdné pole znamená „nenastalo"):
+Na údajích o důchodu stojí kód řádku i to, zda se list vůbec vede. Zdrojem je
+**zákonná evidence osoby** (karta osoby, sekce **Důchodový věk** a **Pobíraný
+důchod**, viz kapitola Zaměstnanci), stejně jako u měsíčního hlášení JMHZ.
+Formulář listu je chce výslovně potvrdit, ale jen jako kontrolu: prázdné pole
+se převezme z evidence za vykazovaný rok, vyplněné se s evidencí musí shodovat,
+jinak se list nesestaví a hláška pošle opravit evidenci. Účast na důchodovém
+pojištění v cizině evidence nevede, ta se potvrzuje jen ve formuláři.
 
 - **Den dosažení důchodového věku** a **den, od kterého zaměstnanec pobírá
   předčasný starobní důchod.** Od dřívějšího z nich má činnost druhý znak
@@ -1528,7 +1543,10 @@ nic z toho nenastalo (prázdné pole znamená „nenastalo"):
   poživatele plného starobního důchodu evidenční list nevede (§ 38 odst. 1
   věta druhá zákona č. 582/1991 Sb.). Měsíce od tohoto měsíce se z listu
   vypustí; nezbude-li žádný, list se nesestaví a hláška to řekne. Za roky do
-  2024 se list za pracujícího důchodce vede dál.
+  2024 se list za pracujícího důchodce vede dál. Z evidence se bere první
+  celý měsíc starobního důchodu (druh 1 bez příznaku předčasnosti): důchod
+  přiznaný uprostřed měsíce se počítá od následujícího měsíce, takže měsíc
+  přiznání v listu zůstane.
 - **Účast na důchodovém pojištění v cizině.** Je-li zaměstnanec účasten
   pojištění v cizině, vede se list i za poživatele plného starobního důchodu.
 

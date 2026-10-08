@@ -260,7 +260,7 @@ final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
         $evidence = $this->json($response)['evidence'];
         self::assertSame([], $evidence['sections']['tax_credit_claims']);
         self::assertSame([], $evidence['blockers']);
-        self::assertSame(['taxpayer_credit' => true], $evidence['derived']);
+        self::assertTrue($evidence['derived']['taxpayer_credit']);
     }
 
     public function testUnsignedDeclarationDerivesNoTaxpayerCredit(): void
@@ -273,10 +273,7 @@ final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
         $response = $this->save($payload);
         self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
 
-        self::assertSame(
-            ['taxpayer_credit' => false],
-            $this->json($response)['evidence']['derived'],
-        );
+        self::assertFalse($this->json($response)['evidence']['derived']['taxpayer_credit']);
     }
 
     /**

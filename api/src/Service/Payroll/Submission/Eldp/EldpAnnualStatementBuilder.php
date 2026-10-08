@@ -79,9 +79,11 @@ use Psr\Clock\ClockInterface;
  * Kód ELDP i to, zda se list vůbec vede, závisí na údajích, které zmrazená
  * revize nenese: den dosažení důchodového věku, předčasný starobní důchod,
  * první měsíc výplaty starobního důchodu v plné výši a účast na důchodovém
- * pojištění v cizině. Účetní je proto potvrzuje výslovně
- * (`confirmation.pension_status`, i když žádné nejsou); bez nich se list
- * nesestaví. Ověřená sleva pracujícího důchodce ze zákonné evidence
+ * pojištění v cizině. Přicházejí v `confirmation.pension_status`; první tři
+ * do něj dosazuje {@see EldpStatementService} ze zákonné evidence osoby
+ * ({@see \MyInvoice\Service\Payroll\Pension\PayrollPensionStatus}, týž zdroj
+ * jako měsíční ELDP řez JMHZ) a výslovné potvrzení účetní s ní jen porovná.
+ * Bez potvrzení se list nesestaví. Ověřená sleva pracujícího důchodce ze zákonné evidence
  * ({@see JmhzEldpEvidenceBuilder::workingPensioner()}) slouží jako kontrola:
  * potvrzení, které žádný starobní důchod neuvádí, s ní nesmí projít.
  *

@@ -148,6 +148,7 @@ final class JmhzBlockerCatalog
         'eldp_not_kept_full_old_age_pension' => 'submission',
         'eldp_pension_age_mid_month_unsupported' => 'support',
         'eldp_pension_status_conflict' => 'submission',
+        'eldp_pension_status_evidence_mismatch' => 'statutory_evidence',
         'eldp_pension_status_invalid' => 'submission',
         'eldp_pension_status_not_confirmed' => 'submission',
         'jmhz_eldp_section18_days_unresolved' => 'runs',

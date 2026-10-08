@@ -153,6 +153,23 @@ final class RegistrationImportLookup
         ], $statement->fetchAll(PDO::FETCH_ASSOC));
     }
 
+    /** @return list<array{pension_type_code:string,effective_from:string}> */
+    public function pensions(int $supplierId, int $employeeId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT pension_type_code, effective_from
+               FROM payroll_person_pensions
+              WHERE supplier_id = ? AND employee_id = ?
+              ORDER BY effective_from, id'
+        );
+        $statement->execute([$supplierId, $employeeId]);
+
+        return array_map(static fn (array $row): array => [
+            'pension_type_code' => (string) $row['pension_type_code'],
+            'effective_from' => (string) $row['effective_from'],
+        ], $statement->fetchAll(PDO::FETCH_ASSOC));
+    }
+
     public function hasPersonIdentifier(int $supplierId, int $employeeId, string $type): bool
     {
         $statement = $this->db->pdo()->prepare(

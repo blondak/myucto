@@ -10,6 +10,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\IncomeTax\TaxpayerCreditEntitlement;
 use MyInvoice\Service\Payroll\PayrollApprovedPeriodFreeze;
+use MyInvoice\Service\Payroll\Pension\PayrollPensionAgeTable;
+use MyInvoice\Service\Payroll\Pension\PayrollPensionStatus;
 use MyInvoice\Service\Payroll\PayrollPersonStatutoryEvidenceValidator;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommand;
 use MyInvoice\Service\Payroll\Run\PayrollRunStatus;
@@ -130,12 +132,17 @@ final class PayrollPersonStatutoryEvidenceRepository
      * `granularity` říká, jestli se účinnost zadává po celých měsících
      * (`month`, výchozí), nebo po dnech (`day`), viz `assertTimeline()`.
      *
+     * `frozen` (výchozí true) říká, jestli řádky zamyká hranice schválené
+     * mzdy; `optional_payload`, jestli smí sekce v těle požadavku chybět.
+     *
      * @var array<string, array{
      *     section:string,
      *     collection:string,
      *     kind:'interval'|'month',
      *     timeline?:'contiguous'|'sparse',
      *     granularity?:'month'|'day',
+     *     frozen?:bool,
+     *     optional_payload?:bool,
      *     fields:list<string>
      * }>
      */
@@ -158,6 +165,8 @@ final class PayrollPersonStatutoryEvidenceRepository
         'health_month_evidence',
         'health_minimum_reductions',
         'health_other_employer_bases',
+        'social_pension_age',
+        'social_pensions',
     ];
 
     private const EDITABLE = [
@@ -277,6 +286,47 @@ final class PayrollPersonStatutoryEvidenceRepository
                 'evidence_reference',
             ],
         ],
+        /*
+         * Důchodové údaje osoby (PayrollPensionStatus): den dosažení důchodového
+         * věku a pobíraný důchod. Jediný zdroj kódu D a odečtených dob pro roční
+         * evidenční list i měsíční hlášení JMHZ.
+         *
+         * Obě řady jsou `sparse` a zadávají se po DNECH (věk se dovršuje v den
+         * narozenin, důchod se přiznává od dne). Do snímku mzdového běhu
+         * nepatří (`section` = `pension`, viz PayrollPersonPensionEvidenceRepository),
+         * a proto je nezamyká ani hranice schválené mzdy (`frozen` = false):
+         * schválená mzda je nečetla a ELDP řez i evidenční list si hodnotu
+         * zmrazí sami ve chvíli sestavení. Opravit špatně zapsaný den tak jde
+         * i zpětně a projeví se jen v hlášení, které se teprve sestaví.
+         *
+         * `optional_payload`: starší volající (import, hromadné doplnění) sekce
+         * neposílají; chybějící klíč znamená „beze změny", ne „smazat vše".
+         */
+        'social_pension_age' => [
+            'section' => 'pension',
+            'collection' => 'age',
+            'kind' => 'interval',
+            'timeline' => 'sparse',
+            'granularity' => 'day',
+            'frozen' => false,
+            'optional_payload' => true,
+            'fields' => ['basis', 'evidence_reference'],
+        ],
+        'social_pensions' => [
+            'section' => 'pension',
+            'collection' => 'pensions',
+            'kind' => 'interval',
+            'timeline' => 'sparse',
+            'granularity' => 'day',
+            'frozen' => false,
+            'optional_payload' => true,
+            'fields' => [
+                'pension_type_code',
+                'early_retirement',
+                'reduced_retirement_age',
+                'evidence_reference',
+            ],
+        ],
     ];
 
     /**
@@ -322,7 +372,22 @@ final class PayrollPersonStatutoryEvidenceRepository
         $spec = self::EDITABLE[$section]
             ?? throw new InvalidArgumentException("Neznámá sekce zákonné evidence {$section}.");
 
-        return self::COLLECTIONS[$spec['section']][$spec['collection']]['table'];
+        return self::collectionOf($spec)['table'];
+    }
+
+    /**
+     * Tabulka a sloupce editovatelné sekce. Důchodové řady nejsou
+     * v `COLLECTIONS` (ty tvoří snímek mzdového běhu), drží je jejich čtecí
+     * repozitář.
+     *
+     * @param array{section:string,collection:string} $spec
+     * @return array{table:string,columns:string,order:string}
+     */
+    private static function collectionOf(array $spec): array
+    {
+        return $spec['section'] === 'pension'
+            ? PayrollPersonPensionEvidenceRepository::COLLECTIONS[$spec['collection']]
+            : self::COLLECTIONS[$spec['section']][$spec['collection']];
     }
 
     /** @return array<string,mixed>|null */
@@ -450,6 +515,8 @@ final class PayrollPersonStatutoryEvidenceRepository
                 'taxpayer_credit' => TaxpayerCreditEntitlement::fromDeclarationStatus(
                     $snapshot['income_tax']['declaration']['status'] ?? null,
                 ),
+                // Jen nabídka pro formulář: zapisuje ji účetní, ne server.
+                'pension_age_suggestion' => $this->pensionAgeSuggestion($supplierId, $employeeId),
             ],
             // Bez tohohle editor ví, že je historie zamčená, ale ne ČÍM —
             // uživatel by musel sám najít mzdový běh, který hranici drží,
@@ -533,12 +600,16 @@ final class PayrollPersonStatutoryEvidenceRepository
                 foreach ($this->editorRows($supplierId, $employeeId, $key) as $row) {
                     $current[(int) $row['id']] = $row;
                 }
+                $input = ($spec['optional_payload'] ?? false) === true
+                    && !array_key_exists($key, is_array($payload['sections'] ?? null) ? $payload['sections'] : [])
+                    ? array_values($current)
+                    : $this->inputRows($payload, $key);
                 [$plans[$key], $deletions[$key]] = $this->planCollection(
                     $key,
                     $spec,
                     $current,
-                    $this->inputRows($payload, $key),
-                    $frozenThrough,
+                    $input,
+                    ($spec['frozen'] ?? true) ? $frozenThrough : null,
                 );
             }
 
@@ -1050,9 +1121,14 @@ final class PayrollPersonStatutoryEvidenceRepository
             }
         }
 
+        $pension = $raw['pension'] ?? [];
+        unset($raw['pension']);
         foreach (array_keys($dates) as $date) {
             $this->validator->normalize($employeeId, (string) $date, $raw);
         }
+        // Důchodové řady nejsou časový snímek k datu: platí jako celek, a tak
+        // se ověří jednou a týmž pravidlem, kterým je čtou ELDP i JMHZ.
+        PayrollPensionStatus::normalize($pension['age'] ?? [], $pension['pensions'] ?? []);
     }
 
     /**
@@ -1177,7 +1253,7 @@ final class PayrollPersonStatutoryEvidenceRepository
     ): array {
         $counts = ['inserted' => 0, 'updated' => 0, 'deleted' => 0];
             foreach (self::EDITABLE as $key => $spec) {
-            $table = self::COLLECTIONS[$spec['section']][$spec['collection']]['table'];
+            $table = self::collectionOf($spec)['table'];
             $dateColumns = $spec['kind'] === 'month'
                 ? ['period_start']
                 : ['effective_from', 'effective_to'];
@@ -1387,8 +1463,7 @@ final class PayrollPersonStatutoryEvidenceRepository
     /** @return list<array<string,mixed>> */
     private function editorRows(int $supplierId, int $employeeId, string $key): array
     {
-        $spec = self::EDITABLE[$key];
-        $collection = self::COLLECTIONS[$spec['section']][$spec['collection']];
+        $collection = self::collectionOf(self::EDITABLE[$key]);
 
         return $this->rows(
             sprintf(
@@ -1609,6 +1684,30 @@ final class PayrollPersonStatutoryEvidenceRepository
         $statement->execute([$supplierId, $employeeId, $id]);
 
         return (int) $statement->fetchColumn();
+    }
+
+    /**
+     * Den dosažení důchodového věku, který z data narození a pohlaví plyne
+     * jednoznačně ({@see PayrollPensionAgeTable}); jinak `null`.
+     */
+    private function pensionAgeSuggestion(int $supplierId, int $employeeId): ?string
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT birth_date, sex FROM payroll_person_identity_history
+              WHERE supplier_id = ? AND employee_id = ? AND birth_date IS NOT NULL
+              ORDER BY effective_from DESC, id DESC
+              LIMIT 1'
+        );
+        $statement->execute([$supplierId, $employeeId]);
+        $identity = $statement->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($identity)) {
+            return null;
+        }
+
+        return PayrollPensionAgeTable::suggest(
+            (string) $identity['birth_date'],
+            $identity['sex'] === null ? null : (string) $identity['sex'],
+        );
     }
 
     private function employeeExists(int $supplierId, int $employeeId): bool

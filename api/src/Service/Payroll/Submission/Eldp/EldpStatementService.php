@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Eldp;
 
 use MyInvoice\Repository\Payroll\EldpStatementRepository;
+use MyInvoice\Repository\Payroll\PayrollPersonPensionEvidenceRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverReader;
+use MyInvoice\Service\Payroll\Pension\PayrollPensionStatus;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
@@ -60,7 +62,50 @@ final readonly class EldpStatementService
          * hotový, aby zůstal čistou funkcí podkladů.
          */
         private PayrollTakeoverReader $takeover,
+        /** Důchodové údaje osoby — zdroj kódu D a odečtených dob listu. */
+        private PayrollPersonPensionEvidenceRepository $pensions,
     ) {}
+
+    /**
+     * Důchodové údaje listu ze zákonné evidence osoby za vykazovaný rok.
+     *
+     * Zdrojem je evidence (sekce Důchod na kartě osoby), stejně jako
+     * u měsíčního ELDP řezu JMHZ; výslovné potvrzení účetní zůstává kontrolou:
+     * prázdné pole znamená „podle evidence", vyplněné musí s evidencí souhlasit
+     * ({@see PayrollPensionStatus::mismatches()}). Účast na pojištění v cizině
+     * evidence nevede, ta zůstává na potvrzení. Neúplné potvrzení se nechá
+     * beze změny, aby ho sestavovač odmítl svým důvodem
+     * (`eldp_pension_status_not_confirmed`).
+     */
+    private function pensionStatusFromEvidence(
+        int $supplierId,
+        int $employmentId,
+        int $year,
+        mixed $confirmed,
+    ): mixed {
+        if (!is_array($confirmed)
+            || array_diff([...PayrollPensionStatus::STATUS_KEYS, 'foreign_insurance'], array_keys($confirmed)) !== []
+        ) {
+            return $confirmed;
+        }
+        $fromEvidence = $this->pensions->statusForEmployment(
+            $supplierId,
+            $employmentId,
+            sprintf('%04d-01-01', $year),
+            sprintf('%04d-12-31', $year),
+        ) ?? array_fill_keys(PayrollPensionStatus::STATUS_KEYS, null);
+        $mismatched = PayrollPensionStatus::mismatches($confirmed, $fromEvidence);
+        if ($mismatched !== []) {
+            throw new EldpValidationException(
+                'eldp_pension_status_evidence_mismatch',
+                'Důchodové údaje v potvrzení evidenčního listu se liší od zákonné evidence osoby ('
+                    . implode(', ', $mismatched) . '). Zdrojem je zákonná evidence na kartě osoby '
+                    . '(sekce Důchod): opravte ji tam, nebo pole v potvrzení nechte prázdná.',
+            );
+        }
+
+        return array_replace($confirmed, $fromEvidence);
+    }
 
     /**
      * @param array<string,mixed> $confirmation
@@ -202,6 +247,12 @@ final readonly class EldpStatementService
                 );
             }
 
+            $buildConfirmation['pension_status'] = $this->pensionStatusFromEvidence(
+                $supplierId,
+                $employmentId,
+                $year,
+                $buildConfirmation['pension_status'] ?? null,
+            );
             $statement = $this->builder->build(
                 $supplierId,
                 $employmentId,

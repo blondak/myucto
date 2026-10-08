@@ -363,6 +363,83 @@ final class PayrollPersonStatutoryEvidenceRepositoryTest extends TestCase
         self::assertNull($after['sections']['health_coverages'][0]['effective_to']);
     }
 
+    /**
+     * Důchodové údaje se ukládají editorem zákonné evidence po dnech, ani
+     * ve zmrazeném období je nezamyká schválená mzda (mzda je nečte) a starší
+     * volající, který sekce neposílá, je nesmaže.
+     */
+    public function testPensionEvidenceIsSavedByDayAndSurvivesCallersWithoutTheSection(): void
+    {
+        $pdo = $this->db->pdo();
+        $this->approveRun($pdo, '2026-06-01', 'approved');
+        $view = $this->repository->editorView($this->supplierId, $this->employeeId, '2026-07-31');
+        self::assertNotNull($view);
+        $sections = $view['sections'];
+        $sections['social_pension_age'] = [[
+            'basis' => 'statutory_table',
+            'evidence_reference' => null,
+            'effective_from' => '2026-03-15',
+            'effective_to' => null,
+            'evidence_note' => null,
+        ]];
+        $sections['social_pensions'] = [[
+            'pension_type_code' => '1',
+            'early_retirement' => '1',
+            'reduced_retirement_age' => '0',
+            'evidence_reference' => 'pension:award-decision',
+            'effective_from' => '2025-11-12',
+            'effective_to' => null,
+            'evidence_note' => null,
+        ]];
+
+        $saved = $this->repository->save($this->supplierId, $this->employeeId, ['sections' => $sections], '2026-07-31', null, null, null);
+        self::assertSame('2026-03-15', $saved['sections']['social_pension_age'][0]['effective_from']);
+        self::assertSame('1', (string) $saved['sections']['social_pensions'][0]['early_retirement']);
+
+        // Oprava dne ve zmrazeném období projde: mzda údaj nečetla.
+        $corrected = $saved['sections'];
+        $corrected['social_pension_age'][0]['effective_from'] = '2026-03-16';
+        $saved = $this->repository->save($this->supplierId, $this->employeeId, ['sections' => $corrected], '2026-07-31', null, null, null);
+        self::assertSame('2026-03-16', $saved['sections']['social_pension_age'][0]['effective_from']);
+
+        $withoutPension = $saved['sections'];
+        unset($withoutPension['social_pension_age'], $withoutPension['social_pensions']);
+        $after = $this->repository->save($this->supplierId, $this->employeeId, ['sections' => $withoutPension], '2026-07-31', null, null, null);
+        self::assertCount(1, $after['sections']['social_pension_age']);
+        self::assertCount(1, $after['sections']['social_pensions']);
+    }
+
+    public function testPensionEvidenceRejectsSecondPensionAgeRow(): void
+    {
+        $view = $this->repository->editorView($this->supplierId, $this->employeeId, '2026-07-31');
+        self::assertNotNull($view);
+        $sections = $view['sections'];
+        $row = ['basis' => 'cssz_information', 'evidence_reference' => null, 'effective_to' => null, 'evidence_note' => null];
+        $sections['social_pension_age'] = [
+            $row + ['effective_from' => '2026-03-15'],
+            $row + ['effective_from' => '2026-04-15'],
+        ];
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('jen jednou');
+        $this->repository->save($this->supplierId, $this->employeeId, ['sections' => $sections], '2026-07-31', null, null, null);
+    }
+
+    /** Muž narozený 1960 dosáhne důchodového věku v 64 letech a 2 měsících. */
+    public function testEditorOffersUnambiguousPensionAgeFromBirthDate(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_identity_history
+                (supplier_id, employee_id, full_name, birth_date, sex, effective_from)
+             VALUES (?, ?, "Syntetická osoba", "1960-05-20", "male", "2026-01-01")'
+        )->execute([$this->supplierId, $this->employeeId]);
+
+        $view = $this->repository->editorView($this->supplierId, $this->employeeId, '2026-07-31');
+
+        self::assertNotNull($view);
+        self::assertSame('2024-07-20', $view['derived']['pension_age_suggestion']);
+    }
+
     private function approveRun(PDO $pdo, string $periodStart, string $status): int
     {
         $pdo->prepare(

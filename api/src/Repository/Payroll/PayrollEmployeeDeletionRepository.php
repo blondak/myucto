@@ -198,6 +198,8 @@ final class PayrollEmployeeDeletionRepository
             'payroll_person_health_other_employer_bases',
             'payroll_person_social_jurisdictions',
             'payroll_person_social_discount_claims',
+            'payroll_person_pension_age',
+            'payroll_person_pensions',
             'payroll_person_foreign_permits',
         ],
         'payout_rules' => ['payroll_payout_rules'],

@@ -773,6 +773,8 @@ export type PayrollStatutoryEvidenceSection =
   | 'health_month_evidence'
   | 'health_minimum_reductions'
   | 'health_other_employer_bases'
+  | 'social_pension_age'
+  | 'social_pensions'
 
 export interface PayrollStatutoryEvidence {
   employee_id: number
@@ -786,8 +788,12 @@ export interface PayrollStatutoryEvidence {
   frozen_runs: PayrollStatutoryEvidenceFrozenRun[]
   sections: Record<PayrollStatutoryEvidenceSection, PayrollStatutoryEvidenceRow[]>
   other_employer_bases: PayrollStatutoryEvidenceRow[]
-  /** Co z evidence plyne bez vlastního řádku (sleva na poplatníka z podpisu prohlášení). */
-  derived?: { taxpayer_credit: boolean }
+  /**
+   * Co z evidence plyne bez vlastního řádku (sleva na poplatníka z podpisu
+   * prohlášení) a nabídka dne dosažení důchodového věku z data narození
+   * (`null`, když výpočet jednoznačný není).
+   */
+  derived?: { taxpayer_credit: boolean, pension_age_suggestion?: string | null }
   /**
    * Důvody, proč by mzdový běh k datu snímku skončil v ručním posouzení.
    * Klíče jsou tytéž, jaké hlásí `PayrollRunStatutoryInputAssembler`.

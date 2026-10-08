@@ -5,12 +5,16 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Pension\PayrollPensionStatus;
 use PDO;
 use PDOException;
 
 final class JmhzEldpEvidenceSnapshotRepository
 {
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly PayrollPersonPensionEvidenceRepository $pensions,
+    ) {}
 
     /**
      * @template T
@@ -38,7 +42,15 @@ final class JmhzEldpEvidenceSnapshotRepository
         }
     }
 
-    /** @return array<string,mixed>|null */
+    /**
+     * Zdroj ELDP řezu: zamčená revize a důchodové údaje osob k vykazovanému
+     * měsíci (`pension_statuses`, klíč = ID osoby; osoba bez důchodového údaje
+     * v mapě chybí). Údaje se čtou ze zákonné evidence osoby týmž pravidlem
+     * jako u ročního evidenčního listu ({@see PayrollPensionStatus::forInterval()}),
+     * zmrazí se až v řezu, takže už zmrazené měsíce změna evidence nemění.
+     *
+     * @return array<string,mixed>|null
+     */
     public function lockSource(int $supplierId, int $revisionId): ?array
     {
         $statement = $this->db->pdo()->prepare(
@@ -63,7 +75,14 @@ final class JmhzEldpEvidenceSnapshotRepository
         foreach (['id', 'run_id', 'revision_no', 'current_revision_no'] as $field) {
             $row[$field] = (int) $row[$field];
         }
-        return ['revision' => $row];
+        $periodStart = (string) $row['period_start'];
+        $periodEnd = (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d');
+        $statuses = [];
+        foreach ($this->pensions->forSupplier($supplierId) as $employeeId => $evidence) {
+            $statuses[$employeeId] = PayrollPensionStatus::forInterval($evidence, $periodStart, $periodEnd);
+        }
+
+        return ['revision' => $row, 'pension_statuses' => $statuses];
     }
 
     public function insertClaim(
