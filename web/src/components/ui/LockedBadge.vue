@@ -37,7 +37,7 @@ const staffReasons = computed(() =>
 
 const staffTitle = computed(() =>
   inClosedPeriod.value
-    ? `${staffReasons.value} — ${t('lock.staff_period_warning')}`
+    ? `${staffReasons.value} - ${t('lock.staff_period_warning')}`
     : staffReasons.value,
 )
 

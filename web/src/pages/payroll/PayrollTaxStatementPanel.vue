@@ -424,7 +424,7 @@ onMounted(load)
           <span v-if="place.district_name" class="text-neutral-500">
             ({{ place.district_name }})
           </span>
-          — {{ place.headcount }}
+          - {{ place.headcount }}
         </li>
       </ul>
 

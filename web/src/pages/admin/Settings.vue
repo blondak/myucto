@@ -316,7 +316,7 @@ const naceLoading = ref(false)
 const naceResolved = ref<NaceResolved | null>(null)
 
 const naceOptions = computed(() =>
-  naceItems.value.map(i => ({ value: i.code, label: `${i.display} — ${i.name}` })))
+  naceItems.value.map(i => ({ value: i.code, label: `${i.display} - ${i.name}` })))
 
 // Vybraná hodnota bývá mimo aktuální výsledky hledání (načtení stránky, po filtru),
 // proto ji SearchableSelect dostává zvlášť — jinak by pole vypadalo prázdné.
@@ -324,7 +324,7 @@ const naceSelected = computed(() => {
   const code = supplier.value?.cz_nace_code
   if (!code) return null
   const r = naceResolved.value
-  return { value: code, label: r?.name ? `${r.display} — ${r.name}` : code }
+  return { value: code, label: r?.name ? `${r.display} - ${r.name}` : code }
 })
 
 async function searchNace(q: string) {
@@ -1782,7 +1782,7 @@ async function confirmTaxRepDelete() {
                   <select v-model="(supplier as any).epo_taxpayer_code" class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
                     <option value="">{{ t('settings.income_tax_profile.taxpayer_code_unset') }}</option>
                     <option v-for="code in TAXPAYER_CODES" :key="code" :value="code">
-                      {{ code }} — {{ t('settings.income_tax_profile.taxpayer_code_' + code) }}
+                      {{ code }} - {{ t('settings.income_tax_profile.taxpayer_code_' + code) }}
                     </option>
                   </select>
                   <p class="text-xs text-neutral-500 mt-1">{{ t('settings.income_tax_profile.taxpayer_code_hint') }}</p>
@@ -1791,7 +1791,7 @@ async function confirmTaxRepDelete() {
                   <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.income_tax_profile.accounting_decree') }}</label>
                   <select v-model="(supplier as any).tax_accounting_decree" class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
                     <option v-for="decree in ACCOUNTING_DECREES" :key="decree" :value="decree">
-                      {{ decree }} — {{ t('settings.income_tax_profile.accounting_decree_' + decree) }}
+                      {{ decree }} - {{ t('settings.income_tax_profile.accounting_decree_' + decree) }}
                     </option>
                   </select>
                   <p class="text-xs text-neutral-500 mt-1">{{ t('settings.income_tax_profile.accounting_decree_hint') }}</p>
@@ -2186,7 +2186,7 @@ async function confirmTaxRepDelete() {
           <p class="text-xs text-neutral-700">
             <span class="font-medium">{{ t('settings.net_turnover.suggestion_title') }}</span>
             <span v-if="turnoverHints.nace" class="ml-1 font-mono">{{ turnoverHints.nace.display }}</span>
-            <span v-if="turnoverHints.nace?.name"> — {{ turnoverHints.nace.name }}</span>
+            <span v-if="turnoverHints.nace?.name"> - {{ turnoverHints.nace.name }}</span>
           </p>
           <p class="text-xs text-neutral-600 mt-1">{{ t(`settings.net_turnover.reason.${turnoverHints.suggestion_reason}`) }}</p>
           <div class="mt-2 flex flex-wrap items-center gap-3">

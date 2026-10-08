@@ -157,7 +157,7 @@ const activeOffices = computed(() => formOffices.value.filter(office => office.i
 const officeOptions = computed(() => activeOffices.value
   .map(office => ({
     value: office.code.trim().toUpperCase(),
-    label: `${office.code.trim().toUpperCase()} — ${office.name || t('payroll.employer.unnamed_office')}`,
+    label: `${office.code.trim().toUpperCase()} - ${office.name || t('payroll.employer.unnamed_office')}`,
   }))
   .filter(option => option.value !== ''))
 const officeCodes = computed(() => formOffices.value.map(office => office.code.trim().toUpperCase()))

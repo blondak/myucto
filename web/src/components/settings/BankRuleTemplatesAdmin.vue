@@ -332,7 +332,7 @@ function criteria(item: AdminBankRuleTemplate): string {
           <select v-model="form.rule_key" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
             <option value="" disabled>{{ t('bank_template_admin.select_posting') }}</option>
             <option v-for="rule in availablePostingRules" :key="rule.rule_key" :value="rule.rule_key">
-              {{ rule.rule_key }} — {{ rule.debit_account_code || '—' }}/{{ rule.credit_account_code || '—' }} — {{ rule.description }}
+              {{ rule.rule_key }} - {{ rule.debit_account_code || '—' }}/{{ rule.credit_account_code || '—' }} - {{ rule.description }}
             </option>
           </select>
           <p v-if="selectedPostingRule" class="mt-1 text-xs text-neutral-500">{{ selectedPostingRule.description }}</p>

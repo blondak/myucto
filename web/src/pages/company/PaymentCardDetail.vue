@@ -96,7 +96,7 @@ async function verify() {
 
 function accountLabel(a: CurrencyAccount): string {
   const num = a.account_number ? formatAccountNumber(a.account_number, a.bank_code) : (a.iban ?? '')
-  return `${num} — ${a.label || a.code}`
+  return `${num} - ${a.label || a.code}`
 }
 
 async function load() {
@@ -356,7 +356,7 @@ const INPUT = 'h-9 w-full px-3 border border-neutral-300 rounded-md text-sm bg-s
           <span class="text-xs font-medium text-neutral-600">{{ t('payment_cards.clearing_change_label') }}</span>
           <select v-model="analyticChoice" :class="INPUT" class="min-w-[16rem]">
             <option :value="null">{{ t('payment_cards.clearing_auto') }}</option>
-            <option v-for="o in clearing.options" :key="o.id" :value="o.account_code">{{ o.account_code }} — {{ o.name }}</option>
+            <option v-for="o in clearing.options" :key="o.id" :value="o.account_code">{{ o.account_code }} - {{ o.name }}</option>
           </select>
         </label>
         <button type="button" :class="btnOutline('warning')" class="whitespace-nowrap"

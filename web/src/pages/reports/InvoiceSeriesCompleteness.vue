@@ -50,7 +50,7 @@ function groupLabel(g: InvoiceSeriesGroup): string {
   } else {
     scope = t('reports.series_completeness.series_supplier')
   }
-  return `${scope} — ${types}`
+  return `${scope} - ${types}`
 }
 
 function periodLabel(g: InvoiceSeriesGroup, periodKey: string): string {

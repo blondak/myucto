@@ -165,7 +165,7 @@ onMounted(loadPreview)
         <header class="sticky top-0 px-5 py-3 border-b border-neutral-200 bg-neutral-50">
           <h3 class="text-sm font-semibold text-neutral-800">
             <span class="font-mono">{{ section.key }}</span>
-            — {{ section.direction }}:
+            - {{ section.direction }}:
             <span class="text-neutral-600">{{ section.label }}</span>
           </h3>
         </header>

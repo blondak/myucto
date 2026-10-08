@@ -55,7 +55,7 @@ const props = withDefaults(defineProps<{
   loading: false,
   loadingLabel: 'Hledám…',
   truncated: false,
-  truncatedLabel: 'Zobrazena jen část shod — upřesněte hledání.',
+  truncatedLabel: 'Zobrazena jen část shod - upřesněte hledání.',
   selectedOption: null,
   invalid: false,
   accent: 'primary',

@@ -1056,7 +1056,7 @@ async function copyXml(payrollRun: PayrollRun) {
                       :key="attributeId"
                       class="font-mono"
                     >
-                      {{ attributeId }}<template v-if="attributeGloss(attributeId)"> — {{ attributeGloss(attributeId) }}</template>
+                      {{ attributeId }}<template v-if="attributeGloss(attributeId)"> - {{ attributeGloss(attributeId) }}</template>
                     </li>
                   </ul>
                   <p v-if="group.entityIds.length" class="mt-1 font-mono">

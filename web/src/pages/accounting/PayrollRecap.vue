@@ -907,7 +907,7 @@ const remittanceRows = computed(() => {
                   class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
             <option :value="null">{{ t('accounting.payroll.employees.form_net_settlement_none') }}</option>
             <option v-for="a in settlementAccountOptions" :key="a.account_code" :value="a.account_code">
-              {{ a.account_code }} — {{ a.name }}
+              {{ a.account_code }} - {{ a.name }}
             </option>
           </select>
           <p class="text-xs text-neutral-500">{{ t('accounting.payroll.employees.form_net_settlement_hint') }}</p>

@@ -564,7 +564,7 @@ onMounted(load)
                   {{ t('payroll.submissions.signing.certificate.validity') }}
                 </dt>
                 <dd class="mt-0.5 text-neutral-800">
-                  {{ formatDate(selectedCertificate.valid_from) }} — {{ formatDate(selectedCertificate.valid_to) }}
+                  {{ formatDate(selectedCertificate.valid_from) }} - {{ formatDate(selectedCertificate.valid_to) }}
                 </dd>
               </div>
               <div>

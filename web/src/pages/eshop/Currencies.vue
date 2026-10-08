@@ -218,7 +218,7 @@ async function remove(row: EshopCurrency) {
             <button v-for="s in SUGGESTIONS" :key="s.code" type="button" @click="applySuggestion(s.code)"
               class="cursor-pointer px-2.5 h-8 rounded-full border text-sm transition whitespace-nowrap"
               :class="form.code === s.code ? 'border-primary-500 bg-primary-50 text-primary-700' : 'border-neutral-300 text-neutral-600 hover:bg-neutral-50'">
-              {{ s.code }} — {{ s.name }}
+              {{ s.code }} - {{ s.name }}
             </button>
           </div>
         </div>

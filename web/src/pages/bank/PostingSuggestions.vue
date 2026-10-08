@@ -416,7 +416,7 @@ function resolveLink(it: PostingSuggestion) {
           </tbody>
         </table>
         <datalist :id="`${pageId}-bps-coa`">
-          <option v-for="a in activeAccounts" :key="a.id" :value="a.account_code">{{ a.account_code }} — {{ a.name }}</option>
+          <option v-for="a in activeAccounts" :key="a.id" :value="a.account_code">{{ a.account_code }} - {{ a.name }}</option>
         </datalist>
       </div>
 

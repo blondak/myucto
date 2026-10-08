@@ -304,7 +304,7 @@ async function searchProducts(q: string) {
   try {
     const rows = await stockApi.searchItems(q, 30)
     if (seq !== productSearchSeq) return
-    productOptions.value = rows.map(r => ({ value: r.id, label: `${r.sku} — ${r.name}`, secondary: r.unit }))
+    productOptions.value = rows.map(r => ({ value: r.id, label: `${r.sku} - ${r.name}`, secondary: r.unit }))
   } catch {
     if (seq === productSearchSeq) productOptions.value = []
   } finally {

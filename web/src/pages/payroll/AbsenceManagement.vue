@@ -2651,7 +2651,7 @@ onMounted(async () => {
           <p class="font-medium">{{ t('payroll_absence.bulk.excluded.title', { count: bulkExclusions.length }) }}</p>
           <ul class="mt-2 space-y-1">
             <li v-for="row in bulkExclusions" :key="row.absenceId" data-test="bulk-approve-excluded-row">
-              <span class="font-medium">{{ row.name }}</span> — {{ row.reason }}
+              <span class="font-medium">{{ row.name }}</span> - {{ row.reason }}
             </li>
           </ul>
         </section>

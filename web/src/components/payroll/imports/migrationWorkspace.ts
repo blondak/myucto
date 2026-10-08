@@ -68,7 +68,7 @@ export function provideMigrationWorkspace(workspace: MigrationWorkspace): void {
 export function useMigrationWorkspace(): MigrationWorkspace {
   const workspace = inject(KEY, null)
   if (workspace === null) {
-    throw new Error('MigrationWorkspace není k dispozici — chybí provideMigrationWorkspace().')
+    throw new Error('MigrationWorkspace není k dispozici - chybí provideMigrationWorkspace().')
   }
   return workspace
 }

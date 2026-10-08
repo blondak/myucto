@@ -1022,7 +1022,7 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
                   </button>
                 </div>
                 <datalist :id="`${pageId}-closing-fx-coa-options`">
-                  <option v-for="a in pickableAccounts" :key="a.id" :value="a.account_code">{{ a.account_code }} — {{ a.name }}</option>
+                  <option v-for="a in pickableAccounts" :key="a.id" :value="a.account_code">{{ a.account_code }} - {{ a.name }}</option>
                 </datalist>
                 <div class="space-y-2">
                   <div v-for="(r, i) in bankRows" :key="i" class="grid grid-cols-12 gap-2 items-center">
@@ -1138,7 +1138,7 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
                 <input v-model="assistForm.counter_account" :list="`${pageId}-closing-assist-coa-options`" type="text"
                   class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
                 <datalist :id="`${pageId}-closing-assist-coa-options`">
-                  <option v-for="a in pickableAccounts" :key="a.id" :value="a.account_code">{{ a.account_code }} — {{ a.name }}</option>
+                  <option v-for="a in pickableAccounts" :key="a.id" :value="a.account_code">{{ a.account_code }} - {{ a.name }}</option>
                 </datalist>
               </div>
               <div class="sm:col-span-2">
@@ -1840,7 +1840,7 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
                 class="cursor-pointer h-9 px-2 text-danger-500 hover:text-danger-600 disabled:opacity-30">✕</button>
             </div>
             <datalist :id="`${pageId}-pd-coa-options`">
-              <option v-for="a in pickableAccounts" :key="a.id" :value="a.account_code">{{ a.account_code }} — {{ a.name }}</option>
+              <option v-for="a in pickableAccounts" :key="a.id" :value="a.account_code">{{ a.account_code }} - {{ a.name }}</option>
             </datalist>
             <button @click="addAllocation" :class="btnOutline('neutral')">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>

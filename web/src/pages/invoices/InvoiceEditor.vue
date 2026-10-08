@@ -347,7 +347,7 @@ async function onStockSearch(rowIndex: number, q: string) {
     }
     stockRowOptions[rowIndex] = res.map(r => ({
       value: r.id,
-      label: `${r.sku} — ${r.name}`,
+      label: `${r.sku} - ${r.name}`,
       secondary: [
         r.matched_unit ? `${r.unit} · ${r.matched_unit}` : r.unit,
         r.search_match ? `${stockSearchMatchLabel(r.search_match, t)}: ${r.search_match.value}` : null,
@@ -431,7 +431,7 @@ function onStockSelect(rowIndex: number, itemId: number | null) {
   }
   const si = stockItemsCache.get(itemId)
   if (si) {
-    stockOptionById[si.id] = { value: si.id, label: `${si.sku} — ${si.name}`, secondary: si.unit }
+    stockOptionById[si.id] = { value: si.id, label: `${si.sku} - ${si.name}`, secondary: si.unit }
     rememberPackaging(si)
     // Sloučené pole (popis = combobox): výběr karty popis přepíše názvem — dosavadní text byl
     // vyhledávací dotaz. Řádek jde dál libovolně přepsat ručně (volný text zůstává první občan).
@@ -705,7 +705,7 @@ async function hydrateStockSelections() {
       if (pack) stockPackagingById[si.id] = { base_unit: pack.base_unit, units: pack.units }
       // Jen příznak pro řádky karet s novou logikou; jednotka ani cena načteného řádku se nemění.
       stockFeaturesById[si.id] = usesStockPricingFeatures({ units: pack?.units, has_customer_prices: si.has_customer_prices })
-      stockOptionById[si.id] = { value: si.id, label: `${si.sku} — ${si.name}`, secondary: si.unit }
+      stockOptionById[si.id] = { value: si.id, label: `${si.sku} - ${si.name}`, secondary: si.unit }
     } catch { /* karta smazána/nedostupná — necháme jen id, picker zůstane prázdný */ }
   }))
   await refreshAvailability()
@@ -2563,7 +2563,7 @@ async function deleteDraft() {
                 </template>
                 <template v-else-if="viesResult.status === 'valid'">
                   <svg class="w-4 h-4 text-success-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                  <span class="text-success-600">{{ t('invoice.vies.valid', { dic: viesResult.dic }) }}<span v-if="viesResult.name" class="text-neutral-500"> — {{ viesResult.name }}</span></span>
+                  <span class="text-success-600">{{ t('invoice.vies.valid', { dic: viesResult.dic }) }}<span v-if="viesResult.name" class="text-neutral-500"> - {{ viesResult.name }}</span></span>
                 </template>
                 <template v-else-if="viesResult.status === 'invalid'">
                   <svg class="w-4 h-4 text-danger-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -3241,7 +3241,7 @@ async function deleteDraft() {
             <select v-model="form.vat_classification_code" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
               <option :value="null">— {{ t('invoice.classification.no_vat_class') }} —</option>
               <option v-for="vc in vatClassifications" :key="vc.id" :value="vc.code">
-                {{ vc.code }} — {{ vc.label.length > 60 ? vc.label.slice(0, 60) + '…' : vc.label }}
+                {{ vc.code }} - {{ vc.label.length > 60 ? vc.label.slice(0, 60) + '…' : vc.label }}
               </option>
             </select>
             <p class="text-xs text-neutral-500 mt-1">{{ t('invoice.classification.vat_classification_hint') }}</p>

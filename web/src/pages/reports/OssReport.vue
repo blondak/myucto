@@ -655,7 +655,7 @@ onMounted(() => {
         <div class="font-semibold mb-1">{{ t('reports.oss.evidence_unsupported') }}</div>
         <ul class="list-disc pl-5 space-y-1">
           <li v-for="(reason, code) in evidence.unsupported" :key="code">
-            <span class="font-mono">{{ code }}</span> — {{ reason }}
+            <span class="font-mono">{{ code }}</span> - {{ reason }}
           </li>
         </ul>
       </div>

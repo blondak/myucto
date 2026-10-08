@@ -511,7 +511,7 @@ function candidateReject() {
       {{ t('bank.counter_account') }}: <span class="font-mono">{{ tx.posting.counter_account_codes.join(', ') }}</span>
     </div>
     <div v-if="showAccount" class="text-xs text-neutral-500 font-mono">
-      {{ formatAccountNumber(tx.account_number, tx.bank_code) }}<span v-if="tx.account_label"> — {{ tx.account_label }}</span>
+      {{ formatAccountNumber(tx.account_number, tx.bank_code) }}<span v-if="tx.account_label"> - {{ tx.account_label }}</span>
     </div>
     <RouterLink v-if="showStatementLink" :to="`/bank/${tx.statement_id}?posting_status=unposted`"
       class="text-xs text-primary-600 hover:underline">

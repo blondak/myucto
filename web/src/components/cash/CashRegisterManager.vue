@@ -282,7 +282,7 @@ async function saveAll() {
               <select v-if="!isForeignForm" v-model="form.account_code"
                 class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
                 <option value="" disabled>—</option>
-                <option v-for="a in cashAccounts" :key="a.id" :value="a.account_code">{{ a.account_code }} — {{ a.name }}</option>
+                <option v-for="a in cashAccounts" :key="a.id" :value="a.account_code">{{ a.account_code }} - {{ a.name }}</option>
               </select>
               <input v-else v-model="form.account_code" type="text" :placeholder="t('cash.register_account_placeholder')"
                 class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />

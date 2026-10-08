@@ -540,7 +540,7 @@ onMounted(load)
             : t('databox.gateway.registrations.deactivateTitle') }}
         </h3>
         <p class="mb-1 text-sm text-neutral-600">
-          {{ pendingActivate.row.label }}<template v-if="submissionTestAllowed || pendingActivate.row.environment === 'test'"> — {{ t(`databox.env.${pendingActivate.row.environment}`) }}</template>
+          {{ pendingActivate.row.label }}<template v-if="submissionTestAllowed || pendingActivate.row.environment === 'test'"> - {{ t(`databox.env.${pendingActivate.row.environment}`) }}</template>
         </p>
         <p class="mb-4 text-sm text-neutral-500">
           {{ pendingActivate.active
@@ -577,7 +577,7 @@ onMounted(load)
       <div class="w-full max-w-md rounded-xl bg-surface p-5 shadow-lg">
         <h3 class="mb-1 text-lg font-semibold">{{ t('databox.gateway.registrations.deleteTitle') }}</h3>
         <p class="mb-1 text-sm text-neutral-600">
-          {{ pendingDelete.label }}<template v-if="submissionTestAllowed || pendingDelete.environment === 'test'"> — {{ t(`databox.env.${pendingDelete.environment}`) }}</template>
+          {{ pendingDelete.label }}<template v-if="submissionTestAllowed || pendingDelete.environment === 'test'"> - {{ t(`databox.env.${pendingDelete.environment}`) }}</template>
         </p>
         <p class="mb-4 text-sm text-neutral-500">{{ t('databox.gateway.registrations.deleteHint') }}</p>
         <div class="flex flex-wrap justify-end gap-2">

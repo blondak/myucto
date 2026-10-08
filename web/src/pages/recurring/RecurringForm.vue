@@ -291,7 +291,7 @@ const vatClassifications = ref<VatClassification[]>([])
 
 function vatClassificationLabel(c: VatClassification): string {
   const label = c.label.length > 48 ? `${c.label.slice(0, 48)}…` : c.label
-  return `${c.code} — ${label}`
+  return `${c.code} - ${label}`
 }
 
 function vatRateLabel(r: VatRate): string {
@@ -1029,7 +1029,7 @@ async function submit() {
               </template>
               <template v-else-if="viesResult.status === 'valid'">
                 <svg class="w-4 h-4 text-success-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                <span class="text-success-600">{{ t('invoice.vies.valid', { dic: viesResult.dic }) }}<span v-if="viesResult.name" class="text-neutral-500"> — {{ viesResult.name }}</span></span>
+                <span class="text-success-600">{{ t('invoice.vies.valid', { dic: viesResult.dic }) }}<span v-if="viesResult.name" class="text-neutral-500"> - {{ viesResult.name }}</span></span>
               </template>
               <template v-else-if="viesResult.status === 'invalid'">
                 <svg class="w-4 h-4 text-danger-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>

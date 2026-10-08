@@ -38,7 +38,7 @@ describe('číselník zdravotních pojišťoven', () => {
     expect(options).toHaveLength(HEALTH_INSURERS.length)
     expect(options[0]).toEqual({
       value: '111',
-      label: '111 — Všeobecná zdravotní pojišťovna ČR (VZP)',
+      label: '111 - Všeobecná zdravotní pojišťovna ČR (VZP)',
     })
   })
 

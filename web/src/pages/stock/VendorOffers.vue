@@ -233,7 +233,7 @@ async function searchItems(q: string) {
   itemLoading.value = true
   try {
     const rows: StockItemSearchResult[] = await stockApi.searchItems(q, 25)
-    itemOptions.value = rows.map(r => ({ value: r.id, label: `${r.sku} — ${r.name}`, secondary: r.unit }))
+    itemOptions.value = rows.map(r => ({ value: r.id, label: `${r.sku} - ${r.name}`, secondary: r.unit }))
   } catch { itemOptions.value = [] } finally { itemLoading.value = false }
 }
 async function searchVendors(q: string) {

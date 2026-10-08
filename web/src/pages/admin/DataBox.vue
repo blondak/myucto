@@ -2227,7 +2227,7 @@ onUnmounted(clearReceiptsTimer)
           <span v-if="row.receipt_matched_by">
             ({{ t(`databox.receipts.matchedBy.${row.receipt_matched_by}`) }})
           </span>
-          — {{ t('databox.outbox.receiptUnverified') }}
+          - {{ t('databox.outbox.receiptUnverified') }}
         </p>
         <p v-else-if="row.dispatch_mode === 'manual'" class="mt-3 text-sm text-neutral-500">
           {{ t('databox.outbox.manualDispatch') }}

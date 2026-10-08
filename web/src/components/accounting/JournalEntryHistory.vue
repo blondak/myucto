@@ -84,7 +84,7 @@ function lineSideLabel(side: string): string {
               <span v-if="v.is_current" class="px-1.5 py-0.5 rounded bg-success-50 text-success-600 font-medium">{{ t('accounting.journal.history.current') }}</span>
               <span class="text-neutral-400">{{ formatDate(v.valid_from) }}</span>
               <span v-if="v.changed_by" class="text-neutral-500">
-                — {{ v.changed_by.user_name || t('accounting.journal.history.unknown_user') }}
+                - {{ v.changed_by.user_name || t('accounting.journal.history.unknown_user') }}
               </span>
             </div>
 
@@ -108,12 +108,12 @@ function lineSideLabel(side: string): string {
                   <template v-if="c.type === 'added' && c.line">
                     <span class="text-success-600 font-medium">+ </span>
                     <span class="font-mono">{{ c.line.account_code }}</span> {{ c.line.account_name }}
-                    — {{ lineSideLabel(c.line.side) }} {{ formatMoney(journalAmount(c.line)) }}
+                    - {{ lineSideLabel(c.line.side) }} {{ formatMoney(journalAmount(c.line)) }}
                   </template>
                   <template v-else-if="c.type === 'removed' && c.line">
                     <span class="text-danger-500 font-medium">− </span>
                     <span class="font-mono line-through">{{ c.line.account_code }}</span> {{ c.line.account_name }}
-                    — {{ lineSideLabel(c.line.side) }} {{ formatMoney(journalAmount(c.line)) }}
+                    - {{ lineSideLabel(c.line.side) }} {{ formatMoney(journalAmount(c.line)) }}
                   </template>
                   <template v-else-if="c.type === 'changed' && c.before && c.after">
                     <span class="text-warning-600 font-medium">~ </span>

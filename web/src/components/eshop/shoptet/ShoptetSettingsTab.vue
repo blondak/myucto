@@ -120,7 +120,7 @@ async function removeUrl() {
       </label>
       <p v-if="settings.last_fetch_at" class="text-xs" :class="settings.last_fetch_status === 'error' ? 'text-danger-500' : 'text-neutral-500'">
         {{ t('shoptet.settings.last_fetch', { date: formatDateTime(settings.last_fetch_at) }) }}
-        <template v-if="settings.last_fetch_message"> — {{ settings.last_fetch_message }}</template>
+        <template v-if="settings.last_fetch_message"> - {{ settings.last_fetch_message }}</template>
       </p>
     </section>
 

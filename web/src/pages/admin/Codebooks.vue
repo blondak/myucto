@@ -458,7 +458,7 @@ function dphLineLabel(line: string): string {
   // Plochý klíč (`line_42`), ne vnořený `line_opt.42` — číselný segment cesty si
   // vue-i18n vykládá jako index pole.
   const key = `vat_classifications.line_${line}`
-  return te(key) ? `${line} — ${t(key)}` : line
+  return te(key) ? `${line} - ${t(key)}` : line
 }
 
 async function loadVatClassifications() {

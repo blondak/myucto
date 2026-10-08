@@ -451,7 +451,7 @@ onMounted(async () => {
       {{ t('payroll.discountIntents.transitionalWarning') }}
       <ul class="mt-2 list-disc space-y-1 pl-5">
         <li v-for="item in transitionalItems" :key="item.id">
-          {{ item.employee_name }} — {{ formatDate(item.intent_from) }}
+          {{ item.employee_name }} - {{ formatDate(item.intent_from) }}
         </li>
       </ul>
     </div>

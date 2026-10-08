@@ -143,7 +143,7 @@ defineExpose({ balanced, complete, valid: computed(() => balanced.value && compl
 
     <datalist :id="accountListId">
       <option v-for="a in activeAccounts" :key="a.id" :value="a.account_code">
-        {{ a.account_code }} — {{ a.name }}
+        {{ a.account_code }} - {{ a.name }}
       </option>
     </datalist>
   </div>

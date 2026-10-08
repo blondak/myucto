@@ -111,7 +111,7 @@ function lineFromServer(l: PurchaseOrderLine): LineRow {
   return {
     id: l.id,
     stock_item_id: l.stock_item_id,
-    option: l.sku ? { value: l.stock_item_id!, label: `${l.sku} — ${l.item_name}`, secondary: l.unit } : null,
+    option: l.sku ? { value: l.stock_item_id!, label: `${l.sku} - ${l.item_name}`, secondary: l.unit } : null,
     vendor_sku: l.vendor_sku ?? '',
     description: l.description,
     unit: l.unit,
@@ -158,7 +158,7 @@ async function onSearch(rowIndex: number, q: string) {
     for (const r of res) itemsCache.set(r.id, r)
     rowOptions[rowIndex] = res.map(r => ({
       value: r.id,
-      label: `${r.sku} — ${r.name}`,
+      label: `${r.sku} - ${r.name}`,
       secondary: r.unit,
     }))
   } catch { rowOptions[rowIndex] = [] } finally { rowLoading[rowIndex] = false }
@@ -170,7 +170,7 @@ function onSelect(rowIndex: number, itemId: number | null) {
   if (itemId === null) { row.option = null; return }
   const si = itemsCache.get(itemId)
   if (si) {
-    row.option = { value: si.id, label: `${si.sku} — ${si.name}`, secondary: si.unit }
+    row.option = { value: si.id, label: `${si.sku} - ${si.name}`, secondary: si.unit }
     if (!row.description) row.description = si.name
     if (!row.unit || row.unit === 'ks') row.unit = si.unit
     if (!row.vat_rate_id && si.vat_rate_id) row.vat_rate_id = si.vat_rate_id

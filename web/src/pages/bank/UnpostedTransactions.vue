@@ -54,7 +54,7 @@ function statusLabel(status: string): string {
 }
 function accountLabel(a: BankAccountOption): string {
   const num = formatAccountNumber(a.account_number, a.bank_code)
-  return a.label ? `${num} — ${a.label}` : num
+  return a.label ? `${num} - ${a.label}` : num
 }
 
 // Sdílená akční logika nad transakcí (match/ignore/unmatch/create/request-doc/…) —

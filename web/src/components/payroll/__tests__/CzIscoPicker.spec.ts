@@ -66,7 +66,7 @@ describe('CzIscoPicker', () => {
     const options = select(wrapper).props('options')
     expect(options).toEqual([{
       value: '43111',
-      label: '43111 — Účetní všeobecní',
+      label: '43111 - Účetní všeobecní',
       secondary: 'Úředníci v oblasti účetnictví',
     }])
   })
@@ -103,7 +103,7 @@ describe('CzIscoPicker', () => {
 
     expect(select(wrapper).props('selectedOption')).toEqual({
       value: '43111',
-      label: '43111 — Účetní všeobecní',
+      label: '43111 - Účetní všeobecní',
       secondary: 'Úředníci v oblasti účetnictví',
     })
   })

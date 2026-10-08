@@ -44,6 +44,6 @@ export function healthInsurerName(code: string | null | undefined): string | nul
 export function healthInsurerOptions(): Array<{ value: string; label: string }> {
   return HEALTH_INSURERS.map(insurer => ({
     value: insurer.code,
-    label: `${insurer.code} — ${insurer.name}`,
+    label: `${insurer.code} - ${insurer.name}`,
   }))
 }

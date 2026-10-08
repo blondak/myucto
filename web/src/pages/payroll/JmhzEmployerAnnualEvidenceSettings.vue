@@ -269,7 +269,7 @@ onMounted(load)
               :data-test="`jmhz-annual-collective-${entry.item_code}`"
               @change="toggleCollective(entry.item_code)"
             >
-            <span>{{ entry.item_code }} — {{ entry.label }}</span>
+            <span>{{ entry.item_code }} - {{ entry.label }}</span>
           </label>
         </div>
       </fieldset>
@@ -288,7 +288,7 @@ onMounted(load)
           >
             <option value="">{{ t('payroll.employer.jmhz_annual.choose') }}</option>
             <option v-for="entry in view.ownership_forms" :key="entry.item_code" :value="entry.item_code">
-              {{ entry.item_code }} — {{ entry.label }}
+              {{ entry.item_code }} - {{ entry.label }}
             </option>
           </select>
         </label>
@@ -333,7 +333,7 @@ onMounted(load)
           >
             <option :value="null">{{ t('payroll.employer.jmhz_annual.all_offices') }}</option>
             <option v-for="office in view.offices" :key="office.id" :value="office.id">
-              {{ office.code }} — {{ office.name }}
+              {{ office.code }} - {{ office.name }}
             </option>
           </select>
           <span class="mt-1 block text-xs text-neutral-500">

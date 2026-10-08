@@ -77,7 +77,7 @@ function newDimension(): PayrollDimensionPayload {
 
 const companyValueOptions = computed(() => companyValues.value.map(value => ({
   value: value.id,
-  label: `${value.code} — ${value.name}`,
+  label: `${value.code} - ${value.name}`,
   secondary: value.type_name,
   keywords: `${value.type_name} ${value.code} ${value.name}`,
 })))
@@ -469,7 +469,7 @@ onMounted(() => {
               <p class="text-xs uppercase tracking-wide text-neutral-500">
                 {{ t(`payroll.employer.dimensions.type_options.${dimension.dimension_type}`) }}
               </p>
-              <p class="font-medium text-neutral-900">{{ dimension.code }} — {{ dimension.name }}</p>
+              <p class="font-medium text-neutral-900">{{ dimension.code }} - {{ dimension.name }}</p>
               <p class="mt-1 text-sm text-neutral-500">{{ dimension.valid_from }} – {{ dimension.valid_to ?? '∞' }}</p>
             </div>
             <span

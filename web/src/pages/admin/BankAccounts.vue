@@ -623,7 +623,7 @@ function parserTypeLabel(parserType: BankEmailProvider['parser_type']): string {
 
 function providerSelectLabel(provider: BankEmailProvider): string {
   const base = `${provider.name} (${providerOwnerLabel(provider)})`
-  return provider.enabled ? base : `${base} — ${t('bank_accounts.provider_disabled')}`
+  return provider.enabled ? base : `${base} - ${t('bank_accounts.provider_disabled')}`
 }
 
 // Mapování nabízí jen zapnuté providery; aktuálně vybraný vypnutý zůstává

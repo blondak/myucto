@@ -54,7 +54,7 @@ const dimensionOptions = computed(() => dimensions.value
   .filter(dimension => dimension.is_active)
   .map(dimension => ({
     value: dimension.id,
-    label: `${dimension.code} — ${dimension.name}`,
+    label: `${dimension.code} - ${dimension.name}`,
     secondary: t(`payroll.employer.dimensions.type_options.${dimension.dimension_type}`),
   })))
 const selectedDimensionOption = computed(() => dimensionOptions.value
@@ -332,7 +332,7 @@ onMounted(load)
         <div>
           <p class="font-medium text-neutral-800">
             {{ t(`payroll.employer.dimensions.type_options.${assignment.dimension_type}`) }}
-            · {{ assignment.dimension_code }} — {{ assignment.dimension_name }}
+            · {{ assignment.dimension_code }} - {{ assignment.dimension_name }}
             <span
               v-if="(assignment.share_percent ?? 100) < 100"
               class="ml-1 inline-flex rounded-full bg-payroll-50 px-2 py-0.5 font-semibold text-payroll-700"

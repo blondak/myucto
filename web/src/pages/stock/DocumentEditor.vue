@@ -128,7 +128,7 @@ async function onSearch(rowIndex: number, q: string) {
     for (const r of res) itemsCache.set(r.id, r)
     rowOptions[rowIndex] = res.map(r => ({
       value: r.id,
-      label: `${r.sku} — ${r.name}`,
+      label: `${r.sku} - ${r.name}`,
       secondary: r.sale_price_without_vat != null ? `${r.unit} · ${formatMoney(Number(r.sale_price_without_vat))}` : r.unit,
     }))
   } catch { rowOptions[rowIndex] = [] } finally { rowLoading[rowIndex] = false }
@@ -147,7 +147,7 @@ function onSelect(rowIndex: number, itemId: number | null) {
   if (itemId === null) { row.option = null; row.tracking_mode = 'none'; row.tracking_allocations = []; row.tracking_units = []; return }
   const si = itemsCache.get(itemId)
   if (si) {
-    row.option = { value: si.id, label: `${si.sku} — ${si.name}`, secondary: si.unit }
+    row.option = { value: si.id, label: `${si.sku} - ${si.name}`, secondary: si.unit }
     row.tracking_mode = si.tracking_mode ?? 'none'
     row.tracking_allocations = []
     void loadTrackingUnits(row, itemId)
@@ -199,7 +199,7 @@ async function loadDocument() {
         unit_cost: l.unit_cost != null ? String(l.unit_cost) : '',
         extra_cost: l.extra_cost != null ? String(l.extra_cost) : '',
         note: l.note ?? '',
-        option: l.sku ? { value: l.stock_item_id, label: `${l.sku} — ${l.name}`, secondary: l.unit } : null,
+        option: l.sku ? { value: l.stock_item_id, label: `${l.sku} - ${l.name}`, secondary: l.unit } : null,
         purchase_invoice_item_id: l.purchase_invoice_item_id ?? null,
         source_description: l.source_description ?? null,
         source_qty: l.source_qty != null ? String(l.source_qty) : null,
@@ -396,7 +396,7 @@ onMounted(async () => {
       try {
         const si = await stockApi.getItem(Number(qItem))
         itemsCache.set(si.id, { id: si.id, sku: si.sku, name: si.name, unit: si.unit, vat_rate_id: si.vat_rate_id, sale_price_without_vat: si.sale_price_without_vat })
-        lines.value = [{ ...blankLine(), stock_item_id: si.id, option: { value: si.id, label: `${si.sku} — ${si.name}`, secondary: si.unit } }]
+        lines.value = [{ ...blankLine(), stock_item_id: si.id, option: { value: si.id, label: `${si.sku} - ${si.name}`, secondary: si.unit } }]
       } catch { /* ignore */ }
     }
   }

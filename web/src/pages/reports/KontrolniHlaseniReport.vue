@@ -238,7 +238,7 @@ onMounted(async () => {
           <tbody class="divide-y divide-neutral-100">
             <tr v-for="section in sectionARows" :key="section.code">
               <td class="px-5 py-2.5 text-neutral-700">
-                <strong class="font-mono">{{ section.code }}</strong> — {{ t(section.labelKey) }}
+                <strong class="font-mono">{{ section.code }}</strong> - {{ t(section.labelKey) }}
               </td>
               <td class="px-5 py-2.5 text-right font-mono">
                 {{ section.count }} {{ t(section.aggregated ? 'reports.kh.aggregated' : 'reports.kh.rows') }}
@@ -257,7 +257,7 @@ onMounted(async () => {
           <tbody class="divide-y divide-neutral-100">
             <tr v-for="section in sectionBRows" :key="section.code">
               <td class="px-5 py-2.5 text-neutral-700">
-                <strong class="font-mono">{{ section.code }}</strong> — {{ t(section.labelKey) }}
+                <strong class="font-mono">{{ section.code }}</strong> - {{ t(section.labelKey) }}
               </td>
               <td class="px-5 py-2.5 text-right font-mono">
                 {{ section.count }} {{ t(section.aggregated ? 'reports.kh.aggregated' : 'reports.kh.rows') }}
