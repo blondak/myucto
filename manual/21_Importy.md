@@ -943,6 +943,19 @@ Export již obsahuje právě vybranou firmu, JSONL data, kontrolní součty a so
 Není potřeba zavádět nový formát zálohy. Běžný databázový ZIP ze sekce Zálohy
 není vstupem tohoto příkazu.
 
+V aplikaci otevřete **Importy → MyÚčto**. Vyberte ZIP, vyplňte stabilní název
+původní instance a případně heslo ZIPu. Klikněte na **Zkontrolovat nanečisto**.
+Po úspěšné kontrole uvidíte přehled ověřených, nových a již přenesených řádků
+včetně oblastí mimo rozsah. Potvrďte cílovou firmu a klikněte na
+**Importovat do aktuální firmy**. Cílem je firma vybraná v přepínači aplikace;
+změna firmy zruší výběr souboru i výsledek kontroly. Potřebujete právo zápisu
+pro import, účetní deník a nastavení firmy.
+
+Průvodce přijímá ZIP do **64 MiB**, nahrává jej po částech a používá stejný
+importér jako CLI. Prázdné heslo použije heslo záloh cílové instalace; zadané
+heslo se neukládá. Během kontroly a importu vyčkejte na výsledek. Pokud se
+odpověď ztratí, zopakujte kontrolu: dokončený import se ověří bez duplicit.
+
 Import spouští správce instalace z příkazové řádky. Cílovou firmu vyberte
 pomocí jejího ID; musí již existovat a mít stejné IČO, zemi, výchozí měnu, účetní režim, typ poplatníka, období DPH,
 plátcovství včetně historie a význam klasifikací DPH. Její nastavení, přístupy uživatelů

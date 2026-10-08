@@ -88,6 +88,7 @@
     "migration_overview",
     "money_s3",
     "monthly_report",
+    "myucto_import",
     "oss_rates",
     "other_items",
     "pamica",
@@ -364,6 +365,10 @@
     ],
     "imports-overview": [
       "migration_overview"
+    ],
+    "imports-myucto": [
+      "company_profile",
+      "myucto_import"
     ],
     "imports-money-s3": [
       "company_profile",

@@ -892,6 +892,8 @@ final class RoutePermissionMap
         ['DELETE', '#^/api/admin/imports/[0-9]+$#', 'utilities.import', AccessLevel::WRITE],
         // Průvodce „Přechod z Money S3" (MoneyS3MigrationAction) — stejné oprávnění jako
         // ostatní importy; převod zapisuje deník, proto nahrání i spuštění chce WRITE.
+        ['POST',   '#^/api/admin/imports/myucto/uploads/(chunked|[a-f0-9]{16}/(chunks|complete|run))$#', 'utilities.import', AccessLevel::WRITE],
+        ['GET',    '#^/api/admin/imports/myucto/uploads/[a-f0-9]{16}$#', 'utilities.import', AccessLevel::WRITE],
         ['POST',   '#^/api/admin/imports/money-s3/uploads(/chunked|/[a-f0-9]+/(reports|start|chunks|complete))?$#', 'utilities.import', AccessLevel::WRITE],
         ['GET',    '#^/api/admin/imports/money-s3/(uploads/[a-f0-9]+|runs(/[0-9]+)?)$#', 'utilities.import', AccessLevel::READ],
         // Dávkový převod více záloh Money S3 (MoneyS3BatchAction) - stejná pravidla.

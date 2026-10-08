@@ -2932,6 +2932,12 @@ final class Routes
         // a mazat tisíce dokladů po jednom nejde.
         $app->post   ('/api/admin/import/batches/{batch:[A-Za-z0-9]{4,32}}/delete',
             \MyInvoice\Action\Admin\Import\DeleteImportBatchAction::class);
+        // Přenos firmy ze stávajícího Kompletního exportu dat MyÚčta.
+        $app->post('/api/admin/imports/myucto/uploads/chunked', [\MyInvoice\Action\Admin\Import\MyuctoMigrationAction::class, 'initChunked']);
+        $app->post('/api/admin/imports/myucto/uploads/{token:[a-f0-9]{16}}/chunks', [\MyInvoice\Action\Admin\Import\MyuctoMigrationAction::class, 'chunk']);
+        $app->post('/api/admin/imports/myucto/uploads/{token:[a-f0-9]{16}}/complete', [\MyInvoice\Action\Admin\Import\MyuctoMigrationAction::class, 'complete']);
+        $app->get('/api/admin/imports/myucto/uploads/{token:[a-f0-9]{16}}', [\MyInvoice\Action\Admin\Import\MyuctoMigrationAction::class, 'show']);
+        $app->post('/api/admin/imports/myucto/uploads/{token:[a-f0-9]{16}}/run', [\MyInvoice\Action\Admin\Import\MyuctoMigrationAction::class, 'run']);
         // Průvodce „Přechod z Money S3" — záloha agendy, náhled, zkouška nanečisto, převod, protokoly.
         $app->post   ('/api/admin/imports/money-s3/uploads', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'upload']);
         $app->post   ('/api/admin/imports/money-s3/uploads/chunked', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'initChunked']);

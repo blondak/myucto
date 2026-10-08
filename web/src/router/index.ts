@@ -99,6 +99,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'purchase-invoices-export': ['purchase_invoices'], 'purchase-invoices-import': ['purchase_invoices'],
   // Přechod z Money S3 — stejné právo jako BE MoneyS3MigrationAction (utilities.import, zápis).
   'imports-overview': ['utilities.import', 'write'],
+  'imports-myucto': ['utilities.import', 'write'],
   'imports-money-s3': ['utilities.import', 'write'],
   'imports-pohoda': ['utilities.import', 'write'],
   'imports-pamica': ['utilities.import', 'write'],
