@@ -65,6 +65,8 @@ vi.mock('vue-i18n', async (importOriginal) => ({
     t: (key: string, parameters?: Record<string, string | number>) =>
       parameters ? `${key} ${Object.values(parameters).join(' ')}` : key,
     te: () => true,
+    tm: (key: string) => [`${key}.0`],
+    rt: (message: unknown) => String(message),
     locale: { value: 'cs' },
   }),
 }))
@@ -625,11 +627,30 @@ describe('PayrollTransportHistoryPanel', () => {
             id_ppv: null,
             control: null,
           },
+          {
+            code: 40326,
+            message: 'V systému nesmí existovat více řádných podání za jedno rozhodné období.',
+            origin: 'cjmhz',
+            control_id: 326,
+            form_guid: null,
+            ik_mpsv: null,
+            id_ppv: null,
+            control: null,
+            remediation: {
+              code: 'jmhz_protocol_regular_submission_duplicate',
+              kind: 'correction',
+              field: null,
+              source: 'cssz_faq_2026_06_09',
+              empty_attribute_ids: [],
+            },
+          },
         ],
       },
     })
 
-    const wrapper = mount(PayrollTransportHistoryPanel)
+    const wrapper = mount(PayrollTransportHistoryPanel, {
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a><slot /></a>' } } },
+    })
     await flushPromises()
     await wrapper.get('[data-test="transport-poll-1"]').trigger('click')
     await flushPromises()
@@ -650,6 +671,16 @@ describe('PayrollTransportHistoryPanel', () => {
     expect(second.text()).toContain('Neznámá vada podání.')
     expect(wrapper.get('[data-test="transport-report-uncatalogued-1-1"]').text())
       .toContain('payroll.submissions.transport.report.control_unknown')
+    expect(wrapper.find('[data-test="transport-report-remediation-1-1"]').exists()).toBe(false)
+
+    // Chyba s doloženou nápravou ukáže vysvětlení, kroky a proklik.
+    const remediation = wrapper.get('[data-test="transport-report-remediation-1-2"]')
+    expect(remediation.text()).toContain('payroll.jmhz_gate.codes.jmhz_protocol_regular_submission_duplicate')
+    expect(remediation.text())
+      .toContain('payroll.jmhz_protocol_help.steps.jmhz_protocol_regular_submission_duplicate.0')
+    expect(remediation.text()).toContain('payroll.jmhz_protocol_help.source.cssz_faq_2026_06_09')
+    expect(wrapper.get('[data-test="transport-report-remediation-1-2-link"]').text())
+      .toContain('payroll.jmhz_gate.remediation.correction')
   })
 
   it('uzavřít nabídne jen u dotaženého protokolu a pošle variabilní symbol', async () => {

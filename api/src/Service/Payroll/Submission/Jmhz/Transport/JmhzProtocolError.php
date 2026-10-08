@@ -14,7 +14,8 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlPassability;
  * „Technická chyba" s detailem v textu, ne kontroly — ID proto nemají.
  *
  * Ostatní kódy jsou platformní (odmítnutí na vstupu, obálka, podpis, šifrování)
- * a musí být v doloženém katalogu; neznámý kód je tvrdá chyba, ne „nezařazeno".
+ * nebo kódy post DIS validace evidence ČSSZ s doloženou kontrolou, a musí být
+ * v doloženém katalogu; neznámý kód je tvrdá chyba, ne „nezařazeno".
  */
 final readonly class JmhzProtocolError
 {
@@ -40,6 +41,21 @@ final readonly class JmhzProtocolError
         101, 102, 103, 104, 105, 201, 202, 300, 302, 305, 310, 400,
         17800, 17801, 17803, 17804, 17805, 17806, 17807, 17808, 17810, 17814,
         17820, 17824, 17830, 17832, 17833, 17835, 17836, 17837, 17839, 17840,
+    ];
+
+    /**
+     * Kódy post DIS validace evidence ČSSZ, které Katalog kontrol MH 1.4.2.10
+     * přiřazuje kontrole ve sloupci poznámek („post DIS validace - kód:
+     * 103901608 (akce 99)"). Kontroly 262 (ID PPV nenalezeno) a 263 (IK MPSV
+     * nenalezeno) jsou DIS a nepropustné; ČSSZ je hlásí buď v rozsahu DIS
+     * (20262, 20263), nebo tímhle kódem evidence. Mapa je jediné místo, kde se
+     * kód evidence převádí na kontrolu — čte ji parser i vysvětlení protokolu.
+     *
+     * @var array<int,int>
+     */
+    private const POST_DIS_VALIDATION_CONTROLS = [
+        103_901_608 => 262,
+        103_901_609 => 263,
     ];
 
     private function __construct(
@@ -84,6 +100,16 @@ final readonly class JmhzProtocolError
                 $message,
                 JmhzProtocolErrorOrigin::Platform,
                 null,
+                $passability,
+            );
+        }
+        $postDisControl = self::postDisValidationControl($code);
+        if ($postDisControl !== null) {
+            return new self(
+                $code,
+                $message,
+                JmhzProtocolErrorOrigin::Dis,
+                $postDisControl,
                 $passability,
             );
         }
@@ -178,6 +204,18 @@ final readonly class JmhzProtocolError
 
         return str_contains($message, 'již existuje')
             && preg_match('/se\s+stejným\s+idpodan[ií]/u', $message) === 1;
+    }
+
+    /**
+     * Kontrola katalogu ke kódu post DIS validace ({@see self::POST_DIS_VALIDATION_CONTROLS}).
+     * Registrační protokoly kód jen přenášejí (viz {@see self::fromRegistrationCode()}),
+     * vysvětlení protokolu se ale ke kontrole dostat potřebuje.
+     */
+    public static function postDisValidationControl(int $code): ?JmhzControlId
+    {
+        $controlId = self::POST_DIS_VALIDATION_CONTROLS[$code] ?? null;
+
+        return $controlId === null ? null : new JmhzControlId($controlId);
     }
 
     public function requireControlId(): JmhzControlId

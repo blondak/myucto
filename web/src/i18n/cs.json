@@ -11041,12 +11041,73 @@
       "no_file": "Z toho, co jste přetáhli, nešel přečíst žádný soubor. Složky ani obsah z jiné stránky bohužel nejdou; vyberte prosím soubor z disku.",
       "pick_another": "Vybrat jiný soubor"
     },
+    "jmhz_protocol_help": {
+      "title": "Jak chybu opravit",
+      "empty_attributes": "Tyto atributy nesmí mít žádnou hodnotu, ani nulu:",
+      "source": {
+        "cssz_faq_2026_06_09": "Zdroj: Nejčastější dotazy při podávání JMHZ, ČSSZ 9. 6. 2026",
+        "cssz_control_catalog_1_4_2_10": "Zdroj: Katalog kontrol měsíčního hlášení 1.4.2.10"
+      },
+      "steps": {
+        "jmhz_protocol_correction_guid_invalid": [
+          "Ve Stavu odeslání najděte řádné podání za stejné období, které ČSSZ přijala částečně.",
+          "Opravné podání musí nést GUID tohoto řádného podání, ne nový GUID. Připravte opravu k řádnému podání znovu a odešlete ji.",
+          "Podání s novým GUID ČSSZ jako opravu nepřijme, znovu ho neodesílejte."
+        ],
+        "jmhz_protocol_correction_form_unpaired": [
+          "V protokolu najděte zaměstnance (IK MPSV a ID PPV), jehož formulář ČSSZ v předchozím podání zamítla nebo v něm nebyl uvedený.",
+          "V opravném podání s GUID řádného podání se formulář takového zaměstnance posílá jako nový: s novým GUID součásti a typem řádný.",
+          "Opravné podání připravte ve Stavu odeslání znovu a odešlete."
+        ],
+        "jmhz_protocol_regular_submission_duplicate": [
+          "Za toto období už ČSSZ eviduje řádné podání. Další řádné podání nepřijme a nezpracuje.",
+          "Ve Stavu odeslání otevřete původní řádné podání a změny pošlete jako opravné podání s jeho GUID."
+        ],
+        "jmhz_protocol_tax_withholding_with_declaration": [
+          "Na kartě zaměstnance v zákonné evidenci zkontrolujte prohlášení poplatníka. S podepsaným prohlášením se daň vybírá zálohou, ne srážkou podle zvláštní sazby.",
+          "Opravte prohlášení nebo daňový režim pracovního vztahu a mzdový běh přepočítejte.",
+          "Pošlete opravné podání. Atributy, které protokol označil jako chybně vyplněné, u dotčených formulářů nesmí být vyplněné vůbec, ani nulou."
+        ],
+        "jmhz_protocol_tax_nonresident_with_declaration": [
+          "Ověřte, že je pro zaměstnance podaná registrace REGZEC akce 3 (změna) s kódem státu daňové rezidence (atribut 10068) „CZ“ a platností změny (atribut 10459) od 1. 1. 2026, nebo ode dne nástupu. Změnu podáte v registraci na kartě pracovního vztahu.",
+          "Po přijetí REGZEC akce 3 počkejte nejméně 48 hodin, než se údaj propíše do systémů ČSSZ. Hlášení odeslané dřív skončí stejnou chybou.",
+          "Odešlo-li hlášení příliš brzy, stačí po 48 hodinách opravné podání jen se souhrnnou částí: GUID původního řádného podání, typ O a aktuální hodnoty. Formuláře zaměstnanců ani PVPOJ se znovu neposílají.",
+          "Zůstává-li zaměstnanec nerezidentem s prohlášením, smí uplatnit jen základní slevu na poplatníka. Ostatní slevy a zvýhodnění na kartě zaměstnance zrušte a běh přepočítejte."
+        ],
+        "jmhz_protocol_tax_reliefs_without_declaration": [
+          "Má-li zaměstnanec na slevy nárok, nejdřív mu na kartě zaměstnance v zákonné evidenci doplňte podepsané prohlášení poplatníka a běh přepočítejte.",
+          "Bez prohlášení se slevy ani daňové zvýhodnění neuplatňují, ani s nulovou hodnotou.",
+          "Pošlete opravné podání. Atributy, které protokol označil jako chybně vyplněné, u dotčených formulářů nesmí být vyplněné vůbec, ani nulou."
+        ],
+        "jmhz_protocol_tax_advance_with_withholding": [
+          "Na kartě zaměstnance zkontrolujte prohlášení poplatníka a daňový režim pracovního vztahu. Bez prohlášení a se srážkovou daní se zálohová daň neuvádí.",
+          "Po opravě údajů mzdový běh přepočítejte.",
+          "Pošlete opravné podání. Atributy, které protokol označil jako chybně vyplněné, u dotčených formulářů nesmí být vyplněné vůbec, ani nulou."
+        ],
+        "jmhz_protocol_tax_withholding_with_advance": [
+          "Na kartě zaměstnance zkontrolujte prohlášení poplatníka a daňový režim pracovního vztahu. Při dani vybírané zálohou se srážková daň neuvádí.",
+          "Po opravě údajů mzdový běh přepočítejte.",
+          "Pošlete opravné podání. Atributy, které protokol označil jako chybně vyplněné, u dotčených formulářů nesmí být vyplněné vůbec, ani nulou."
+        ],
+        "jmhz_protocol_employment_not_found_at_cssz": [
+          "Na kartě pracovního vztahu zkontrolujte ID PPV v části Identifikátory přidělené ČSSZ. Musí se shodovat s protokolem o přijetí přihlášky nebo s ePortálem ČSSZ.",
+          "Není-li zaměstnání u ČSSZ zaregistrované, podejte přihlášku zaměstnance (REGZEC). Je-li podaná, ověřte, že ji ČSSZ přijala, a počkejte, než se registrace propíše.",
+          "Potom pošlete opravné podání s GUID řádného podání."
+        ],
+        "jmhz_protocol_person_not_found_at_cssz": [
+          "Na kartě pracovního vztahu zkontrolujte IK MPSV (OIČ) v části Identifikátory přidělené ČSSZ. Musí se shodovat s protokolem o přijetí přihlášky nebo s ePortálem ČSSZ.",
+          "Není-li zaměstnanec u ČSSZ zaregistrovaný, podejte přihlášku zaměstnance (REGZEC). Je-li podaná, ověřte, že ji ČSSZ přijala, a počkejte, než se registrace propíše.",
+          "Potom pošlete opravné podání s GUID řádného podání."
+        ]
+      }
+    },
     "jmhz_gate": {
       "unlabelled": "Nález bez popisu. Spusťte test hlášení znovu; pokud zůstane, kontaktujte podporu.",
       "remediation": {
         "employment_terms": "Otevřít podmínky vztahu",
         "employment_profile": "Otevřít evidenci pro ČSSZ",
         "employment_identity": "Doplnit identifikátory ČSSZ",
+        "registration": "Otevřít registraci zaměstnání",
         "employee_identity": "Otevřít osobní údaje",
         "statutory_evidence": "Otevřít zákonnou evidenci osoby",
         "dependants": "Otevřít vyživované osoby",
@@ -11071,6 +11132,7 @@
         "employment_terms": "Opravte údaj v podmínkách pracovního vztahu na kartě zaměstnance. Údaj zmrazený ve mzdovém běhu se projeví až po přepočtu běhu, potom hlášení připravte znovu.",
         "employment_profile": "Na kartě pracovního vztahu v části Evidence pro ČSSZ doplňte odpověď a hlášení připravte znovu.",
         "employment_identity": "Na kartě pracovního vztahu opište OIČ a ID PPV z protokolu ČSSZ, případně nejdřív podejte přihlášku zaměstnance.",
+        "registration": "Na kartě pracovního vztahu v části Registrace podejte nebo doplňte registraci zaměstnance (REGZEC) a po jejím přijetí hlášení připravte znovu.",
         "employee_identity": "Na kartě zaměstnance doplňte osobní údaje (jméno, datum narození, rodné číslo) a hlášení připravte znovu.",
         "statutory_evidence": "Na kartě zaměstnance v zákonné evidenci doplňte prohlášení poplatníka nebo slevy a běh přepočítejte.",
         "dependants": "Na kartě zaměstnance u vyživovaných osob doplňte údaje dítěte nebo nároku a běh přepočítejte.",
@@ -11557,6 +11619,16 @@
         "jmhz_protocol_correlation_mismatch": "Protokol o zpracování patří jinému podání, než ke kterému byl načten. Načtěte protokol patřící tomuto podání.",
         "jmhz_protocol_correlation_missing": "Ověřený protokol neuvádí identifikátor CorrelationID, takže ho nelze bezpečně přiřadit k tomuto podání.",
         "jmhz_protocol_correlation_unknown": "Podání nemá uložený identifikátor CorrelationID, takže k němu nelze protokol bezpečně přiřadit.",
+        "jmhz_protocol_correction_guid_invalid": "Chyba 219: opravné podání nese chybný GUID. Obvykle bylo odeslané s novým GUID místo GUID řádného, částečně přijatého podání.",
+        "jmhz_protocol_correction_form_unpaired": "Chyba 238: v opravném podání je formulář zaměstnance, k jehož dvojici IK MPSV a ID PPV ČSSZ nenašla formulář v předchozím podání. Formuláře dříve zamítnuté nebo neuvedené se v opravném podání posílají s novým GUID součásti a typem řádný.",
+        "jmhz_protocol_employment_not_found_at_cssz": "Kontrola 262: ČSSZ nenašla pojistný vztah s uvedeným ID PPV. Zaměstnání u ČSSZ není zaregistrované, registrace se ještě nepropsala, nebo je ID PPV opsané chybně.",
+        "jmhz_protocol_person_not_found_at_cssz": "Kontrola 263: ČSSZ nenašla pojistný vztah s uvedeným IK MPSV (OIČ). Zaměstnanec u ČSSZ není zaregistrovaný, registrace se ještě nepropsala, nebo je IK MPSV opsané chybně.",
+        "jmhz_protocol_regular_submission_duplicate": "Chyba 326: za jedno rozhodné období smí existovat jen jedno řádné podání. Další řádné podání ČSSZ nepřijme, změny se posílají opravným podáním s GUID řádného.",
+        "jmhz_protocol_tax_advance_with_withholding": "Chyba 245: zaměstnanec nemá prohlášení poplatníka a příjem podléhá srážkové dani, hlášení ale vyplňuje atributy zálohové daně.",
+        "jmhz_protocol_tax_nonresident_with_declaration": "Chyba 243: daňový nerezident s podepsaným prohlášením smí uplatnit jen základní slevu na poplatníka, ne další slevy, daňové zvýhodnění ani zvláštní sazbu daně.",
+        "jmhz_protocol_tax_reliefs_without_declaration": "Chyba 244: zaměstnanec nemá prohlášení poplatníka, hlášení ale vyplňuje atributy slev na dani nebo daňového zvýhodnění.",
+        "jmhz_protocol_tax_withholding_with_advance": "Chyba 325: daň se vybírá zálohou, hlášení ale vyplňuje atributy srážkové daně.",
+        "jmhz_protocol_tax_withholding_with_declaration": "Chyba 242: zaměstnanec má podepsané prohlášení poplatníka, hlášení ale uplatňuje srážkovou daň podle zvláštní sazby.",
         "jmhz_protocol_digest_algorithm_unknown": "Podepsaná časová značka v protokolu neuvádí algoritmus otisku, nebo je nedoložený. Obraťte se na podporu.",
         "jmhz_protocol_digest_mismatch": "Otisk podepsaný ČSSZ neodpovídá obsahu protokolu; protokol byl po podpisu změněn. Obraťte se na podporu.",
         "jmhz_protocol_employment_identifier_mismatch": "Identifikátor pracovního vztahu (ID PPV) v protokolu ČSSZ neodpovídá evidenci. Zkontrolujte identifikátory na kartě pracovního vztahu.",
