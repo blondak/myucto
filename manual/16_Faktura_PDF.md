@@ -359,6 +359,35 @@ Koncepty veřejný odkaz nemají — stránka je dostupná až po vystavení dok
 > Kdo odkaz má, fakturu vidí; pokud se dostal do nesprávných rukou, vygenerujte
 > nový odkaz (starý tím zneplatníte).
 
+### 16.5.1 Vypnutí web faktury na instalaci
+
+Odkaz vede na adresu `app.url`. Běží-li server jen v domácí nebo firemní síti
+či za VPN, klient ho z e-mailu neotevře. Provozovatel proto může web fakturu
+pro celou instalaci vypnout v `cfg.local.php` (nebo `cfg.php`):
+
+```php
+return [
+    'invoices' => [
+        'public_links' => false,
+    ],
+];
+```
+
+Pokud už soubor obsahuje jiné volby, doplňte klíč do existujícího pole
+`invoices`. Alternativou je proměnná prostředí `MYINVOICE_INVOICE_PUBLIC_LINKS=0`.
+Chybějící volba znamená zapnuto. Po změně znovu načtěte aplikaci (v Dockeru
+kontejner znovu vytvořte, aby se nová konfigurace načetla).
+
+S vypnutou web fakturou:
+
+- e-mail s fakturou neobsahuje tlačítko **Zobrazit fakturu online** ani textový
+  odkaz — PDF zůstává v příloze;
+- v detailu faktury se nenabízí tlačítko **Web faktura**;
+- dřív rozeslané odkazy přestanou fungovat (stránka hlásí neplatný odkaz) a
+  znovu fungují po opětovném zapnutí; tokeny se vypnutím nemažou.
+
+Nastavení platí pro všechny firmy v instalaci.
+
 ## 16.6 Historie PDF
 
 V detailu faktury je sekce **Historie PDF** — seznam všech archivovaných

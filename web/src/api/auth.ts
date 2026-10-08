@@ -191,6 +191,8 @@ export interface MeResponse extends AuthSessionContract {
   domain_context?: DomainContext | null
   /** Smí se podávat do testovacího prostředí úřadů? Jen ve vývojové instalaci. */
   submission_test_environment_allowed?: boolean
+  /** Je na instalaci zapnutá web faktura (veřejný odkaz na fakturu)? */
+  invoice_public_links_enabled?: boolean
 }
 
 export interface DomainLoginStart {

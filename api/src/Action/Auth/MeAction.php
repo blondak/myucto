@@ -17,6 +17,7 @@ use MyInvoice\Security\PermissionCatalog;
 use MyInvoice\Security\PermissionResolver;
 use MyInvoice\Service\Auth\MfaOfferService;
 use MyInvoice\Service\Invoice\DefaultInvoiceNote;
+use MyInvoice\Service\Invoice\InvoicePublicLinkFeature;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\SessionLockPolicy;
 use MyInvoice\Service\Tenant\TenantDomainContext;
@@ -261,6 +262,8 @@ final class MeAction
             // Výběr testovacího prostředí podání úřadům (ČSSZ, ZP, ISDS). Mimo
             // vývojovou instalaci ho UI skryje a backend test odmítne.
             'submission_test_environment_allowed' => (new SubmissionEnvironmentPolicy($this->config))->testAllowed(),
+            // Web faktura (veřejný odkaz) — vypnutá instalace UI tlačítko skryje.
+            'invoice_public_links_enabled' => (new InvoicePublicLinkFeature($this->config))->isEnabled(),
         ]);
     }
 

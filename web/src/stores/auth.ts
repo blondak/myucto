@@ -23,6 +23,8 @@ export const useAuthStore = defineStore('auth', () => {
   // Fail-closed: dokud server výslovně nepotvrdí vývojovou instalaci, podává se
   // jen do produkce a výběr testovacího prostředí se nenabízí.
   const submissionTestEnvironmentAllowed = ref(false)
+  // Web faktura je výchozí funkce; skrývá se jen na výslovné false ze serveru.
+  const invoicePublicLinksEnabled = ref(true)
   const lockedSession = ref<SessionState | null>(null)
   const profileHydrated = ref(false)
   const domainContext = ref<DomainContext | null>(null)
@@ -125,6 +127,7 @@ export const useAuthStore = defineStore('auth', () => {
       permissionCatalogVersion.value = data.permission_catalog_version || ''
       license.value = data.license || null
       submissionTestEnvironmentAllowed.value = data.submission_test_environment_allowed === true
+      invoicePublicLinksEnabled.value = data.invoice_public_links_enabled !== false
       lockedSession.value = null
       profileHydrated.value = true
       domainContext.value = data.domain_context && domainContext.value
@@ -262,6 +265,7 @@ export const useAuthStore = defineStore('auth', () => {
     loading,
     license,
     submissionTestEnvironmentAllowed,
+    invoicePublicLinksEnabled,
     lockedSession,
     profileHydrated,
     domainContext,

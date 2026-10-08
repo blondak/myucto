@@ -11,6 +11,7 @@ use MyInvoice\Repository\InvoiceAttachmentRepository;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Approval\ApprovalTokenValidator;
+use MyInvoice\Service\Invoice\InvoicePublicLinkFeature;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Mail\InvoiceEmailVarsBuilder;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
@@ -44,10 +45,16 @@ final class PublicInvoiceGetAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly PublicTenantGuard $tenantGuard,
+        private readonly InvoicePublicLinkFeature $feature,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
     {
+        // Vypnutá web faktura = odkaz neexistuje (stejná 404 jako neplatný token).
+        if (!$this->feature->isEnabled()) {
+            return Json::error($response, 'not_found', 'Tento odkaz není platný.', 404);
+        }
+
         $token = (string) ($args['token'] ?? '');
         if (!ApprovalTokenValidator::isValidFormat($token)) {
             return Json::error($response, 'invalid_token', 'Neplatný odkaz.', 404);
