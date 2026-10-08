@@ -178,6 +178,111 @@ final class JmhzEldpEvidenceSnapshotServiceTest extends TestCase
         self::assertSame($this->employmentId, $payload['employment_id']);
     }
 
+    /**
+     * Zaměstnanec po dosažení důchodového věku, který důchod nepobírá: měsíční
+     * hlášení nese kód D. Den dosažení věku je jen v zákonné evidenci osoby —
+     * dřív ho zdroj řezu nenesl a hlášení odešlo s „1++".
+     */
+    public function testPensionAgeFromStatutoryEvidenceGivesCodeD(): void
+    {
+        $this->insertPensionAge($this->employeeId(), '2026-03-15');
+
+        $snapshot = $this->preparedSnapshot('synthetic-preparation-pension-age');
+
+        $section = $snapshot['payload']['eldp_sections'][0];
+        self::assertSame('1D+', $section['code']);
+        self::assertNull($section['deducted_days_total']);
+        self::assertSame(
+            ['early_pension_from' => null, 'full_pension_paid_from' => null, 'pension_age_reached_on' => '2026-03-15'],
+            $snapshot['payload']['source_evidence']['pension_status'],
+        );
+    }
+
+    /**
+     * Poživatel předčasného starobního důchodu před dosažením důchodového věku:
+     * kód D, ale odečtené doby nemá (předčasný důchod je důchod).
+     */
+    public function testEarlyPensionerFromStatutoryEvidenceGivesCodeDWithoutDeductedDays(): void
+    {
+        $employeeId = $this->employeeId();
+        $this->insertPensionAge($employeeId, '2027-05-01');
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_pensions
+                (supplier_id, employee_id, pension_type_code, early_retirement,
+                 reduced_retirement_age, effective_from)
+             VALUES (?, ?, "1", 1, 0, "2026-02-01")',
+        )->execute([$this->supplierId, $employeeId]);
+
+        $snapshot = $this->preparedSnapshot('synthetic-preparation-early-pension');
+
+        $section = $snapshot['payload']['eldp_sections'][0];
+        self::assertSame('1D+', $section['code']);
+        self::assertNull($section['deducted_days_total']);
+        self::assertSame('2026-02-01', $snapshot['payload']['source_evidence']['pension_status']['early_pension_from']);
+    }
+
+    /**
+     * Zmrazený řez se změnou evidence nemění: hlášení za už připravený měsíc
+     * zůstane, jak bylo, i když účetní důchodový věk doplní později.
+     */
+    public function testFrozenSnapshotIgnoresLaterPensionEvidence(): void
+    {
+        $first = $this->preparedSnapshot('synthetic-preparation-before-pension-age');
+        self::assertSame('1++', $first['payload']['eldp_sections'][0]['code']);
+
+        $this->insertPensionAge($this->employeeId(), '2026-03-15');
+        $again = $this->service->snapshotForPreparation($this->supplierId, 'test', $this->revisionId, $this->employmentId);
+
+        self::assertIsArray($again);
+        self::assertSame($first['id'], $again['id']);
+        self::assertSame('1++', $again['payload']['eldp_sections'][0]['code']);
+    }
+
+    /** @return array<string,mixed> */
+    private function preparedSnapshot(string $key): array
+    {
+        $preparation = $this->preparations->freeze(
+            $this->supplierId,
+            $this->revisionId,
+            'test',
+            $key,
+            $this->createdBy,
+        );
+        self::assertNotContains(
+            'jmhz_eldp_evidence_missing',
+            array_column($preparation['issues'], 'code'),
+            CanonicalJson::encode(array_column($preparation['issues'], 'code')),
+        );
+        $snapshot = $this->service->snapshotForPreparation(
+            $this->supplierId,
+            'test',
+            $this->revisionId,
+            $this->employmentId,
+        );
+        self::assertIsArray($snapshot);
+
+        return $snapshot;
+    }
+
+    private function employeeId(): int
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT employee_id FROM payroll_employments WHERE supplier_id = ? AND id = ?',
+        );
+        $statement->execute([$this->supplierId, $this->employmentId]);
+
+        return (int) $statement->fetchColumn();
+    }
+
+    private function insertPensionAge(int $employeeId, string $reachedOn): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_pension_age
+                (supplier_id, employee_id, basis, effective_from)
+             VALUES (?, ?, "statutory_table", ?)',
+        )->execute([$this->supplierId, $employeeId, $reachedOn]);
+    }
+
     public function testPreparationKeepsAbsenceExceptionFailClosedAndActionable(): void
     {
         [, $revisionId] = $this->source($this->db->pdo(), true, '2026-08-01');

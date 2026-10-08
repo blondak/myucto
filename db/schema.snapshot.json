@@ -954,7 +954,8 @@
         "1970_payroll_discount_intent_predecessor.sql",
         "1971_payroll_sickness_case_slovak.sql",
         "1972_payroll_health_coverage_employee_notice.sql",
-        "1973_payroll_eldp_deducted_days.sql"
+        "1973_payroll_eldp_deducted_days.sql",
+        "1974_payroll_person_pension_evidence.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -14255,6 +14256,82 @@
                 "chk_payroll_identity_birth_country": "`birth_country_code` is null or `birth_country_code` regexp '^[A-Z]{2}$'",
                 "chk_payroll_identity_citizenship": "`citizenship_country_code` is null or `citizenship_country_code` regexp '^[A-Z]{2}$'",
                 "chk_payroll_identity_interval": "`effective_to` is null or `effective_to` >= `effective_from`"
+            }
+        },
+        "payroll_person_pension_age": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "basis": "enum('statutory_table','cssz_information','employee_declaration') NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "effective_from": "date NOT NULL",
+                "effective_to": "date NULL DEFAULT NULL",
+                "employee_id": "bigint(20) unsigned NOT NULL",
+                "evidence_note": "varchar(500) NULL DEFAULT NULL",
+                "evidence_reference": "varchar(500) NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_pp_pension_age_created_by": "BTREE (created_by)",
+                "fk_pp_pension_age_updated_by": "BTREE (updated_by)",
+                "uq_pp_pension_age_employee": "UNIQUE BTREE (supplier_id, employee_id)",
+                "uq_pp_pension_age_supplier_id": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_pp_pension_age_created_by": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_pp_pension_age_employee": "(supplier_id, employee_id) -> payroll_employees (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_pp_pension_age_updated_by": "(updated_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": {
+                "chk_pp_pension_age_open": "`effective_to` is null"
+            }
+        },
+        "payroll_person_pensions": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "early_retirement": "tinyint(1) NOT NULL DEFAULT 0",
+                "effective_from": "date NOT NULL",
+                "effective_to": "date NULL DEFAULT NULL",
+                "employee_id": "bigint(20) unsigned NOT NULL",
+                "evidence_note": "varchar(500) NULL DEFAULT NULL",
+                "evidence_reference": "varchar(500) NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "pension_type_code": "varchar(3) NOT NULL",
+                "reduced_retirement_age": "tinyint(1) NOT NULL DEFAULT 0",
+                "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_pp_pensions_created_by": "BTREE (created_by)",
+                "fk_pp_pensions_updated_by": "BTREE (updated_by)",
+                "idx_pp_pensions_effective": "BTREE (supplier_id, employee_id, effective_from, effective_to)",
+                "uq_pp_pensions_start": "UNIQUE BTREE (supplier_id, employee_id, pension_type_code, effective_from)",
+                "uq_pp_pensions_supplier_id": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_pp_pensions_created_by": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_pp_pensions_employee": "(supplier_id, employee_id) -> payroll_employees (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_pp_pensions_updated_by": "(updated_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": {
+                "chk_pp_pensions_early_old_age": "`early_retirement` = 0 or `pension_type_code` = '1'",
+                "chk_pp_pensions_flags": "`early_retirement` in (0,1) and `reduced_retirement_age` in (0,1)",
+                "chk_pp_pensions_interval": "`effective_to` is null or `effective_to` >= `effective_from`",
+                "chk_pp_pensions_type": "`pension_type_code` in ('1','2','8','A','B','C')"
             }
         },
         "payroll_person_social_discount_claims": {

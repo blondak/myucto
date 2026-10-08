@@ -194,6 +194,64 @@ final class RegistrationImportServiceTest extends TestCase
         }
     }
 
+    /**
+     * Pobíraný důchod z přihlášky (`pens`) se propíše do zákonné evidence osoby,
+     * odkud ho čte ELDP i JMHZ. Do vyplněné evidence import nesahá.
+     */
+    public function testRegistrationPensionFillsEmptyStatutoryEvidenceOnly(): void
+    {
+        $birthNumber = RegistrationXmlFixtures::birthNumber('1962-04-03', 'male', 3);
+        $files = [$this->file('a1-pens.xml', RegistrationXmlFixtures::regzecA1([
+            'bno' => $birthNumber,
+            'birth_date' => '1962-04-03',
+            'sex' => 'M',
+            'first' => 'Karel',
+            'last' => 'Zkušební',
+            'pens' => '<pens typ="1" tak="2025-11-12" early="A"/>',
+        ]))];
+
+        $record = $this->imports->preview($this->supplierId, 'test', $files)['records'][0];
+        self::assertContains('pension', array_column($record['changes'], 'field'), json_encode($record, JSON_UNESCAPED_UNICODE));
+        $applied = $this->apply($files, [$record['key']]);
+        $result = $applied['results'][0];
+        self::assertSame('applied', $result['status'], (string) $result['message']);
+        self::assertContains('pension', $result['operations'], (string) $result['message']);
+
+        $employeeId = (int) $result['employee_id'];
+        $pension = $this->row(
+            'SELECT pension_type_code, early_retirement, reduced_retirement_age, effective_from, effective_to
+               FROM payroll_person_pensions WHERE supplier_id = ? AND employee_id = ?',
+            [$this->supplierId, $employeeId],
+        );
+        self::assertSame(['1', 1, 0, '2025-11-12', null], [
+            (string) $pension['pension_type_code'],
+            (int) $pension['early_retirement'],
+            (int) $pension['reduced_retirement_age'],
+            (string) $pension['effective_from'],
+            $pension['effective_to'],
+        ]);
+
+        // Jiný důchod v další větě vyplněnou evidenci nepřepíše, jen ho ohlásí.
+        $changed = [$this->file('a1-pens-2.xml', RegistrationXmlFixtures::regzecA1([
+            'bno' => $birthNumber,
+            'birth_date' => '1962-04-03',
+            'sex' => 'M',
+            'first' => 'Karel',
+            'last' => 'Zkušební',
+            'pens' => '<pens typ="8" tak="2026-01-01"/>',
+        ]))];
+        $again = $this->imports->preview($this->supplierId, 'test', $changed)['records'][0];
+        self::assertNotContains('pension', array_column($again['changes'], 'field'));
+        self::assertNotEmpty(array_filter(
+            $again['warnings'],
+            static fn (string $warning): bool => str_contains($warning, 'Pobíraný důchod'),
+        ));
+        self::assertSame(1, (int) $this->scalar(
+            'SELECT COUNT(*) FROM payroll_person_pensions WHERE supplier_id = ? AND employee_id = ?',
+            [$this->supplierId, $employeeId],
+        ));
+    }
+
     public function testExistingPersonGetsInsurerChangeFromRegistration(): void
     {
         $birthNumber = RegistrationXmlFixtures::birthNumber('1990-01-15', 'female', 1);

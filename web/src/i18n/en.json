@@ -5751,7 +5751,10 @@
           "minimum_pension_age_declaration": "Declaration of reaching pension age without pension entitlement",
           "minimum_osvc_advance_confirmation": "Insurer confirmation of self-employed advances at least from the minimum",
           "minimum_foster_reward_decision": "Foster carer reward decision",
-          "minimum_sickness_certificate": "Certificate of sickness, quarantine or caring for a family member"
+          "minimum_sickness_certificate": "Certificate of sickness, quarantine or caring for a family member",
+          "pension_age_statutory_table": "Calculated from the annex to Act No. 155/1995 Coll.",
+          "pension_age_cssz_information": "Pension insurance statement or notice from the CSSA (ČSSZ)",
+          "pension_age_employee_declaration": "Employee's declaration"
         },
         "issue": {
           "period_required": "Fill in when the record starts.",
@@ -5775,12 +5778,23 @@
           "amount_invalid": "“{label}” must be a non-negative amount in CZK with at most two decimals (e.g. 15000 or 15000.50)."
         },
         "title": "Statutory evidence of the person",
-        "subtitle": "Tax declaration, tax residence, tax credits, social and health insurance jurisdiction, the working pensioner discount and exceptions from the health insurance minimum.",
+        "subtitle": "Tax declaration, tax residence, tax credits, social and health insurance jurisdiction, the working pensioner discount, retirement age and pension received, and exceptions from the health insurance minimum.",
         "employer_reference_placeholder": "e.g. employer:company-b",
         "currency_czk": "CZK",
         "current_no_exemption": "No exception",
         "current_no_other_employer": "No other employer",
         "current_discount_not_claimed": "Not claimed (no record)",
+        "current_pension_age_unknown": "Not entered",
+        "current_no_pension": "None received (no record)",
+        "pension_age_suggestion": "Based on the date of birth, the retirement age is reached on {day} (section 32 and annex 1 of Act No. 155/1995 Coll.). The suggested day is prefilled in a new record; check it, the calculation does not know a reduced retirement age.",
+        "pension_age_no_suggestion": "The retirement age does not follow unambiguously from the date of birth (for women it depends on the number of children raised, special groups have a reduced age). Enter it according to the CSSA (ČSSZ) notice.",
+        "effective_from_label": {
+          "social_pension_age": "Retirement age reached on",
+          "social_pensions": "Received from"
+        },
+        "effective_to_label": {
+          "social_pensions": "Received until"
+        },
         "blocked_badge": "all filled in | 1 missing item | {count} missing items | {count} missing items",
         "blockers_title": "Missing for this month:",
         "blockers_consequence": "Until these are filled in, the payroll run cannot compute the statutory part for this person and ends in manual review.",
@@ -5841,7 +5855,9 @@
           "health_coverages": "Health insurance jurisdiction",
           "health_month_evidence": "Monthly evidence of the health minimum",
           "health_minimum_reductions": "Exceptions from the health insurance minimum",
-          "health_other_employer_bases": "Assessment base with another employer"
+          "health_other_employer_bases": "Assessment base with another employer",
+          "social_pension_age": "Retirement age",
+          "social_pensions": "Pension received"
         },
         "section_hint": {
           "tax_declarations": "Decides whether monthly credits and allowances apply, or tax is withheld without them.",
@@ -5852,7 +5868,9 @@
           "health_coverages": "Whether the person is subject to Czech health insurance and which insurer they are registered with.",
           "health_month_evidence": "Left empty means the employee pays the top-up to the minimum assessment base — that is what the law says. Add a record only for the exception: an obstacle on the employer's side, or the choice of employer when there are several.",
           "health_minimum_reductions": "Who the minimum assessment base does not apply to (Section 3(8) of Act No. 592/1992 Coll.): a state-insured person (pensioner, student, parent on parental leave…), a ZTP or ZTP/P card holder, someone who reached pension age without pension entitlement, a self-employed person paying advances at least from the minimum, and someone receiving only a foster carer reward. If the exception starts during a month, the minimum is reduced proportionally by days, so it is entered with an exact date. A documented working pensioner discount, the ZTP/P tax credit, sickness, quarantine, caring, maternity and parental leave are applied by the calculation itself; you do not need to enter them here.",
-          "health_other_employer_bases": "With concurrent employments the minimum is assessed from the sum of the assessment bases with all employers. Enter the base the employee had with another employer for the month; which of them pays the top-up is set in the monthly evidence of the health minimum."
+          "health_other_employer_bases": "With concurrent employments the minimum is assessed from the sum of the assessment bases with all employers. Enter the base the employee had with another employer for the month; which of them pays the top-up is set in the monthly evidence of the health minimum.",
+          "social_pension_age": "The day the employee reached or will reach retirement age. From that day the activity has code D both in the pension insurance record and in the monthly report, and if no old-age pension is received, deducted periods are reported. Leave empty if you do not know the day; code D then does not arise.",
+          "social_pensions": "The pension the employee receives, with its kind from the CSSA (ČSSZ) code list (the same as in the REGZEC registration). An early old-age pension gives code D; an old-age pension ends deducted periods from the first whole month of payment and, from 2025, also the annual pension insurance record. Importing REGZEC registrations fills it into empty records."
         },
         "field": {
           "status": "Status",
@@ -5879,7 +5897,11 @@
           "employer_reference": "Employer label",
           "assessment_base_minor_units": "Monthly assessment base",
           "employment_from": "Employed from",
-          "employment_to": "Employed until"
+          "employment_to": "Employed until",
+          "basis": "Source",
+          "pension_type_code": "Kind of pension",
+          "early_retirement": "Early old-age pension",
+          "reduced_retirement_age": "Reduced retirement age"
         },
         "option": {
           "status": {
@@ -5932,6 +5954,27 @@
             "foster_reward_only": "Foster carer reward only",
             "sickness_care_or_quarantine": "Sickness, quarantine or caring",
             "unverified": "Unverified"
+          },
+          "basis": {
+            "statutory_table": "From the statutory table (annex 1 of Act No. 155/1995 Coll.)",
+            "cssz_information": "According to the CSSA (ČSSZ)",
+            "employee_declaration": "According to the employee's declaration"
+          },
+          "pension_type_code": {
+            "1": "Old-age",
+            "2": "Disability, 3rd degree",
+            "8": "Disability, 1st or 2nd degree",
+            "A": "Foreign, old-age type",
+            "B": "Foreign, disability 3rd degree type",
+            "C": "Foreign, disability 1st or 2nd degree type"
+          },
+          "early_retirement": {
+            "0": "No",
+            "1": "Yes"
+          },
+          "reduced_retirement_age": {
+            "0": "No",
+            "1": "Yes"
           }
         },
         "edit_section": "Edit",
@@ -8241,7 +8284,7 @@
       "authorityRequestDueOnHint": "From 2027 the deadline for a pension record on request is no longer set by law but by the request itself. Copy it from the request.",
       "pension": {
         "title": "Employee pension details",
-        "description": "The ELDP code and whether the record is kept at all depend on pension details that the payroll revision does not carry. Fill in what happened in the reported year; an empty field means it did not happen.",
+        "description": "The ELDP code and whether the record is kept at all depend on pension details. Their source is the statutory records on the person card (sections Retirement age and Pension received), the same as for the monthly report. The fields here are only a check: an empty field means \"as recorded\", a filled one must match the records.",
         "ageReachedOn": "Date retirement age was reached",
         "ageReachedOnHint": "Only if it happened by the end of the reported year. From this date the activity has code D (e.g. 1D+).",
         "earlyPensionFrom": "Recipient of early old-age pension from",
@@ -8249,7 +8292,7 @@
         "fullPensionPaidFrom": "First month of full old-age pension payment",
         "fullPensionPaidFromHint": "From 2025 no pension record is kept for a recipient of a full old-age pension; months from this month are left out of the record.",
         "foreignInsurance": "The employee participates or participated in pension insurance abroad (the record is then kept even for a full pension recipient).",
-        "confirm": "I confirm the employee's pension details for the reported year (empty fields mean they did not happen)."
+        "confirm": "I confirm the employee's pension details for the reported year (empty fields are taken from the person's statutory records)."
       },
       "noSendNotice": "This control XML is not the official standalone ELDP submission message. The application will neither send it nor queue it in the data box.",
       "preparedCreated": "The record sheet was built as a control document.",
@@ -11101,6 +11144,7 @@
         "eldp_not_kept_full_old_age_pension": "No pension record is kept for this year: the employee is entitled to payment of the old-age pension in full and does not participate in pension insurance abroad.",
         "eldp_pension_age_mid_month_unsupported": "The ELDP code changes in the middle of a month (retirement age reached or early old-age pension) and the application does not keep an assessment base for part of a month. File the pension record outside the application.",
         "eldp_pension_status_conflict": "The statutory records show a verified working pensioner discount, but the pension record confirmation states no old-age pension. Complete the pension details in the form.",
+        "eldp_pension_status_evidence_mismatch": "The pension details in the record confirmation differ from the person's statutory records. Correct the records on the person card (sections Retirement age and Pension received), or leave the confirmation fields empty.",
         "eldp_pension_status_invalid": "The employee's pension details are not in a valid format. Correct them in the pension record form.",
         "eldp_pension_status_not_confirmed": "Confirm the employee's pension details in the form: retirement age, early or full old-age pension, and participation in insurance abroad.",
         "jmhz_eldp_section18_days_unresolved": "Excluded sickness insurance days (section 18(7)) cannot be split for this employment because the sickness is frozen in the payroll run without the wage compensation window. Create a corrective revision of the run and approve it again.",

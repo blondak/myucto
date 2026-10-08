@@ -244,6 +244,15 @@ final class RegistrationImportWriter
                     $userId,
                 ));
             }
+            if (is_array($steps['pension'] ?? null) && $employeeId !== null) {
+                $this->optional('Pobíraný důchod', $notes, $operations, 'pension', fn () => $this->writePension(
+                    $supplierId,
+                    $employeeId,
+                    $steps['pension'],
+                    'regzec:' . substr((string) $plan['_file_sha256'], 0, 16) . ':' . $record->sequence,
+                    $userId,
+                ));
+            }
             if (is_array($steps['health_insurer']) && $employeeId !== null) {
                 $this->optional('Zdravotní pojišťovna', $notes, $operations, 'health_insurer', fn () => $this->writeHealthInsurer(
                     $supplierId,
@@ -558,6 +567,39 @@ final class RegistrationImportWriter
             'country_code' => $residence['country_code'],
             'evidence_reference' => $reference,
             'effective_from' => $from ?? $today,
+            'effective_to' => null,
+            'evidence_note' => null,
+        ]];
+        $this->statutory->save($supplierId, $employeeId, ['sections' => $sections], $today, $userId, null, null);
+    }
+
+    /**
+     * Pobíraný důchod z věty do zákonné evidence osoby — jen do prázdné řady;
+     * evidenci, kterou mezitím někdo vyplnil, import nepřepisuje.
+     *
+     * @param array{pension_type_code:string,early_retirement:bool,reduced_retirement_age:bool,effective_from:string} $pension
+     */
+    private function writePension(
+        int $supplierId,
+        int $employeeId,
+        array $pension,
+        string $reference,
+        ?int $userId,
+    ): void {
+        $today = date('Y-m-d');
+        $view = $this->statutory->editorView($supplierId, $employeeId, $today)
+            ?? throw new \DomainException('Zákonná evidence zaměstnance nebyla nalezena.');
+        /** @var array<string,list<array<string,mixed>>> $sections */
+        $sections = $view['sections'];
+        if (($sections['social_pensions'] ?? []) !== []) {
+            return;
+        }
+        $sections['social_pensions'] = [[
+            'pension_type_code' => $pension['pension_type_code'],
+            'early_retirement' => $pension['early_retirement'] ? '1' : '0',
+            'reduced_retirement_age' => $pension['reduced_retirement_age'] ? '1' : '0',
+            'evidence_reference' => $reference,
+            'effective_from' => $pension['effective_from'],
             'effective_to' => null,
             'evidence_note' => null,
         ]];

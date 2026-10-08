@@ -227,12 +227,28 @@ const personInsurerCode = computed(() => {
 
 const defaultInsurerCode = computed(() => personInsurerCode.value ?? employerInsurerCode.value)
 
+/** Den dosažení důchodového věku, je-li z data narození jednoznačný (server). */
+const pensionAgeSuggestion = computed(() => evidence.value?.derived?.pension_age_suggestion ?? null)
+
 function contextFor(row: PayrollStatutoryEvidenceRow): StatutoryFormContext {
   return {
     effectiveOn: effectiveOn.value,
     defaultInsurerCode: defaultInsurerCode.value,
     employerReferences: employerReferencesFor(row),
+    pensionAgeSuggestion: pensionAgeSuggestion.value,
   }
+}
+
+/** Sekce, kde „Platí od/do" říká málo (u důchodu „Pobírán od", u věku den dosažení). */
+const INTERVAL_LABELS: Partial<Record<PayrollStatutoryEvidenceSection, ReadonlyArray<'effective_from' | 'effective_to'>>> = {
+  social_pension_age: ['effective_from'],
+  social_pensions: ['effective_from', 'effective_to'],
+}
+
+function intervalLabel(section: StatutorySectionSpec, edge: 'effective_from' | 'effective_to'): string {
+  return INTERVAL_LABELS[section.key]?.includes(edge) === true
+    ? t(`payroll.people.statutory_evidence.${edge}_label.${section.key}`)
+    : t(`payroll.people.statutory_evidence.${edge}`)
 }
 
 function rowsOf(section: StatutorySectionSpec): PayrollStatutoryEvidenceRow[] {
@@ -240,6 +256,7 @@ function rowsOf(section: StatutorySectionSpec): PayrollStatutoryEvidenceRow[] {
 }
 
 function isFrozen(section: StatutorySectionSpec, row: PayrollStatutoryEvidenceRow): boolean {
+  if (section.unfrozen === true) return false
   const start = section.kind === 'month' ? row.period_start : row.effective_from
   return typeof start === 'string'
     && frozenThrough.value !== null
@@ -266,7 +283,7 @@ function offersNewVersion(
   row: PayrollStatutoryEvidenceRow,
 ): boolean {
   const boundary = frozenThrough.value
-  if (boundary === null || section.kind !== 'interval') return false
+  if (boundary === null || section.kind !== 'interval' || section.unfrozen === true) return false
   const peers = scopePeers(section, row)
   if (currentRow(section, peers, boundary) !== row) return false
   return !peers.some(other => statutoryText(other, 'effective_from') > boundary)
@@ -527,7 +544,10 @@ const hintExpanded = reactive<Record<string, boolean>>({})
  */
 const GROUPS: ReadonlyArray<{ key: string; sections: readonly PayrollStatutoryEvidenceSection[] }> = [
   { key: 'tax', sections: ['tax_declarations', 'tax_residences', 'tax_credit_claims'] },
-  { key: 'social', sections: ['social_jurisdictions', 'social_discount_claims'] },
+  {
+    key: 'social',
+    sections: ['social_jurisdictions', 'social_discount_claims', 'social_pension_age', 'social_pensions'],
+  },
   {
     key: 'health',
     sections: [
@@ -756,6 +776,7 @@ function addRow(section: StatutorySectionSpec) {
     effectiveOn: effectiveOn.value,
     defaultInsurerCode: defaultInsurerCode.value,
     employerReferences: [],
+    pensionAgeSuggestion: pensionAgeSuggestion.value,
   })
   drafts.value[section.key] = [...rows, row]
 }
@@ -1086,6 +1107,13 @@ onMounted(() => {
                         ? t('payroll.people.statutory_evidence.hint_less')
                         : t('payroll.people.statutory_evidence.hint_more') }}</button>
                     </p>
+                    <p
+                      v-if="section.key === 'social_pension_age' && (drafts[section.key] ?? []).length === 0"
+                      class="mt-1 text-xs text-neutral-600"
+                      data-test="pension-age-suggestion"
+                    >{{ pensionAgeSuggestion !== null
+                      ? t('payroll.people.statutory_evidence.pension_age_suggestion', { day: formatDate(pensionAgeSuggestion) })
+                      : t('payroll.people.statutory_evidence.pension_age_no_suggestion') }}</p>
                   </div>
                   <div v-if="canWrite && !isEditing(section)" class="flex shrink-0 flex-wrap items-start gap-2">
                     <!--
@@ -1162,15 +1190,15 @@ onMounted(() => {
                         </label>
                         <template v-else>
                           <label class="block text-xs text-neutral-600">
-                            {{ t('payroll.people.statutory_evidence.effective_from') }}
+                            {{ intervalLabel(section, 'effective_from') }}
                             <DateInput
                               v-model="row.effective_from"
                               :disabled="!isEditing(section) || saving || isFrozen(section, row)"
                               :data-test="`${section.key}-${index}-effective_from`"
                               class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100" />
                           </label>
-                          <label class="block text-xs text-neutral-600">
-                            {{ t('payroll.people.statutory_evidence.effective_to') }}
+                          <label v-if="section.single !== true" class="block text-xs text-neutral-600">
+                            {{ intervalLabel(section, 'effective_to') }}
                             <DateInput
                               v-model="row.effective_to"
                               :disabled="!isEditing(section) || saving"
@@ -1424,6 +1452,7 @@ onMounted(() => {
                     -->
                     <button
                       v-if="canWrite && !sectionDirty(section)
+                        && !(section.single === true && (drafts[section.key] ?? []).length > 0)
                         && (isEditing(section) || (drafts[section.key] ?? []).length > 0)"
                       type="button"
                       :class="['mt-2 whitespace-nowrap', btnOutlineSm('primary')]"

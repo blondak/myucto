@@ -90,6 +90,7 @@ export const eldpRemediationCodes: Record<string, string> = {
   eldp_pension_status_not_confirmed: 'pension',
   eldp_pension_status_invalid: 'pension',
   eldp_pension_status_conflict: 'pension',
+  eldp_pension_status_evidence_mismatch: 'pension',
   eldp_not_kept_full_old_age_pension: 'pension_not_kept',
   eldp_pension_age_mid_month_unsupported: 'unsupported',
   eldp_no_insurance_period: 'no_insurance',

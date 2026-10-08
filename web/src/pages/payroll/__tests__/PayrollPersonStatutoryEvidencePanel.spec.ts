@@ -232,6 +232,8 @@ function emptyEvidence(overrides: Partial<PayrollStatutoryEvidence> = {}): Payro
       health_month_evidence: [],
       health_minimum_reductions: [],
       health_other_employer_bases: [],
+      social_pension_age: [],
+      social_pensions: [],
     },
     other_employer_bases: [],
     blockers: [
@@ -266,6 +268,8 @@ function filledEvidence(): PayrollStatutoryEvidence {
       health_month_evidence: [],
       health_minimum_reductions: [],
       health_other_employer_bases: [],
+      social_pension_age: [],
+      social_pensions: [],
     },
   })
 }
@@ -1360,5 +1364,86 @@ describe('PayrollPersonStatutoryEvidencePanel — výchozí záznamy jedním pot
     const wrapper = mount(PayrollPersonStatutoryEvidencePanel, { props: { personId: 17, canWrite: false } })
     await flushPromises()
     expect(wrapper.find('[data-test="statutory-evidence-defaults"]').exists()).toBe(false)
+  })
+})
+
+/**
+ * Důchodové údaje: zdroj kódu D a odečtených dob v ELDP i JMHZ. Den dosažení
+ * věku se jen NABÍZÍ z data narození, zapisuje ho účetní.
+ */
+describe('PayrollPersonStatutoryEvidencePanel — důchodové údaje', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.canWrite.mockReturnValue(true)
+    resetDefaultHealthInsurerCode()
+    mocks.saveStatutoryEvidence.mockResolvedValue(filledEvidence())
+    mocks.employerSettings.mockResolvedValue({ default_health_insurer_code: '205' })
+    Element.prototype.scrollIntoView = vi.fn()
+  })
+
+  it('nabídnutý den dosažení důchodového věku předvyplní nový záznam', async () => {
+    mocks.statutoryEvidence.mockResolvedValue(emptyEvidence({
+      derived: { taxpayer_credit: false, pension_age_suggestion: '2027-11-30' },
+    }))
+    const wrapper = await mounted()
+
+    expect(wrapper.get('[data-test="pension-age-suggestion"]').text())
+      .toContain('payroll.people.statutory_evidence.pension_age_suggestion')
+    await wrapper.get('[data-test="add-first-social_pension_age"]').trigger('click')
+    // Jediný záznam bez konce platnosti.
+    expect(wrapper.find('[data-test="social_pension_age-0-effective_to"]').exists()).toBe(false)
+    await wrapper.get('[data-test="inline-save-social_pension_age"]').trigger('click')
+    await flushPromises()
+
+    expect(savedRow('social_pension_age')).toMatchObject({
+      effective_from: '2027-11-30',
+      effective_to: null,
+      basis: 'statutory_table',
+    })
+  })
+
+  it('bez jednoznačného výpočtu den nepředvyplní a uložení zablokuje', async () => {
+    mocks.statutoryEvidence.mockResolvedValue(emptyEvidence({
+      derived: { taxpayer_credit: false, pension_age_suggestion: null },
+    }))
+    const wrapper = await mounted()
+
+    expect(wrapper.get('[data-test="pension-age-suggestion"]').text())
+      .toContain('payroll.people.statutory_evidence.pension_age_no_suggestion')
+    await wrapper.get('[data-test="add-first-social_pension_age"]').trigger('click')
+    await wrapper.get('[data-test="inline-save-social_pension_age"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.saveStatutoryEvidence).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="issues-social_pension_age-0"]').text())
+      .toContain('payroll.people.statutory_evidence.issue.period_required')
+  })
+
+  it('předčasnost se nabízí jen u starobního důchodu a zmrazení důchod nezamyká', async () => {
+    mocks.statutoryEvidence.mockResolvedValue(emptyEvidence({
+      frozen_through: '2026-06-30',
+      sections: {
+        ...emptyEvidence().sections,
+        social_pensions: [{
+          id: 9, row_version: 1, pension_type_code: '1', early_retirement: 1,
+          reduced_retirement_age: 0, evidence_reference: null, evidence_note: null,
+          effective_from: '2026-02-01', effective_to: null,
+        }],
+      },
+    }))
+    const wrapper = await mounted()
+    await wrapper.get('[data-test="edit-social_pensions"]').trigger('click')
+
+    const from = wrapper.get('[data-test="social_pensions-0-effective_from"]')
+    expect(from.attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-test="change-from-social_pensions"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="social_pensions-0-early_retirement"]').exists()).toBe(true)
+
+    await wrapper.get('[data-test="social_pensions-0-pension_type_code"]').setValue('2')
+    expect(wrapper.find('[data-test="social_pensions-0-early_retirement"]').exists()).toBe(false)
+    await wrapper.get('[data-test="inline-save-social_pensions"]').trigger('click')
+    await flushPromises()
+
+    expect(savedRow('social_pensions')).toMatchObject({ pension_type_code: '2', early_retirement: '0' })
   })
 })

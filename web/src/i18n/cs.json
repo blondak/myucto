@@ -5751,7 +5751,10 @@
           "minimum_pension_age_declaration": "Prohlášení o dosažení důchodového věku bez nároku na důchod",
           "minimum_osvc_advance_confirmation": "Potvrzení pojišťovny o zálohách OSVČ alespoň z minima",
           "minimum_foster_reward_decision": "Rozhodnutí o odměně pěstouna",
-          "minimum_sickness_certificate": "Potvrzení o pracovní neschopnosti, karanténě nebo ošetřování"
+          "minimum_sickness_certificate": "Potvrzení o pracovní neschopnosti, karanténě nebo ošetřování",
+          "pension_age_statutory_table": "Výpočet podle přílohy zákona č. 155/1995 Sb.",
+          "pension_age_cssz_information": "Informativní osobní list důchodového pojištění nebo sdělení ČSSZ",
+          "pension_age_employee_declaration": "Prohlášení zaměstnance"
         },
         "issue": {
           "period_required": "Doplňte, od kdy záznam platí.",
@@ -5775,12 +5778,23 @@
           "amount_invalid": "„{label}“ musí být nezáporná částka v korunách, nejvýše na haléře (např. 15000 nebo 15000,50)."
         },
         "title": "Zákonná evidence osoby",
-        "subtitle": "Prohlášení k dani, daňová rezidence, slevy na dani, příslušnost k sociálnímu a zdravotnímu pojištění, sleva pracujícího důchodce a výjimky z minima zdravotního pojištění.",
+        "subtitle": "Prohlášení k dani, daňová rezidence, slevy na dani, příslušnost k sociálnímu a zdravotnímu pojištění, sleva pracujícího důchodce, důchodový věk a pobíraný důchod a výjimky z minima zdravotního pojištění.",
         "employer_reference_placeholder": "např. zamestnavatel:firma-b",
         "currency_czk": "Kč",
         "current_no_exemption": "Bez výjimky",
         "current_no_other_employer": "Bez jiného zaměstnavatele",
         "current_discount_not_claimed": "Neuplatňuje se (bez záznamu)",
+        "current_pension_age_unknown": "Nezadáno",
+        "current_no_pension": "Nepobírá (bez záznamu)",
+        "pension_age_suggestion": "Podle data narození vychází den dosažení důchodového věku na {day} (§ 32 a příloha č. 1 zákona č. 155/1995 Sb.). Nabídnutý den se předvyplní do nového záznamu; zkontrolujte ho, snížený důchodový věk výpočet nezná.",
+        "pension_age_no_suggestion": "Den dosažení důchodového věku z data narození jednoznačně nevychází (u žen závisí na počtu vychovaných dětí, u zvláštních skupin platí snížený věk). Zapište ho podle sdělení ČSSZ.",
+        "effective_from_label": {
+          "social_pension_age": "Den dosažení důchodového věku",
+          "social_pensions": "Pobírán od"
+        },
+        "effective_to_label": {
+          "social_pensions": "Pobírán do"
+        },
         "blocked_badge": "vše doplněno | 1 chybějící údaj | {count} chybějící údaje | {count} chybějících údajů",
         "blockers_title": "K tomuto měsíci chybí:",
         "blockers_consequence": "Dokud tyto údaje chybí, mzdový běh zákonný výpočet této osoby nespočítá a skončí v ručním posouzení.",
@@ -5841,7 +5855,9 @@
           "health_coverages": "Příslušnost ke zdravotnímu pojištění",
           "health_month_evidence": "Měsíční evidence zdravotního minima",
           "health_minimum_reductions": "Výjimky z minima zdravotního pojištění",
-          "health_other_employer_bases": "Vyměřovací základ u jiného zaměstnavatele"
+          "health_other_employer_bases": "Vyměřovací základ u jiného zaměstnavatele",
+          "social_pension_age": "Důchodový věk",
+          "social_pensions": "Pobíraný důchod"
         },
         "section_hint": {
           "tax_declarations": "Rozhoduje o tom, zda se uplatní měsíční slevy a zvýhodnění, nebo se sráží daň bez nich.",
@@ -5852,7 +5868,9 @@
           "health_coverages": "Zda osoba podléhá českému zdravotnímu pojištění a u které pojišťovny je vedená.",
           "health_month_evidence": "Nevyplněno znamená, že dopočet do minimálního vyměřovacího základu hradí zaměstnanec — tak to určuje zákon. Záznam zakládejte jen pro výjimku: překážku na straně zaměstnavatele nebo volbu zaměstnavatele při souběhu.",
           "health_minimum_reductions": "Na koho se minimální vyměřovací základ nevztahuje (§ 3 odst. 8 zákona č. 592/1992 Sb.): státní pojištěnec (poživatel důchodu, student, rodič na rodičovské…), držitel průkazu ZTP nebo ZTP/P, kdo dosáhl důchodového věku bez nároku na důchod, OSVČ platící zálohy alespoň z minima a kdo je jen příjemcem odměny pěstouna. Začne-li výjimka během měsíce, minimum se sníží poměrně podle dnů, proto se zadává s přesným datem. Doloženou slevu pracujícího důchodce, slevu na dani pro ZTP/P, nemoc, karanténu, ošetřování, mateřskou a rodičovskou výpočet započte sám, tady je zadávat nemusíte.",
-          "health_other_employer_bases": "Při souběhu zaměstnání se minimum posuzuje z úhrnu vyměřovacích základů u všech zaměstnavatelů. Zadejte základ, který zaměstnanec za měsíc měl u jiného zaměstnavatele; kdo z nich doplatek odvádí, určíte v měsíční evidenci zdravotního minima."
+          "health_other_employer_bases": "Při souběhu zaměstnání se minimum posuzuje z úhrnu vyměřovacích základů u všech zaměstnavatelů. Zadejte základ, který zaměstnanec za měsíc měl u jiného zaměstnavatele; kdo z nich doplatek odvádí, určíte v měsíční evidenci zdravotního minima.",
+          "social_pension_age": "Den, kdy zaměstnanec dosáhl nebo dosáhne důchodového věku. Od něj má výdělečná činnost v evidenčním listu i v měsíčním hlášení kód D, a nepobírá-li starobní důchod, vedou se za něj odečítané doby. Nevyplněno znamená, že den neznáte; kód D pak nevznikne.",
+          "social_pensions": "Důchod, který zaměstnanec pobírá, s druhem podle číselníku ČSSZ (stejně jako v přihlášce REGZEC). Předčasný starobní důchod zakládá kód D, starobní důchod od prvního celého měsíce výplaty ukončuje odečítané doby a od roku 2025 i vedení ročního evidenčního listu. Import přihlášek REGZEC údaj doplní do prázdné evidence."
         },
         "field": {
           "status": "Stav",
@@ -5879,7 +5897,11 @@
           "employer_reference": "Označení zaměstnavatele",
           "assessment_base_minor_units": "Vyměřovací základ za měsíc",
           "employment_from": "Zaměstnán od",
-          "employment_to": "Zaměstnán do"
+          "employment_to": "Zaměstnán do",
+          "basis": "Zdroj údaje",
+          "pension_type_code": "Druh důchodu",
+          "early_retirement": "Předčasný starobní důchod",
+          "reduced_retirement_age": "Snížený důchodový věk"
         },
         "option": {
           "status": {
@@ -5932,6 +5954,27 @@
             "foster_reward_only": "Jen odměna pěstouna",
             "sickness_care_or_quarantine": "Nemoc, karanténa nebo ošetřování",
             "unverified": "Neověřeno"
+          },
+          "basis": {
+            "statutory_table": "Podle tabulky zákona (příloha č. 1 zákona č. 155/1995 Sb.)",
+            "cssz_information": "Podle sdělení ČSSZ",
+            "employee_declaration": "Podle prohlášení zaměstnance"
+          },
+          "pension_type_code": {
+            "1": "Starobní",
+            "2": "Invalidní 3. stupně",
+            "8": "Invalidní 1. nebo 2. stupně",
+            "A": "Cizí charakteru starobního",
+            "B": "Cizí charakteru invalidního 3. stupně",
+            "C": "Cizí charakteru invalidního 1. nebo 2. stupně"
+          },
+          "early_retirement": {
+            "0": "Ne",
+            "1": "Ano"
+          },
+          "reduced_retirement_age": {
+            "0": "Ne",
+            "1": "Ano"
           }
         },
         "edit_section": "Upravit",
@@ -8241,7 +8284,7 @@
       "authorityRequestDueOnHint": "Za roky od 2027 už lhůtu pro evidenční list na výzvu neurčuje zákon, ale výzva sama. Opište ji z výzvy.",
       "pension": {
         "title": "Důchodové údaje zaměstnance",
-        "description": "Kód ELDP i to, zda se list vůbec vede, závisí na důchodových údajích, které mzdová revize nenese. Vyplňte, co ve vykazovaném roce nastalo; prázdné pole znamená, že to nenastalo.",
+        "description": "Kód ELDP i to, zda se list vůbec vede, závisí na důchodových údajích. Zdrojem je zákonná evidence na kartě osoby (sekce Důchodový věk a Pobíraný důchod), stejně jako u měsíčního hlášení. Pole tady jsou jen kontrola: prázdné pole znamená „podle evidence“, vyplněné se s evidencí musí shodovat.",
         "ageReachedOn": "Den dosažení důchodového věku",
         "ageReachedOnHint": "Jen nastal-li do konce vykazovaného roku. Od tohoto dne má činnost kód D (např. 1D+).",
         "earlyPensionFrom": "Poživatel předčasného starobního důchodu od",
@@ -8249,7 +8292,7 @@
         "fullPensionPaidFrom": "První měsíc výplaty starobního důchodu v plné výši",
         "fullPensionPaidFromHint": "Od roku 2025 se za poživatele plného starobního důchodu evidenční list nevede; měsíce od tohoto měsíce se z listu vypustí.",
         "foreignInsurance": "Zaměstnanec je nebo byl účasten důchodového pojištění v cizině (pak se list vede i za poživatele plného důchodu).",
-        "confirm": "Potvrzuji důchodové údaje zaměstnance za vykazovaný rok (prázdná pole znamenají, že nenastaly)."
+        "confirm": "Potvrzuji důchodové údaje zaměstnance za vykazovaný rok (prázdná pole se převezmou ze zákonné evidence osoby)."
       },
       "noSendNotice": "Toto kontrolní XML není datová věta samostatného elektronického podání ELDP a aplikace je neodešle ani nezařadí do datové schránky.",
       "preparedCreated": "Evidenční list byl sestaven jako kontrolní podklad.",
@@ -11101,6 +11144,7 @@
         "eldp_not_kept_full_old_age_pension": "Za tento rok se evidenční list nevede: zaměstnanec má nárok na výplatu starobního důchodu v plné výši a není účasten důchodového pojištění v cizině.",
         "eldp_pension_age_mid_month_unsupported": "Kód ELDP se mění uprostřed měsíce (dovršení důchodového věku nebo předčasný starobní důchod) a vyměřovací základ za část měsíce aplikace nevede. Evidenční list podejte mimo aplikaci.",
         "eldp_pension_status_conflict": "Zákonná evidence má ověřenou slevu pracujícího důchodce, ale potvrzení evidenčního listu neuvádí žádný starobní důchod. Doplňte důchodové údaje ve formuláři.",
+        "eldp_pension_status_evidence_mismatch": "Důchodové údaje v potvrzení evidenčního listu se liší od zákonné evidence osoby. Opravte evidenci na kartě osoby (sekce Důchodový věk a Pobíraný důchod), nebo pole v potvrzení nechte prázdná.",
         "eldp_pension_status_invalid": "Důchodové údaje zaměstnance nemají platný tvar. Opravte je ve formuláři evidenčního listu.",
         "eldp_pension_status_not_confirmed": "Potvrďte ve formuláři důchodové údaje zaměstnance: důchodový věk, předčasný nebo plný starobní důchod a účast na pojištění v cizině.",
         "jmhz_eldp_section18_days_unresolved": "Vyloučené dny nemocenského pojištění (§ 18 odst. 7) nejde u tohoto vztahu rozdělit, protože nemoc je ve mzdovém běhu zmrazená bez okna náhrady mzdy. Založte opravnou revizi běhu a znovu ji schvalte.",

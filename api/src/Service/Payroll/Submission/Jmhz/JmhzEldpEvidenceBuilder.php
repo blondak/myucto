@@ -186,6 +186,7 @@ final class JmhzEldpEvidenceBuilder
             'result',
         );
         [$employeeId, $entry] = $this->findEmployment($input, $employmentId);
+        $source = self::withEmployeePensionStatus($source, $employeeId);
         $employment = $this->object($entry['employment'] ?? null, 'employment');
         $term = $this->object($entry['term'] ?? null, 'term');
         if (self::deferredIncomeType($entry, $employment, $periodStart) !== null) {
@@ -308,6 +309,7 @@ final class JmhzEldpEvidenceBuilder
         }
 
         [$employeeId, $entry] = $this->findEmployment($input, $employmentId);
+        $source = self::withEmployeePensionStatus($source, $employeeId);
         $employment = $this->object($entry['employment'] ?? null, 'employment');
         $term = $this->object($entry['term'] ?? null, 'term');
         $relationType = $employment['relation_type'] ?? null;
@@ -613,6 +615,11 @@ final class JmhzEldpEvidenceBuilder
                 ...($eldpReported && is_string($code) && ($code[strlen($code) - 2] ?? '') === 'D'
                     ? ['pension_age_code_from' => $this->pensionAgeCodeFrom($source)]
                     : []),
+                // Důchodové údaje ze zákonné evidence, ze kterých řez vyšel.
+                // Jen u osoby, která nějaké má: otisk ostatních se nemění.
+                ...(is_array($source['pension_status'] ?? null)
+                    ? ['pension_status' => $source['pension_status']]
+                    : []),
             ],
             'insurance_interval' => [
                 'insurance_from' => $insuranceFrom,
@@ -680,13 +687,13 @@ final class JmhzEldpEvidenceBuilder
      * rozejít.
      *
      * Důchodové údaje čte z `$source['pension_status']` (`pension_age_reached_on`,
-     * `early_pension_from`); bez nich zůstává „++" a zmrazené snapshoty
-     * dřívějších měsíců se tím nemění. Zdroj řezu
+     * `early_pension_from`); bez nich zůstává „++". Zdroj řezu
      * ({@see \MyInvoice\Repository\Payroll\JmhzEldpEvidenceSnapshotRepository::lockSource()})
-     * je zatím nenese: potvrzují se jen v ročním evidenčním listu. Kód D,
-     * dělení měsíce dovršení věku i blokace odečítaných dob se proto v provozu
-     * nespustí, dokud je nenaplní evidence osoby. Předčasný důchod uprostřed
-     * měsíce se zastaví, protože pravidla podání rozdělení základu nestanoví.
+     * je plní ze zákonné evidence osoby (sekce Důchod) k vykazovanému měsíci
+     * týmž pravidlem jako roční evidenční list
+     * ({@see \MyInvoice\Service\Payroll\Pension\PayrollPensionStatus}); už
+     * zmrazené řezy se tím nemění. Předčasný důchod uprostřed měsíce se
+     * zastaví, protože pravidla podání rozdělení základu nestanoví.
      *
      * @param array<string,mixed> $source
      */
@@ -830,6 +837,28 @@ final class JmhzEldpEvidenceBuilder
         }
 
         return $sections;
+    }
+
+    /**
+     * Důchodové údaje té osoby, jejíž vztah se řeže.
+     *
+     * Zdroj z repozitáře je společný celé revizi (příprava ho zamyká jednou za
+     * všechny vztahy), a proto nese údaje po osobách v `pension_statuses`.
+     * Osoba bez záznamu má `pension_status` = `null`, tedy „nic se neví".
+     * Zdroj bez mapy (sestavení mimo repozitář) zůstává, jak přišel.
+     *
+     * @param array<string,mixed> $source
+     * @return array<string,mixed>
+     */
+    private static function withEmployeePensionStatus(array $source, int $employeeId): array
+    {
+        if (!array_key_exists('pension_statuses', $source)) {
+            return $source;
+        }
+        $statuses = is_array($source['pension_statuses']) ? $source['pension_statuses'] : [];
+        $source['pension_status'] = $statuses[$employeeId] ?? null;
+
+        return $source;
     }
 
     /**

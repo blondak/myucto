@@ -11,6 +11,7 @@ use MyInvoice\Service\Payroll\CzechBirthNumber;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzDerivedRegistrations;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\PayrollVcp;
+use MyInvoice\Service\Payroll\Pension\PayrollPensionStatus;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationFieldVocabulary;
@@ -142,6 +143,7 @@ final class RegistrationImportPlanner
                 'tax_residence' => null,
                 'foreign_tax_identifier' => null,
                 'a1_profile' => null,
+                'pension' => null,
                 'termination_reason' => null,
             ],
         ];
@@ -349,6 +351,7 @@ final class RegistrationImportPlanner
         if ($record->documentType === 'REGZEC25') {
             $this->planTaxResidence($plan, $record, []);
             $this->planA1Profile($plan, $record, null);
+            $this->planPension((int) $plan['_supplier_id'], $plan, $record, null);
         }
         if ($record->documentType === 'REGZEC25' || $record->isCsszExport() || $record->isJmhzDerived()) {
             $this->newEmploymentTerms($plan, $record, $relationType);
@@ -520,6 +523,7 @@ final class RegistrationImportPlanner
                 $plan['_steps']['foreign_tax_identifier'] = $plan['_steps']['tax_residence']['identifier'];
             }
             $this->planA1Profile($plan, $record, $row === null ? null : (int) $row['id']);
+            $this->planPension($supplierId, $plan, $record, $employeeId);
         }
 
         $this->planIdentifiers($supplierId, $environment, $plan, $record, $employeeId, $row);
@@ -539,7 +543,8 @@ final class RegistrationImportPlanner
             || $steps['vcp'] !== null
             || $steps['tax_residence'] !== null
             || $steps['foreign_tax_identifier'] !== null
-            || $steps['a1_profile'] !== null;
+            || $steps['a1_profile'] !== null
+            || $steps['pension'] !== null;
         $hasIdentifiers = $steps['identifiers']['person'] !== null || $steps['identifiers']['employment'] !== null;
         $plan['operation'] = match (true) {
             $steps['create_employment'] !== null => 'create_employment',
@@ -1004,6 +1009,57 @@ final class RegistrationImportPlanner
         }
         $plan['_steps']['a1_profile'] = $record->a1Profile;
         $this->change($plan, 'a1_profile', 'Profil registrace A1', null, implode(', ', array_unique($changed)));
+    }
+
+    /**
+     * Pobíraný důchod z věty (`pens`: druh, pobírán od, předčasný, snížený
+     * důchodový věk) do zákonné evidence osoby, ze které ho čtou ELDP i JMHZ.
+     *
+     * Jen do PRÁZDNÉ řady: evidenci, kterou už vede účetní, import nemění
+     * (rozdíl jen ohlásí). Profil A1 dostane tytéž údaje svou cestou
+     * ({@see planA1Profile()}), tady jde o zdroj kódu D a odečtených dob.
+     *
+     * @param array<string,mixed> $plan
+     */
+    private function planPension(int $supplierId, array &$plan, RegistrationRecord $record, ?int $employeeId): void
+    {
+        $pension = $record->a1Profile['pension'] ?? null;
+        $type = is_array($pension) ? ($pension['type_code'] ?? null) : null;
+        $from = is_array($pension) ? ($pension['received_from'] ?? null) : null;
+        if (!is_string($type) || !is_string($from)) {
+            return;
+        }
+        $early = ($pension['early_retirement'] ?? false) === true;
+        if (!in_array($type, PayrollPensionStatus::PENSION_TYPE_CODES, true)
+            || ($early && $type !== PayrollPensionStatus::OLD_AGE)
+        ) {
+            $plan['warnings'][] = "Důchod ve větě (druh {$type}" . ($early ? ', předčasný' : '')
+                . ') neodpovídá číselníku ČSSZ, do zákonné evidence se nezapíše. Doplňte ho na kartě '
+                . 'osoby (Zákonná evidence, Pobíraný důchod).';
+
+            return;
+        }
+        if ($employeeId !== null) {
+            $current = $this->lookup->pensions($supplierId, $employeeId);
+            if ($current !== []) {
+                foreach ($current as $row) {
+                    if ($row['pension_type_code'] === $type && $row['effective_from'] === $from) {
+                        return;
+                    }
+                }
+                $plan['warnings'][] = "Důchod ve větě (druh {$type} od {$from}) se liší od zákonné evidence osoby. "
+                    . 'Import ji nemění, zkontrolujte ji na kartě osoby (Zákonná evidence, Pobíraný důchod).';
+
+                return;
+            }
+        }
+        $plan['_steps']['pension'] = [
+            'pension_type_code' => $type,
+            'early_retirement' => $early,
+            'reduced_retirement_age' => ($pension['reduced_retirement_age'] ?? false) === true,
+            'effective_from' => $from,
+        ];
+        $this->change($plan, 'pension', 'Pobíraný důchod', null, "druh {$type}" . ($early ? ' (předčasný)' : '') . " od {$from}");
     }
 
     /**

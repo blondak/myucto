@@ -88,6 +88,17 @@ export interface StatutorySectionSpec {
   summaryRaw?: boolean
   /** Klíč překladu přehledu nepovinné sekce bez záznamu; výchozí „Žádná sleva". */
   emptyKey?: string
+  /**
+   * Řádky nezamyká hranice schválené mzdy. Platí pro důchodové údaje: mzdový
+   * běh je nečte (server je drží mimo jeho snímek) a ELDP i hlášení si hodnotu
+   * zmrazí samy v okamžiku sestavení.
+   */
+  unfrozen?: boolean
+  /**
+   * Jediný záznam bez konce platnosti (den dosažení důchodového věku). Pole
+   * „Platí do" se neukazuje a další záznam se nenabízí.
+   */
+  single?: boolean
   fields: readonly StatutoryFieldSpec[]
 }
 
@@ -98,6 +109,11 @@ export interface StatutoryFormContext {
   defaultInsurerCode: string | null
   /** Reference na základy u jiného zaměstnavatele, doložené pro daný měsíc. */
   employerReferences: readonly string[]
+  /**
+   * Den dosažení důchodového věku, který server spočítal z data narození
+   * (jen je-li jednoznačný). Předvyplní se do nového záznamu, nic se neukládá samo.
+   */
+  pensionAgeSuggestion?: string | null
 }
 
 export interface StatutoryIssue {
@@ -330,6 +346,50 @@ export const STATUTORY_SECTIONS: readonly StatutorySectionSpec[] = [
       { key: 'evidence_reference', kind: 'evidence' },
     ],
   },
+  {
+    // Den dosažení důchodového věku: od něj nese činnost kód D v ELDP i JMHZ.
+    // Jediný záznam po dnech; bez něj se kód D nevytvoří.
+    key: 'social_pension_age',
+    kind: 'interval',
+    summaryKey: 'basis',
+    optional: true,
+    dayPrecision: true,
+    unfrozen: true,
+    single: true,
+    emptyKey: 'current_pension_age_unknown',
+    fields: [
+      {
+        key: 'basis',
+        kind: 'enum',
+        options: ['statutory_table', 'cssz_information', 'employee_declaration'],
+      },
+      { key: 'evidence_reference', kind: 'evidence' },
+    ],
+  },
+  {
+    // Pobíraný důchod podle číselníku CIS Druh důchodu (REGZEC 10113). Každý
+    // druh je vlastní řada; předčasný může být jen starobní důchod.
+    key: 'social_pensions',
+    kind: 'interval',
+    summaryKey: 'pension_type_code',
+    scopeKey: 'pension_type_code',
+    optional: true,
+    dayPrecision: true,
+    unfrozen: true,
+    emptyKey: 'current_no_pension',
+    fields: [
+      { key: 'pension_type_code', kind: 'enum', options: ['1', '2', '8', 'A', 'B', 'C'] },
+      {
+        key: 'early_retirement',
+        kind: 'enum',
+        options: ['0', '1'],
+        visible: row => text(row, 'pension_type_code') === '1',
+        whenHidden: () => '0',
+      },
+      { key: 'reduced_retirement_age', kind: 'enum', options: ['0', '1'] },
+      { key: 'evidence_reference', kind: 'evidence' },
+    ],
+  },
 ] as const
 
 /**
@@ -392,6 +452,12 @@ export const EVIDENCE_REASONS: Readonly<Record<string, readonly string[]>> = {
   'health_other_employer_bases.evidence_reference': [
     'minimum:other-employer-confirmation',
   ],
+  'social_pension_age.evidence_reference': [
+    'pension-age:statutory-table',
+    'pension-age:cssz-information',
+    'pension-age:employee-declaration',
+  ],
+  'social_pensions.evidence_reference': ['pension:award-decision'],
 }
 
 /** Které doklady dávají smysl u kterého důvodu výjimky z minima. */
@@ -559,6 +625,7 @@ export function normalizeRow(
   ) {
     row.country_code = null
   }
+  if (section.single === true) row.effective_to = null
 
   for (const field of section.fields) {
     if (!isFieldVisible(field, row)) {
@@ -655,6 +722,13 @@ const DEFAULT_VALUES: Readonly<
     employment_to: null,
     evidence_reference: null,
   },
+  social_pension_age: { basis: 'cssz_information', evidence_reference: null },
+  social_pensions: {
+    pension_type_code: '1',
+    early_retirement: '0',
+    reduced_retirement_age: '0',
+    evidence_reference: null,
+  },
 }
 
 export function defaultRow(
@@ -675,6 +749,18 @@ export function defaultRow(
   }
   if (section.key === 'health_other_employer_bases') {
     row.employment_from = monthStart
+  }
+  // Den dosažení věku není začátek měsíce: buď ho server jednoznačně spočítal
+  // z data narození (příloha zákona), nebo ho účetní zapíše sama.
+  if (section.key === 'social_pension_age') {
+    const suggested = context.pensionAgeSuggestion ?? null
+    if (suggested === null) {
+      delete row.effective_from
+    } else {
+      row.effective_from = suggested
+      row.basis = 'statutory_table'
+      row.evidence_reference = 'pension-age:statutory-table'
+    }
   }
   normalizeRow(section, row)
   return row
