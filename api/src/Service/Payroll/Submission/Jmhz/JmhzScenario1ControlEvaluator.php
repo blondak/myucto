@@ -437,6 +437,7 @@ final class JmhzScenario1ControlEvaluator
                 $projection,
                 '10366',
                 ['10473', '10474', '10475'],
+                [self::PRISONER_FORM],
             ),
             170 => $this->employeeDiscountTolerance(
                 $projection,
@@ -780,6 +781,9 @@ final class JmhzScenario1ControlEvaluator
         if ($total === null) {
             return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_PVPOJ)];
         }
+        if ($this->hasPrisonerForm($projection)) {
+            return [$this->prisonerContributionsUnitemized('10370')];
+        }
         $sum = 0;
         $seen = false;
         foreach ($projection->forms() as $form) {
@@ -816,6 +820,34 @@ final class JmhzScenario1ControlEvaluator
         }
 
         return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_PVPOJ)];
+    }
+
+    private function hasPrisonerForm(JmhzAttributeProjection $projection): bool
+    {
+        foreach ($projection->forms() as $form) {
+            if (in_array(self::PRISONER_FORM, $form->bodies(), true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Kontroly 7 a 12 poměřují pojistnou část se součtem součástí, a formulář
+     * vězně vyměřovací základ ani pojistné (10477 až 10480, 10370) nenese,
+     * přestože se za odsouzeného zařazeného do práce pojistné platí (§ 11
+     * ZPSZ). Kontrola 12 takové scénáře výslovně „nevyhodnocuje"; z jednoho
+     * XML se proto nedá říct, jaký podíl pojistné části na vězně připadá.
+     */
+    private function prisonerContributionsUnitemized(string $attributeId): JmhzControlVerdict
+    {
+        return JmhzControlVerdict::notEvaluable(
+            JmhzAttributeProjection::PART_PVPOJ,
+            "Formulář vězně atribut {$attributeId} nenese, pojistná část ale pojistné"
+                . ' za odsouzené zařazené do práce obsahuje; součet součástí s ní'
+                . ' nelze porovnat.',
+        );
     }
 
     /** @return list<JmhzControlVerdict> */
@@ -2827,6 +2859,9 @@ final class JmhzScenario1ControlEvaluator
         JmhzAttributeProjection $projection,
     ): array {
         return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            if (in_array(self::PRISONER_FORM, $form->bodies(), true)) {
+                return null;
+            }
             $overtime = $form->scaled('10269');
             if ($overtime === null || self::compareScaled($overtime, [0, 0]) <= 0) {
                 return null;
@@ -3043,6 +3078,9 @@ final class JmhzScenario1ControlEvaluator
         return $this->perForm(
             $projection,
             static function (JmhzAttributeScope $form): ?string {
+                if (in_array(self::INTERNATIONAL_HIRE_FORM, $form->bodies(), true)) {
+                    return null;
+                }
                 $total = $form->integer('10321');
                 $tax = $form->integer('10322');
                 $bonus = $form->integer('10323');
@@ -3069,7 +3107,10 @@ final class JmhzScenario1ControlEvaluator
                 if ($form->boolean('10320') !== true) {
                     return null;
                 }
-                foreach (['10321', '10322', '10323', '10420', '10454'] as $attributeId) {
+                $required = in_array(self::INTERNATIONAL_HIRE_FORM, $form->bodies(), true)
+                    ? ['10321']
+                    : ['10321', '10322', '10323', '10420', '10454'];
+                foreach ($required as $attributeId) {
                     if (!$form->has($attributeId)) {
                         return "Pro provedené roční zúčtování chybí atribut {$attributeId}.";
                     }
@@ -3732,16 +3773,21 @@ final class JmhzScenario1ControlEvaluator
      * běžně neuvádí.
      *
      * @param list<string> $parts
+     * @param list<string> $excludedBodies formuláře, pro které kontrola podle katalogu neplatí
      * @return list<JmhzControlVerdict>
      */
     private function sumMatchesWhenPositive(
         JmhzAttributeProjection $projection,
         string $totalId,
         array $parts,
+        array $excludedBodies = [],
     ): array {
         return $this->perForm(
             $projection,
-            static function (JmhzAttributeScope $form) use ($totalId, $parts): ?string {
+            static function (JmhzAttributeScope $form) use ($totalId, $parts, $excludedBodies): ?string {
+                if (array_intersect($form->bodies(), $excludedBodies) !== []) {
+                    return null;
+                }
                 $total = $form->integer($totalId);
                 if ($total === null || $total <= 0) {
                     return null;
@@ -3978,6 +4024,9 @@ final class JmhzScenario1ControlEvaluator
      */
     private function employerBaseMatchesForms(JmhzAttributeProjection $projection): array
     {
+        if ($this->hasPrisonerForm($projection)) {
+            return [$this->prisonerContributionsUnitemized('10478')];
+        }
         $total = $projection->pvpoj()->integer('10023');
         $sum = 0;
         $seen = 0;
@@ -4155,7 +4204,25 @@ final class JmhzScenario1ControlEvaluator
         'odlozenyPrijem' => true,
         'cinnostKS' => false,
         'pestoun' => false,
+        // Kontroly 216 a 284 vyjímají jen činnosti K až S a pěstouna; vězeň,
+        // jiný příjem a pronájem síly v nich zůstávají, jen 10477 nenesou.
+        'vezen' => true,
+        'jinyPrijem' => true,
+        'mezinarodniPronajemSily' => true,
     ];
+
+    /**
+     * Formulář vězně (`formVezen.xsd`): kontrola 36 ho výslovně ignoruje
+     * a kontrola 165 ho nevyjmenovává mezi scénáři, pro které platí.
+     */
+    private const PRISONER_FORM = 'vezen';
+
+    /**
+     * Mezinárodní pronájem pracovní síly (`formMezinarodniPronajemSily.xsd`,
+     * druh činnosti 12): kontrola 78 ho nepostihuje a kontrola 79 u něj
+     * vyžaduje jen 10321.
+     */
+    private const INTERNATIONAL_HIRE_FORM = 'mezinarodniPronajemSily';
 
     /**
      * Vrací true, když se u součásti nedá rozhodnout, jestli § 5a platí —

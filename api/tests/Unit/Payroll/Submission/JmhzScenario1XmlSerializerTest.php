@@ -2162,6 +2162,233 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         );
     }
 
+    /**
+     * Scénář 4 (`formVezen.xsd`): podmnožina scénáře 1 bez zdravotního
+     * pojištění, vyměřovacích základů § 5a, pojistného, pozice a rozpadu mzdy.
+     * Vyloučené doby jen úhrn, DPN, PPM a úhrn § 18 odst. 7.
+     */
+    public function testPrisonerIsSerializedOnVezenFormValidAgainstSchema(): void
+    {
+        $payload = $this->specialScenarioPayload('scenario_4', '1', '2');
+        $employment = &$payload['people'][0]['employments'][0];
+        $employment['eldp']['eldp_sections'][0]['excluded_days_total'] = 3;
+        $employment['eldp']['eldp_sections'][0]['excluded_days'] = [
+            'docasNeschopnost' => 3,
+            'penezitaPomocMaterstvi' => 0,
+            'osetrovaniClenaRodiny' => 0,
+            'otcovska' => 0,
+            'vyloucenePar16' => 0,
+        ];
+        $employment['eldp']['eldp_sections'][0]['section18_days_total'] = 3;
+        $employment['eldp']['eldp_sections'][0]['section18_days'] = [
+            'omluvenaNepritomnost' => 0,
+            'pracovniNeschopnost' => 3,
+            'vyplaceniDavek' => 0,
+        ];
+        $employment['earnings_by_attribute_minor']['10342'] = 30_000;
+        unset($employment);
+
+        $xml = (string) preg_replace(
+            '/>\s+</',
+            '><',
+            (new JmhzScenario1XmlValidator())->dryRun($this->resolutionFor($payload), $this->envelope())['xml'],
+        );
+
+        self::assertStringContainsString('<form:vezen xmlns:form="http://schemas.cssz.cz/JMHZ/form/1.0"><form:identifikace>', $xml);
+        self::assertStringNotContainsString('zdravPoj', $xml);
+        self::assertStringNotContainsString('<form:vymerovaciZakladParagraf5>', $xml);
+        self::assertStringNotContainsString('<form:pojisteniZamestnanec>', $xml);
+        self::assertStringNotContainsString('<form:vykonavanaPozice>', $xml);
+        self::assertStringContainsString(
+            '<form:vylouceneDny><form:vylouceneDobyCelkem>3</form:vylouceneDobyCelkem>'
+                . '<form:docasNeschopnost>3</form:docasNeschopnost>'
+                . '<form:penezitaPomocMaterstvi>0</form:penezitaPomocMaterstvi>'
+                . '<form:vyloucenePar18>3</form:vyloucenePar18></form:vylouceneDny>',
+            $xml,
+        );
+        self::assertStringContainsString(
+            '<form:mzda><form:nahrady><form:docasnaNeschopnost>300</form:docasnaNeschopnost></form:nahrady></form:mzda>',
+            $xml,
+        );
+        self::assertStringContainsString('<form:mzdaCista><form:mzdaCista>734</form:mzdaCista>', $xml);
+        self::assertSame([], $this->failedControls($xml, [36, 165]));
+    }
+
+    /**
+     * Ošetřování člena rodiny formulář vězně nevede: hodnota by se ztratila,
+     * proto je to nález na vztahu, ne mlčení.
+     */
+    public function testPrisonerCareDaysAreRefused(): void
+    {
+        $payload = $this->specialScenarioPayload('scenario_4', '1', '2');
+        $section = &$payload['people'][0]['employments'][0]['eldp']['eldp_sections'][0];
+        $section['excluded_days_total'] = 2;
+        $section['excluded_days'] = [
+            'docasNeschopnost' => 0,
+            'penezitaPomocMaterstvi' => 0,
+            'osetrovaniClenaRodiny' => 2,
+            'otcovska' => 0,
+            'vyloucenePar16' => 0,
+        ];
+        unset($section);
+
+        $this->expectExceptionObject(new JmhzXmlException(
+            'jmhz_xml_prisoner_excluded_days_unsupported',
+            'Formulář vězně nemá kam zapsat vyloučené doby atributu 10360.',
+        ));
+        $this->refuse($payload);
+    }
+
+    /** Scénář 5 (`formJinyPrijem.xsd`): identifikace, souhrn a daňový základ. */
+    public function testOtherIncomeIsSerializedOnJinyPrijemFormValidAgainstSchema(): void
+    {
+        $xml = (string) preg_replace(
+            '/>\s+</',
+            '><',
+            (new JmhzScenario1XmlValidator())->dryRun(
+                $this->resolutionFor($this->uninsuredPayload('scenario_5', '13')),
+                $this->envelope(),
+            )['xml'],
+        );
+
+        self::assertStringContainsString(
+            '<form:jinyPrijem xmlns:form="http://schemas.cssz.cz/JMHZ/form/1.0"><form:identifikace>',
+            $xml,
+        );
+        self::assertStringContainsString(
+            '</form:souhrnDataZec><form:prijem><form:dan><form:zakladDane>1000</form:zakladDane></form:dan></form:prijem></form:jinyPrijem>',
+            $xml,
+        );
+        self::assertStringNotContainsString('<form:pojisteni>', $xml);
+        self::assertStringNotContainsString('<form:mzdaCista>', $xml);
+        self::assertStringNotContainsString('zdravPoj', $xml);
+    }
+
+    /**
+     * Formulář jiného příjmu pojištění nenese. Vztah s vyměřovacím základem
+     * by v něm pojistné zamlčel - je to nález na vztahu.
+     */
+    public function testInsuredOtherIncomeIsRefused(): void
+    {
+        $payload = $this->specialScenarioPayload('scenario_5', '14', '1');
+
+        $this->expectExceptionObject(new JmhzXmlException(
+            'jmhz_scenario_social_insurance_unreportable',
+            'Formulář jiného příjmu a mezinárodního pronájmu pracovní síly'
+                . ' nenese pojištění (atributy 10477, 10370, 10481), vztah ale'
+                . ' vyměřovací základ nebo pojistné má.',
+        ));
+        $this->refuse($payload);
+    }
+
+    /**
+     * Scénář 6 (`formMezinarodniPronajemSily.xsd`): zúžený souhrn bez
+     * osvobozeného příjmu a bonusu, z výsledku ročního zúčtování jen 10321.
+     */
+    public function testInternationalHireCarriesTheReducedSummaryValidAgainstSchema(): void
+    {
+        $payload = $this->uninsuredPayload('scenario_6', '12');
+        $employment = &$payload['people'][0]['employments'][0];
+        $employment['exempt_income_minor'] = 0;
+        unset($employment);
+
+        $xml = (string) preg_replace(
+            '/>\s+</',
+            '><',
+            (new JmhzScenario1XmlValidator())->dryRun($this->resolutionFor($payload), $this->envelope())['xml'],
+        );
+
+        self::assertStringContainsString(
+            '<form:mezinarodniPronajemSily xmlns:form="http://schemas.cssz.cz/JMHZ/form/1.0"><form:identifikace>',
+            $xml,
+        );
+        self::assertStringContainsString(
+            '<form:prijmy><form:zuctovanoCelkem>1000</form:zuctovanoCelkem></form:prijmy>',
+            $xml,
+        );
+        self::assertStringNotContainsString('<form:danBonus>', $xml);
+        self::assertStringNotContainsString('<form:pojisteni>', $xml);
+    }
+
+    public function testInternationalHireWithChildCreditIsRefused(): void
+    {
+        $payload = $this->payloadWithChildCredit();
+        $source = $this->uninsuredPayload('scenario_6', '12');
+        $payload['scope'] = $source['scope'];
+        $payload['people'][0]['employments'][0] = $source['people'][0]['employments'][0];
+        $payload['people'][0]['person_summary']['statutory']['social_insurance']
+            = $source['people'][0]['person_summary']['statutory']['social_insurance'];
+        $payload['people'][0]['employments'][0]['term']['tax_declaration_signed'] = true;
+
+        $this->expectExceptionObject(new JmhzXmlException(
+            'jmhz_xml_international_hire_attribute_unsupported',
+            'Formulář mezinárodního pronájmu pracovní síly nese ze slev'
+                . ' jen základní slevu na poplatníka (10299).',
+        ));
+        $this->refuse($payload);
+    }
+
+    /**
+     * Příprava se zařazením scénáře podle druhu činnosti; vztah zůstává
+     * pojištěný jako v základním vzorku.
+     *
+     * @return array<string,mixed>
+     */
+    private function specialScenarioPayload(
+        string $scenarioKey,
+        string $activityCode,
+        string $detailCode,
+    ): array {
+        $payload = $this->payload();
+        $payload['scope']['scenario_set'] = [$scenarioKey];
+        $employment = &$payload['people'][0]['employments'][0];
+        $employment['employment']['relation_type'] = 'employment';
+        $employment['term']['activity_code'] = $activityCode;
+        $employment['term']['jmhz_relationship_detail_code'] = $detailCode;
+        $employment['scenario_resolution'] = [
+            'scenario_key' => $scenarioKey,
+            'activity_code' => $activityCode,
+            'relationship_detail_code' => $detailCode,
+        ];
+        unset($employment);
+
+        return $payload;
+    }
+
+    /**
+     * Druh činnosti 11 až 14: vztah mimo pojištění, bez vyměřovacího základu,
+     * pojistného i dnů ELDP.
+     *
+     * @return array<string,mixed>
+     */
+    private function uninsuredPayload(string $scenarioKey, string $activityCode): array
+    {
+        $payload = $this->specialScenarioPayload($scenarioKey, $activityCode, '1');
+        $payload['people'][0]['person_summary']['statutory']['social_insurance'] = [
+            'status' => 'calculated',
+            'issues' => [],
+            'capped_assessment_base_minor_units' => 0,
+            'employee_contribution_minor_units' => 0,
+            'employer_contribution_minor_units' => 0,
+        ];
+        $employment = &$payload['people'][0]['employments'][0];
+        $employment['insurance']['participation']['status'] = 'does_not_participate';
+        $employment['insurance']['capped_assessment_base_minor_units'] = 0;
+        $employment['eldp']['eldp_sections'][0] = [
+            'ordinal' => 1,
+            'code' => null,
+            'valid_from' => null,
+            'valid_to' => null,
+            'insurance_days' => 0,
+            'assessment_base_czk' => null,
+            'excluded_days' => null,
+            'deducted_days' => null,
+        ];
+        unset($employment);
+
+        return $payload;
+    }
+
     /** @return array<string,mixed> */
     private function payloadWithDiscount(): array
     {
