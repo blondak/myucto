@@ -446,7 +446,7 @@ final class GlobalSeedTables
         'payroll_submission_transport_attempts', 'payroll_submissions',
         'payroll_surcharge_input_materializations', 'payroll_surcharge_period_claims',
         'payroll_takeover_payment_evidence', 'payroll_takeover_runs',
-        'payroll_taxable_income_confirmation_requests', 'payroll_time_entries', 'payroll_time_import_errors',
+        'payroll_taxable_income_confirmation_requests', 'payroll_pension_requests', 'payroll_time_entries', 'payroll_time_import_errors',
         'payroll_time_imports', 'payroll_time_month_events', 'payroll_time_month_import_summaries',
         'payroll_time_months', 'payroll_travel_compensation_links', 'payroll_wage_statement_revisions',
         'payroll_work_calendars', 'payroll_year_closures',

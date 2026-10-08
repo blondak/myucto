@@ -955,7 +955,8 @@
         "1971_payroll_sickness_case_slovak.sql",
         "1972_payroll_health_coverage_employee_notice.sql",
         "1973_payroll_eldp_deducted_days.sql",
-        "1974_payroll_person_pension_evidence.sql"
+        "1974_payroll_person_pension_evidence.sql",
+        "1975_payroll_pension_requests.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -13591,6 +13592,63 @@
             "checks": {
                 "chk_payroll_payout_rule_active": "`is_active` in (0,1)",
                 "chk_payroll_payout_rule_shape": "`allocation_kind` = 'fixed' and `amount_minor` is not null and `basis_points` is null or `allocation_kind` = 'percentage' and `amount_minor` is null and `basis_points` between 0 and 10000 or `allocation_kind` = 'remainder' and `amount_minor` is null and `basis_points` is null"
+            }
+        },
+        "payroll_pension_requests": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "completed_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "completed_on": "date NULL DEFAULT NULL",
+                "completion_kind": "enum('eldp_statement','document','manual') NULL DEFAULT NULL",
+                "completion_reference": "varchar(190) NULL DEFAULT NULL",
+                "copy_delivered_on": "date NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "deadline_rule": "varchar(128) NOT NULL",
+                "death_on": "date NULL DEFAULT NULL",
+                "due_on": "date NOT NULL",
+                "eldp_environment": "enum('production','test') NULL DEFAULT NULL",
+                "eldp_statement_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "employee_id": "bigint(20) unsigned NOT NULL",
+                "employment_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "legacy_kind": "enum('excluded_periods','deep_mining','risky_work','rescuer') NULL DEFAULT NULL",
+                "note": "varchar(500) NULL DEFAULT NULL",
+                "period_from": "date NULL DEFAULT NULL",
+                "period_to": "date NULL DEFAULT NULL",
+                "period_year": "smallint(5) unsigned NULL DEFAULT NULL",
+                "received_on": "date NOT NULL",
+                "request_kind": "enum('eldp','jmh_correction','insurance_period_confirmation','compensation_confirmation','legacy_confirmation') NOT NULL",
+                "requester": "enum('cssz','ossz','employee','former_employee','survivor') NOT NULL",
+                "requester_reference": "varchar(190) NULL DEFAULT NULL",
+                "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
+                "stated_due_on": "date NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_payroll_pension_request_completed_by": "BTREE (completed_by)",
+                "fk_payroll_pension_request_created_by": "BTREE (created_by)",
+                "fk_payroll_pension_request_employment": "BTREE (supplier_id, employment_id)",
+                "idx_payroll_pension_request_employee": "BTREE (supplier_id, employee_id, received_on)",
+                "idx_payroll_pension_request_open": "BTREE (supplier_id, completed_on, due_on)",
+                "idx_payroll_pension_request_statement": "BTREE (supplier_id, eldp_statement_id)"
+            },
+            "foreign_keys": {
+                "fk_payroll_pension_request_completed_by": "(completed_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_payroll_pension_request_created_by": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_payroll_pension_request_employee": "(supplier_id, employee_id) -> payroll_employees (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_payroll_pension_request_employment": "(supplier_id, employment_id) -> payroll_employments (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_payroll_pension_request_completion": "`completed_on` is null and `completion_kind` is null or `completed_on` is not null and `completion_kind` is not null",
+                "chk_payroll_pension_request_due": "`due_on` >= `received_on`",
+                "chk_payroll_pension_request_legacy": "`request_kind` = 'legacy_confirmation' = (`legacy_kind` is not null)",
+                "chk_payroll_pension_request_period": "`period_from` is null or `period_to` is null or `period_to` >= `period_from`",
+                "chk_payroll_pension_request_statement": "`eldp_statement_id` is null = (`eldp_environment` is null)"
             }
         },
         "payroll_period_export_download_grants": {

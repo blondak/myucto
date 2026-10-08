@@ -6019,6 +6019,82 @@
         "issue": "Vystavit potvrzení",
         "complete": "Vyřízeno mimo aplikaci"
       },
+      "pension_requests": {
+        "title": "Výzvy a žádosti v důchodovém pojištění",
+        "subtitle": "Evidenční list na výzvu nebo po úmrtí, oprava hlášení na výzvu, potvrzení o době pojištění a další potvrzení. Lhůta běží od doručení.",
+        "open_count": "{count} nevyřízená | {count} nevyřízené | {count} nevyřízených",
+        "empty": "Žádná výzva ani žádost není zapsaná.",
+        "row": "{requester} · doručeno {received} · vyřídit do {due}",
+        "copy_delivered": "Stejnopis předán {date}",
+        "completed_on": "Vyřízeno {date}",
+        "prepare_eldp": "Sestavit evidenční list",
+        "open_eldp": "Otevřít evidenční list",
+        "download_certificate": "Stáhnout potvrzení (PDF)",
+        "record_copy": "Stejnopis předán zaměstnanci",
+        "record_copy_cssz": "Stejnopis předložen ČSSZ",
+        "completion_reference": "Doklad o vyřízení (nepovinné)",
+        "complete": "Vyřízeno",
+        "save": "Zapsat výzvu nebo žádost",
+        "saved": "Výzva nebo žádost je zapsaná, termín je v hlídači termínů.",
+        "save_failed": "Výzvu nebo žádost se nepodařilo uložit.",
+        "load_failed": "Výzvy a žádosti se nepodařilo načíst.",
+        "certificate_failed": "Potvrzení se nepodařilo sestavit.",
+        "kind": {
+          "eldp": "Evidenční list důchodového pojištění",
+          "jmh_correction": "Sdělení nebo oprava údajů měsíčním hlášením (§ 38a odst. 1)",
+          "insurance_period_confirmation": "Potvrzení o době důchodového pojištění (§ 42)",
+          "compensation_confirmation": "Potvrzení o náhradách za ztrátu na výdělku (§ 37 odst. 2)",
+          "legacy_confirmation": "Potvrzení podle znění do 31. 12. 2025"
+        },
+        "legacy": {
+          "excluded_periods": "Potvrzení o vyloučených dobách se zúčtovaným příjmem (§ 37 odst. 2 písm. c) do 2025)",
+          "deep_mining": "Potvrzení o zaměstnání v hlubinném hornictví (§ 37 odst. 3 do 2025)",
+          "risky_work": "Potvrzení o počtu směn v rizikovém zaměstnání (§ 37 odst. 4 do 2025)",
+          "rescuer": "Potvrzení o směnách záchranáře nebo hasiče podniku (§ 37a do 2025)"
+        },
+        "requester": {
+          "cssz": "Výzva ČSSZ",
+          "ossz": "Výzva územní správy sociálního zabezpečení",
+          "employee": "Žádost zaměstnance",
+          "former_employee": "Žádost bývalého zaměstnance",
+          "survivor": "Oznámení úmrtí pozůstalým"
+        },
+        "status": {
+          "open": "Čeká na vyřízení",
+          "statement_prepared": "Evidenční list připraven",
+          "statement_submitted": "Evidenční list podán",
+          "statement_fulfilled": "Evidenční list přijat",
+          "completed": "Vyřízeno"
+        },
+        "fields": {
+          "kind": "Druh",
+          "legacy_kind": "Druh potvrzení",
+          "requester": "Kdo vyzval nebo požádal",
+          "received_on": "Den doručení",
+          "employment": "Pracovní vztah",
+          "employment_choose": "Zvolte pracovní vztah",
+          "period_year": "Rok",
+          "period_month": "Měsíc hlášení",
+          "death_on": "Datum úmrtí",
+          "stated_due_on": "Lhůta uvedená ve výzvě",
+          "requester_reference": "Číslo jednací nebo značka",
+          "note": "Poznámka"
+        },
+        "hint": {
+          "eldp": "Evidenční list na výzvu ČSSZ/ÚSSZ se předkládá do 8 dnů od doručení (za roky od 2027 ve lhůtě z výzvy), po úmrtí do 3 měsíců. Sestavíte ho na obrazovce ELDP tlačítkem u výzvy; od té chvíle termín nese podání listu.",
+          "jmh_correction": "Chybějící nebo chybné údaje sdělte nebo opravte měsíčním hlášením do 8 dnů od doručení výzvy. Uplynula-li lhůta pro hlášení, sdělte údaje na tiskopise ČSSZ, případně evidenčním listem na výzvu.",
+          "insurance_period_confirmation": "Potvrzení o době trvání zaměstnání v roce, po kterou byl zaměstnanec důchodově pojištěn, vydejte do 8 dnů od obdržení žádosti. Aplikace ho sestaví ze schválených mezd.",
+          "compensation_confirmation": "Potvrzení o době, důvodu a výši náhrad za ztrátu na výdělku po pracovním úrazu nebo nemoci z povolání vystavte do 30 dnů. Náhrady modul mezd nepočítá, potvrzení vystavte z vlastní evidence a žádost označte jako vyřízenou.",
+          "legacy_confirmation": "Potvrzení podle znění do 31. 12. 2025 (čl. V zákona č. 360/2025 Sb.) se vydává za období před rokem 2026 na předepsaných tiskopisech do 30 dnů od žádosti. Údaje o směnách modul nevede."
+        },
+        "missing": {
+          "received_on": "Zadejte den doručení.",
+          "employment": "Zvolte pracovní vztah.",
+          "period_month": "Zadejte měsíc hlášení.",
+          "death_on": "Zadejte datum úmrtí.",
+          "stated_due_on": "Za rok od 2027 zadejte lhůtu uvedenou ve výzvě."
+        }
+      },
       "foreign_permits": {
         "title": "Pobytová a pracovní oprávnění",
         "subtitle": "Účinná historie cizineckých oprávnění s ověřeným firemním podkladem v Dokumentech.",
@@ -8280,6 +8356,11 @@
       "deductedDerivedHint": "Odečtené doby po dosažení důchodového věku (kód D) aplikace odvozuje z nepřítomností: neplacené volno, neomluvená absence, nemoc, ošetřování a měsíce bez účasti na pojištění.",
       "deathOn": "Datum úmrtí zaměstnance",
       "deathOnHint": "Vyplňte jen u evidenčního listu v souvislosti s úmrtím (typ 03). Předkládá se do 3 měsíců od úmrtí.",
+      "fromRequest": {
+        "title": "Evidenční list na výzvu z evidence výzev",
+        "body": "{requester} doručena {received}, předložit do {due}.",
+        "hint": "Údaje výzvy převezme aplikace ze zapsané výzvy; připravený list se k ní naváže a termín pak nese podání listu."
+      },
       "requestedByAuthority": "Evidenční list se sestavuje na výzvu ČSSZ/ÚSSZ.",
       "authorityRequestReceivedOn": "Datum doručení výzvy",
       "authorityRequestReceivedOnHint": "Od tohoto dne běží osmidenní lhůta. Při výzvě během roku list skončí posledním měsícem, za který už byla schválena mzda; budoucí měsíce nevyžaduje.",
@@ -9068,6 +9149,14 @@
           "foreign_permit_residence": "Končí povolení k pobytu",
           "foreign_permit_work": "Končí povolení k zaměstnání",
           "taxable_income_request": "Vystavit potvrzení o zdanitelných příjmech na žádost (§ 38j)",
+          "pension_request_eldp": "Předložit evidenční list na výzvu",
+          "pension_request_jmh_correction": "Opravit údaje měsíčním hlášením na výzvu (§ 38a)",
+          "pension_request_insurance_period_confirmation": "Vydat potvrzení o době důchodového pojištění (§ 42)",
+          "pension_request_compensation_confirmation": "Vystavit potvrzení o náhradách za ztrátu na výdělku (§ 37)",
+          "pension_request_excluded_periods": "Vystavit potvrzení o vyloučených dobách (do 2025)",
+          "pension_request_deep_mining": "Vystavit potvrzení o hlubinném hornictví (do 2025)",
+          "pension_request_risky_work": "Vystavit potvrzení o směnách v rizikovém zaměstnání (do 2025)",
+          "pension_request_rescuer": "Vystavit potvrzení o směnách záchranáře (do 2025)",
           "business_trip_documents": "Doklady k vyúčtování pracovní cesty (§ 183 ZP)",
           "business_trip_settlement": "Vyúčtovat pracovní cestu (§ 183 ZP)"
         },

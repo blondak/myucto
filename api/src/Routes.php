@@ -1646,6 +1646,17 @@ final class Routes
             $g->post(
                 '/people/{id:[0-9]+}/taxable-income-requests',
                 [\MyInvoice\Action\Payroll\PayrollTaxableIncomeConfirmationRequestAction::class, 'save'],
+            );            $g->get(
+                '/people/{id:[0-9]+}/pension-requests',
+                [\MyInvoice\Action\Payroll\PayrollPensionRequestAction::class, 'show'],
+            );
+            $g->post(
+                '/people/{id:[0-9]+}/pension-requests',
+                [\MyInvoice\Action\Payroll\PayrollPensionRequestAction::class, 'save'],
+            );
+            $g->get(
+                '/people/{id:[0-9]+}/pension-requests/{requestId:[0-9]+}/certificate',
+                [\MyInvoice\Action\Payroll\PayrollPensionRequestAction::class, 'certificate'],
             );
             $g->get(
                 '/people/{id:[0-9]+}/statutory-openings',

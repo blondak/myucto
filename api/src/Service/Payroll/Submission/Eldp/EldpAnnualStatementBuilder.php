@@ -282,6 +282,10 @@ final class EldpAnnualStatementBuilder
         }
         ksort($months, SORT_STRING);
         $allMonths = $months;
+        // Výzva v průběhu vykazovaného roku: list končí posledním zúčtovaným
+        // měsícem ({@see self::employmentLines()}).
+        $untilLastAccountedMonth = $requestedByAuthority
+            && substr((string) $authorityRequestReceivedOn, 0, 4) === sprintf('%04d', $year);
 
         $employmentFromTakeover = false;
         $employment = $this->resolveEmployment(
@@ -308,8 +312,7 @@ final class EldpAnnualStatementBuilder
             $takeover,
             $takeoverRows,
             $pension,
-            $requestedByAuthority,
-            $authorityRequestReceivedOn,
+            $untilLastAccountedMonth,
             $blockers,
         );
         $lines = $assembled['lines'];
@@ -361,8 +364,7 @@ final class EldpAnnualStatementBuilder
                 $continuedTakeover,
                 $continuedRows,
                 $pension,
-                $requestedByAuthority,
-                $authorityRequestReceivedOn,
+                $untilLastAccountedMonth,
                 $blockers,
             );
             if ($continued === []) {
@@ -622,6 +624,125 @@ final class EldpAnnualStatementBuilder
     }
 
     /**
+     * Doby důchodového pojištění jednoho vztahu v kalendářním roce — podklad
+     * potvrzení podle § 42 zákona č. 582/1991 Sb. („potvrzení o době trvání
+     * zaměstnání v kalendářním roce, po kterou byl zaměstnanec důchodově
+     * pojištěn").
+     *
+     * Potvrzení vydává zaměstnavatel na žádost za každý rok, i za roky, za
+     * které evidenční list sestavuje ČSSZ. Doby proto skládá týž sestavovač
+     * z týchž zmrazených podkladů jako evidenční list (účast, měsíce bez
+     * pojištění, „Od" od vzniku účasti), jen bez přípustnosti samostatného
+     * listu, lhůty a tiskopisu. Souvislé řádky listu se slévají do jedné doby;
+     * plný starobní důchod dobu pojištění nekrátí. Trvá-li vztah, potvrzení
+     * končí posledním zúčtovaným měsícem — stejně jako list na výzvu v roce.
+     *
+     * @param list<mixed> $revisions
+     * @param array<string,mixed> $pensionStatus důchodové údaje osoby ze zákonné evidence
+     * @return array{
+     *   employee_id:int,employment_start:string,employment_end:?string,
+     *   periods:list<array{from:string,to:string,days:int,months_without_insurance:list<int>}>,
+     *   insurance_days:int,source_revisions:list<array{period_start:string,revision_id:int}>,
+     *   source_takeover_periods:list<string>
+     * }
+     */
+    public function insurancePeriods(
+        int $supplierId,
+        int $employmentId,
+        int $year,
+        array $revisions,
+        array $pensionStatus,
+        ?PayrollTakeoverYear $takeover = null,
+    ): array {
+        if ($supplierId <= 0 || $employmentId <= 0) {
+            throw new \InvalidArgumentException('Firma a pracovní vztah musí být kladná čísla.');
+        }
+        if ($year < 2000 || $year > 2100) {
+            throw new \InvalidArgumentException('Rok potvrzení musí být v rozsahu 2000 až 2100.');
+        }
+        if ($takeover !== null
+            && ($takeover->supplierId !== $supplierId || $takeover->year !== $year)
+        ) {
+            throw new \InvalidArgumentException(
+                'Převzaté mzdy musí být načtené za tutéž firmu a rok jako potvrzení.',
+            );
+        }
+        $pension = self::pensionStatus($pensionStatus);
+        $takeoverRows = $takeover !== null ? $takeover->forEmployment($employmentId) : [];
+        $blockers = [];
+        $months = $this->readMonths($supplierId, $year, $revisions, $blockers);
+        if ($months === [] && $takeoverRows === []) {
+            throw EldpValidationException::blocked([[
+                'code' => 'eldp_no_source_revision',
+                'message' => "Za rok {$year} není k pracovnímu vztahu žádná schválená mzdová revize.",
+                'detail' => ['year' => $year, 'employment_id' => $employmentId],
+            ]]);
+        }
+        ksort($months, SORT_STRING);
+        $fromTakeover = false;
+        $employment = $this->resolveEmployment($months, $employmentId, $blockers, $takeoverRows, $fromTakeover);
+        $assembled = $this->employmentLines(
+            $employmentId,
+            $year,
+            $employment,
+            $months,
+            $takeover,
+            $takeoverRows,
+            $pension,
+            true,
+            $blockers,
+            true,
+        );
+        $lines = $assembled['lines'];
+        $periods = [];
+        if (array_filter($lines, static fn (array $line): bool => $line['participates'] === true) !== []) {
+            foreach ($this->sections($lines) as $section) {
+                if (!is_string($section['valid_from']) || !is_string($section['valid_to'])) {
+                    continue;
+                }
+                $last = array_key_last($periods);
+                if ($last !== null
+                    && (new \DateTimeImmutable($periods[$last]['to']))->modify('+1 day')->format('Y-m-d')
+                        === $section['valid_from']
+                ) {
+                    $periods[$last]['to'] = $section['valid_to'];
+                    $periods[$last]['days'] += (int) $section['insurance_days'];
+                    $periods[$last]['months_without_insurance'] = array_values(array_unique([
+                        ...$periods[$last]['months_without_insurance'],
+                        ...$section['months_without_insurance'],
+                    ]));
+                    continue;
+                }
+                $periods[] = [
+                    'from' => $section['valid_from'],
+                    'to' => $section['valid_to'],
+                    'days' => (int) $section['insurance_days'],
+                    'months_without_insurance' => $section['months_without_insurance'],
+                ];
+            }
+        }
+
+        return [
+            'employee_id' => $employment['employee_id'],
+            'employment_start' => $employment['start'],
+            'employment_end' => $employment['end'],
+            'periods' => $periods,
+            'insurance_days' => array_sum(array_column($periods, 'days')),
+            'source_revisions' => array_values(array_column(array_map(
+                static fn (array $line): array => [
+                    'period_start' => (string) $line['period_start'],
+                    'revision_id' => (int) $line['revision_id'],
+                ],
+                array_filter($lines, static fn (array $line): bool => $line['source'] === 'revision'),
+            ), null, 'period_start')),
+            'source_takeover_periods' => array_values(array_map(
+                static fn (array $line): string => (string) $line['period_start'],
+                array_filter($lines, static fn (array $line): bool => $line['source'] === 'takeover'),
+            )),
+        ];
+    }
+
+    /**
      * Řádky listu za jeden pracovní vztah: měsíce ze schválených revizí,
      * v roce přechodu doplněné převzatými, dodatečně zúčtovaný příjem „P+"
      * a dělení podle kódu D. Při navazujícím zaměstnání se volá za každý
@@ -643,9 +764,9 @@ final class EldpAnnualStatementBuilder
         ?PayrollTakeoverYear $takeover,
         array $takeoverRows,
         array $pension,
-        bool $requestedByAuthority,
-        ?string $authorityRequestReceivedOn,
+        bool $untilLastAccountedMonth,
         array &$blockers,
+        bool $keepFullPensionMonths = false,
     ): array {
         $this->assertPensionStatusMatchesEvidence(
             $months,
@@ -658,9 +779,7 @@ final class EldpAnnualStatementBuilder
         // Všeobecné zásady ČSSZ k ELDP určují pro výzvu během roku jako
         // datum „Do“ konec posledního měsíce se zúčtovaným příjmem. Schválená
         // aktuální revize je zde neměnným důkazem takového zúčtovaného měsíce.
-        if ($requestedByAuthority
-            && substr((string) $authorityRequestReceivedOn, 0, 4) === sprintf('%04d', $year)
-        ) {
+        if ($untilLastAccountedMonth && $months !== []) {
             $lastAccountedMonth = (string) array_key_last($months);
             $lastAccountedOn = (new \DateTimeImmutable($lastAccountedMonth))
                 ->modify('last day of this month')->format('Y-m-d');
@@ -673,7 +792,9 @@ final class EldpAnnualStatementBuilder
             $employment['start'],
             $reportingEnd,
         );
-        $notKeptFrom = self::fullPensionNotKeptFrom($year, $pension);
+        // Plný starobní důchod vylučuje jen vedení listu, ne důchodové pojištění:
+        // potvrzení o době pojištění (§ 42) měsíce nevypouští.
+        $notKeptFrom = $keepFullPensionMonths ? null : self::fullPensionNotKeptFrom($year, $pension);
         if ($notKeptFrom !== null) {
             $requiredMonths = array_values(array_filter(
                 $requiredMonths,

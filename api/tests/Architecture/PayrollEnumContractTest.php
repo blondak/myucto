@@ -74,6 +74,13 @@ final class PayrollEnumContractTest extends TestCase
      * @var array<string,string>
      */
     private const UNION_DOMAIN = [
+        // Výzvy a žádosti v důchodovém pojištění (ELDP na výzvu, § 38a, § 42, § 37)
+        'payroll.ts::PayrollPensionRequestKind'
+            => 'db:payroll_pension_requests.request_kind',
+        'payroll.ts::PayrollPensionRequestLegacyKind'
+            => 'db:payroll_pension_requests.legacy_kind',
+        'payroll.ts::PayrollPensionRequester'
+            => 'db:payroll_pension_requests.requester',
         // Druh dokumentu personálního spisu
         'payrollPersonnel.ts::PersonnelDocumentCategory'
             => 'const:MyInvoice\Repository\Payroll\PayrollPersonnelFileRepository::CATEGORIES',

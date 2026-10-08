@@ -14,8 +14,8 @@
  * „připraveno" a nabízí jen kontrolní XML. Člověk podání dokončí v oficiálním
  * rozhraní ČSSZ a tady následně uloží jen doložený výsledek z firemního DMS.
  */
-import { computed, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { RouterLink, useRoute } from 'vue-router'
 import { eldpRemediation, type EldpBlocker } from './payrollRemediation'
 import { isAxiosError } from 'axios'
 import { useI18n } from 'vue-i18n'
@@ -29,6 +29,7 @@ import {
   type PayrollEldpPrepared,
   type PayrollEldpStatement,
   type PayrollEmployment,
+  type PayrollPensionRequest,
   type PayrollRegzelEnvironment,
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
@@ -42,6 +43,7 @@ import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
+const route = useRoute()
 
 const preparing = ref(false)
 const downloading = ref(false)
@@ -111,6 +113,13 @@ const confirmedOn = ref(new Date().toLocaleDateString('sv-SE'))
 const completing = ref(false)
 const completionError = ref('')
 const completionSuccess = ref('')
+/*
+ * Výzva z evidence výzev u osoby (`?pension_request=`). Údaje výzvy (žadatel,
+ * doručení, lhůta, úmrtí) se do formuláře převezmou a server je při přípravě
+ * stejně vezme ze zapsané výzvy, aby list a výzva měly tentýž termín.
+ */
+const pensionRequest = ref<PayrollPensionRequest | null>(null)
+let employmentsLoad: Promise<void> = Promise.resolve()
 
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
 const canReadDocuments = computed(() => auth.canRead('documents'))
@@ -486,6 +495,11 @@ async function prepare(): Promise<void> {
         : `eldp:${environment.value}:${employmentId.value}:${year.value}`,
       correction: correction.value && statement.value !== null,
       prepared_on: preparedOn.value !== '' ? preparedOn.value : null,
+      pension_request_id: pensionRequest.value !== null
+        && pensionRequest.value.employment_id === employmentId.value
+        && pensionRequest.value.period_year === year.value
+        ? pensionRequest.value.id
+        : null,
     })
     success.value = prepared.value.created
       ? (prepared.value.corrects_statement_id
@@ -529,7 +543,7 @@ async function downloadControlXml(): Promise<void> {
 
 watch(personId, value => {
   if (value !== null) {
-    void loadEmployments(value)
+    employmentsLoad = loadEmployments(value)
   } else {
     employments.value = []
     employmentId.value = null
@@ -547,6 +561,38 @@ watch([employmentId, year, environment], () => {
   blockers.value = []
   void loadStatement()
 })
+/** Předvyplnění z prokliku z evidence výzev nebo z nápravy blokátoru. */
+async function applyRouteQuery(): Promise<void> {
+  const query = route?.query ?? {}
+  const person = Number(query.person)
+  const employment = Number(query.employment)
+  const queryYear = Number(query.year)
+  const requestId = Number(query.pension_request)
+  if (Number.isInteger(person) && person > 0) {
+    personId.value = person
+    await nextTick()
+    await employmentsLoad
+  }
+  if (Number.isInteger(employment) && employment > 0) employmentId.value = employment
+  if (Number.isInteger(queryYear) && queryYear >= 2000) year.value = queryYear
+  await nextTick()
+  if (!Number.isInteger(requestId) || requestId <= 0 || personId.value === null) return
+  try {
+    const found = (await payrollApi.pensionRequests(personId.value))
+      .find(request => request.id === requestId && request.request_kind === 'eldp') ?? null
+    pensionRequest.value = found
+    if (found === null) return
+    requestedByAuthority.value = found.requester === 'cssz' || found.requester === 'ossz'
+    authorityRequestReceivedOn.value = requestedByAuthority.value ? found.received_on : ''
+    authorityRequestDueOn.value = found.stated_due_on ?? ''
+    deathOn.value = found.death_on ?? ''
+  } catch {
+    pensionRequest.value = null
+  }
+}
+
+onMounted(() => { void applyRouteQuery() })
+
 watch(requestedByAuthority, value => {
   if (value && authorityRequestReceivedOn.value === '') {
     const today = new Date()
@@ -640,6 +686,24 @@ watch(requestedByAuthority, value => {
       role="status"
     >
       {{ success }}
+    </div>
+
+    <div
+      v-if="pensionRequest"
+      data-test="eldp-pension-request"
+      class="rounded-xl border border-primary-500/30 bg-primary-50 p-4 text-sm text-primary-800"
+      role="status"
+    >
+      <p class="font-medium">{{ t('payroll.eldp.fromRequest.title') }}</p>
+      <p class="mt-1 max-w-prose">
+        {{ t('payroll.eldp.fromRequest.body', {
+          requester: t(`payroll.people.pension_requests.requester.${pensionRequest.requester}`),
+          received: formatDate(pensionRequest.received_on),
+          due: formatDate(pensionRequest.due_on),
+        }) }}
+        <template v-if="pensionRequest.requester_reference"> ({{ pensionRequest.requester_reference }})</template>
+      </p>
+      <p class="mt-1 max-w-prose text-xs">{{ t('payroll.eldp.fromRequest.hint') }}</p>
     </div>
 
     <div class="space-y-4 rounded-xl border border-neutral-200 bg-surface p-4">

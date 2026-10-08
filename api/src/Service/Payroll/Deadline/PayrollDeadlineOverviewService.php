@@ -141,6 +141,7 @@ final readonly class PayrollDeadlineOverviewService
         'annual_settlement',
         'foreign_permit',
         'taxable_income_request',
+        'pension_request',
         'business_trip',
     ];
 
@@ -173,6 +174,7 @@ final readonly class PayrollDeadlineOverviewService
         'annual_settlement',
         'foreign_permit',
         'taxable_income_request',
+        'pension_request',
         'business_trip',
     ];
 
@@ -475,6 +477,7 @@ final readonly class PayrollDeadlineOverviewService
             ...$this->annualSettlementItems($supplierId, $from, $to),
             ...$this->foreignPermitItems($supplierId, $from, $to),
             ...$this->taxableIncomeRequestItems($supplierId, $from, $to),
+            ...$this->pensionRequestItems($supplierId, $from, $to),
             ...$this->businessTripItems($supplierId, $from, $to),
         ];
         usort(
@@ -616,6 +619,7 @@ final readonly class PayrollDeadlineOverviewService
             'annual_settlement' => $this->annualSettlementItems($supplierId, $from, $to),
             'foreign_permit' => $this->foreignPermitItems($supplierId, $from, $to),
             'taxable_income_request' => $this->taxableIncomeRequestItems($supplierId, $from, $to),
+            'pension_request' => $this->pensionRequestItems($supplierId, $from, $to),
             'business_trip' => $this->businessTripItems($supplierId, $from, $to),
             default => [],
         };
@@ -1426,6 +1430,53 @@ final readonly class PayrollDeadlineOverviewService
                 'request_id' => $row['request_id'],
                 'deadline_source' => '§ 38j odst. 3 zákona č. 586/1992 Sb. — do 10 dnů od žádosti ze dne '
                     . (new \DateTimeImmutable($row['requested_on']))->format('j. n. Y'),
+                'deadline_source_status' => 'statute_verified',
+                'path' => '/payroll/people?' . http_build_query($query),
+            ];
+        }
+
+        return $items;
+    }
+
+    /**
+     * Výzvy a žádosti v důchodovém pojištění (evidenční list na výzvu nebo
+     * po úmrtí, oprava hlášení na výzvu, potvrzení podle § 42 a § 37 odst. 2,
+     * potvrzení podle znění do 31. 12. 2025). Termín počítá
+     * {@see \MyInvoice\Service\Payroll\Submission\Eldp\PensionRequestDeadlinePolicy};
+     * výzva navázaná na připravený evidenční list tu chybí, její termín nese
+     * povinnost listu v pramenu podání.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function pensionRequestItems(
+        int $supplierId,
+        string $from,
+        string $to,
+    ): array {
+        $items = [];
+        foreach ($this->repository->pensionRequestDeadlines($supplierId, $from, $to) as $row) {
+            $dueOn = $row['due_on'];
+            $phase = $this->phase($dueOn);
+            $query = ['person' => $row['employee_id'], 'panel' => 'pension_requests'];
+            if ($row['employment_id'] !== null) {
+                $query['employment'] = $row['employment_id'];
+            }
+            $items[] = [
+                'source' => 'pension_request',
+                'reference' => 'payroll_pension_request:' . $row['request_id'],
+                'title' => 'pension_request_' . ($row['legacy_kind'] ?? $row['request_kind']),
+                'subject' => $row['full_name'],
+                'period' => $row['period_year'] !== null
+                    ? (string) $row['period_year']
+                    : ($row['period_from'] !== null ? substr($row['period_from'], 0, 7) : null),
+                'due_on' => $dueOn,
+                'phase' => $phase,
+                'days_to_due' => $this->daysToDue($dueOn),
+                'is_overdue' => $phase === 'overdue',
+                'employee_id' => $row['employee_id'],
+                'employment_id' => $row['employment_id'],
+                'request_id' => $row['request_id'],
+                'deadline_source' => $row['legal_basis'],
                 'deadline_source_status' => 'statute_verified',
                 'path' => '/payroll/people?' . http_build_query($query),
             ];

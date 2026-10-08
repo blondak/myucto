@@ -6019,6 +6019,82 @@
         "issue": "Issue certificate",
         "complete": "Completed outside the app"
       },
+      "pension_requests": {
+        "title": "Pension insurance requests",
+        "subtitle": "Record sheet on request or after death, report correction on request, confirmation of the insurance period and other confirmations. The deadline runs from delivery.",
+        "open_count": "{count} open | {count} open | {count} open",
+        "empty": "No request has been recorded.",
+        "row": "{requester} · delivered {received} · due {due}",
+        "copy_delivered": "Copy handed over on {date}",
+        "completed_on": "Completed on {date}",
+        "prepare_eldp": "Prepare the record sheet",
+        "open_eldp": "Open the record sheet",
+        "download_certificate": "Download the confirmation (PDF)",
+        "record_copy": "Copy handed to the employee",
+        "record_copy_cssz": "Copy submitted to ČSSZ",
+        "completion_reference": "Proof of completion (optional)",
+        "complete": "Completed",
+        "save": "Record the request",
+        "saved": "The request is recorded and its deadline is in the deadline overview.",
+        "save_failed": "The request could not be saved.",
+        "load_failed": "Requests could not be loaded.",
+        "certificate_failed": "The confirmation could not be prepared.",
+        "kind": {
+          "eldp": "Pension insurance record sheet",
+          "jmh_correction": "Reporting or correcting data in the monthly report (§ 38a(1))",
+          "insurance_period_confirmation": "Confirmation of the pension insurance period (§ 42)",
+          "compensation_confirmation": "Confirmation of compensation for loss of earnings (§ 37(2))",
+          "legacy_confirmation": "Confirmation under the wording until 31 Dec 2025"
+        },
+        "legacy": {
+          "excluded_periods": "Confirmation of excluded periods with accounted income (§ 37(2)(c) until 2025)",
+          "deep_mining": "Confirmation of deep-mining employment (§ 37(3) until 2025)",
+          "risky_work": "Confirmation of shifts in risky work (§ 37(4) until 2025)",
+          "rescuer": "Confirmation of rescuer or company firefighter shifts (§ 37a until 2025)"
+        },
+        "requester": {
+          "cssz": "ČSSZ request",
+          "ossz": "District social security office request",
+          "employee": "Employee request",
+          "former_employee": "Former employee request",
+          "survivor": "Death notice from a survivor"
+        },
+        "status": {
+          "open": "Waiting",
+          "statement_prepared": "Record sheet prepared",
+          "statement_submitted": "Record sheet submitted",
+          "statement_fulfilled": "Record sheet accepted",
+          "completed": "Completed"
+        },
+        "fields": {
+          "kind": "Kind",
+          "legacy_kind": "Confirmation kind",
+          "requester": "Requested by",
+          "received_on": "Delivery date",
+          "employment": "Employment",
+          "employment_choose": "Choose the employment",
+          "period_year": "Year",
+          "period_month": "Report month",
+          "death_on": "Date of death",
+          "stated_due_on": "Deadline stated in the request",
+          "requester_reference": "Reference number",
+          "note": "Note"
+        },
+        "hint": {
+          "eldp": "A record sheet requested by ČSSZ is submitted within 8 days of delivery (for years from 2027 within the deadline stated in the request), after death within 3 months. Prepare it on the ELDP screen using the button at the request; from then on the deadline is carried by the submission.",
+          "jmh_correction": "Report or correct missing or wrong data in the monthly report within 8 days of delivery. If the report deadline has passed, use the ČSSZ form or a record sheet on request.",
+          "insurance_period_confirmation": "Issue the confirmation of the employment period in the year during which the employee was pension-insured within 8 days. The application builds it from approved payroll.",
+          "compensation_confirmation": "Issue the confirmation of the period, reason and amount of compensation for loss of earnings within 30 days. Payroll does not calculate this compensation; issue it from your own records and mark the request completed.",
+          "legacy_confirmation": "Confirmations under the wording until 31 Dec 2025 (Art. V of Act 360/2025) are issued for periods before 2026 on prescribed forms within 30 days. Payroll does not keep shift records."
+        },
+        "missing": {
+          "received_on": "Enter the delivery date.",
+          "employment": "Choose the employment.",
+          "period_month": "Enter the report month.",
+          "death_on": "Enter the date of death.",
+          "stated_due_on": "For years from 2027 enter the deadline stated in the request."
+        }
+      },
       "foreign_permits": {
         "title": "Residence and work permits",
         "subtitle": "Effective history of foreign-national permits with verified company evidence in Documents.",
@@ -8280,6 +8356,11 @@
       "deductedDerivedHint": "Periods deducted after reaching retirement age (code D) are derived from absences: unpaid leave, unexcused absence, sickness, care and months without insurance participation.",
       "deathOn": "Date of the employee's death",
       "deathOnHint": "Fill in only for a pension record issued in connection with death (type 03). It is submitted within 3 months of death.",
+      "fromRequest": {
+        "title": "Record sheet for a recorded request",
+        "body": "{requester} delivered on {received}, submit by {due}.",
+        "hint": "The request data are taken from the recorded request; the prepared sheet is linked to it and the submission then carries the deadline."
+      },
       "requestedByAuthority": "The record sheet is being prepared at the request of the authority.",
       "authorityRequestReceivedOn": "Request received on",
       "authorityRequestReceivedOnHint": "The eight-day deadline starts on this date. For a request made during the year, the sheet ends with the last month whose payroll has already been approved; future months are not required.",
@@ -9068,6 +9149,14 @@
           "foreign_permit_residence": "Residence permit expires",
           "foreign_permit_work": "Work permit expires",
           "taxable_income_request": "Issue the certificate of taxable income on request (§ 38j)",
+          "pension_request_eldp": "Submit the record sheet on request",
+          "pension_request_jmh_correction": "Correct data in the monthly report on request (§ 38a)",
+          "pension_request_insurance_period_confirmation": "Issue the confirmation of the insurance period (§ 42)",
+          "pension_request_compensation_confirmation": "Issue the confirmation of compensation for loss of earnings (§ 37)",
+          "pension_request_excluded_periods": "Issue the confirmation of excluded periods (until 2025)",
+          "pension_request_deep_mining": "Issue the deep-mining confirmation (until 2025)",
+          "pension_request_risky_work": "Issue the risky-work shift confirmation (until 2025)",
+          "pension_request_rescuer": "Issue the rescuer shift confirmation (until 2025)",
           "business_trip_documents": "Business trip settlement documents (§ 183 Labour Code)",
           "business_trip_settlement": "Settle the business trip (§ 183 Labour Code)"
         },

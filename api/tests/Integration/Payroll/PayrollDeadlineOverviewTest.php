@@ -8,6 +8,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository;
 use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
+use MyInvoice\Repository\Payroll\PayrollPensionRequestRepository;
 use MyInvoice\Repository\Payroll\PayrollTaxableIncomeConfirmationRequestRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationChangeProposalRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationIdentitySnapshotRepository;
@@ -422,6 +423,86 @@ final class PayrollDeadlineOverviewTest extends TestCase
             [],
             $this->itemsOfSource($this->service->overview($this->supplierId, 'production'), 'taxable_income_request'),
         );
+    }
+
+    /**
+     * § 38a odst. 1 zákona č. 582/1991 Sb.: výzva ČSSZ/ÚSSZ ke sdělení nebo
+     * opravě údajů měsíčním hlášením má lhůtu 8 dnů od doručení. Dřív ji
+     * aplikace neevidovala vůbec; teď je v přehledu termínů, dokud ji účetní
+     * nevyřídí.
+     */
+    public function testAuthorityRequestToCorrectTheMonthlyReportIsADeadline(): void
+    {
+        $requests = new PayrollPensionRequestRepository($this->db);
+        $actorId = $this->actorId();
+        $list = $requests->create($this->supplierId, $this->employeeId, [
+            'request_kind' => 'jmh_correction',
+            'requester' => 'ossz',
+            'requester_reference' => 'SYN-38a-1',
+            'received_on' => '2026-08-12',
+            'period_from' => '2026-05-01',
+            'employment_id' => $this->employmentId,
+        ], $actorId);
+        self::assertSame('2026-08-20', $list[0]['due_on']);
+        self::assertStringContainsString('§ 38a odst. 1', $list[0]['deadline_source']);
+
+        $items = $this->itemsOfSource($this->service->overview($this->supplierId, 'production'), 'pension_request');
+        self::assertCount(1, $items);
+        self::assertSame('2026-08-20', $items[0]['due_on']);
+        self::assertSame('pension_request_jmh_correction', $items[0]['title']);
+        self::assertSame('2026-05', $items[0]['period']);
+        self::assertStringContainsString('panel=pension_requests', $items[0]['path']);
+
+        $requests->complete($this->supplierId, $this->employeeId, $list[0]['id'], '2026-08-18', 'SYN-JMH-opravne', $actorId);
+        self::assertSame(
+            [],
+            $this->itemsOfSource($this->service->overview($this->supplierId, 'production'), 'pension_request'),
+        );
+        self::assertSame('completed', $requests->list($this->supplierId, $this->employeeId)[0]['status']);
+    }
+
+    /**
+     * § 37 odst. 2 a čl. V bod 4 zák. č. 360/2025 Sb.: potvrzení o náhradách
+     * za ztrátu na výdělku a o směnách v rizikovém zaměstnání do 30 dnů od
+     * žádosti; potvrzení podle starého znění jen za období před rokem 2026.
+     */
+    public function testCertificateRequestsOfTheOldAndCurrentWordingAreDeadlines(): void
+    {
+        $requests = new PayrollPensionRequestRepository($this->db);
+        $actorId = $this->actorId();
+        $requests->create($this->supplierId, $this->employeeId, [
+            'request_kind' => 'compensation_confirmation',
+            'requester' => 'former_employee',
+            'received_on' => '2026-08-03',
+        ], $actorId);
+        $list = $requests->create($this->supplierId, $this->employeeId, [
+            'request_kind' => 'legacy_confirmation',
+            'legacy_kind' => 'risky_work',
+            'requester' => 'employee',
+            'received_on' => '2026-08-04',
+            'period_year' => 2024,
+        ], $actorId);
+        self::assertSame(['2026-09-03', '2026-09-02'], array_column($list, 'due_on'));
+
+        $titles = array_column(
+            $this->itemsOfSource($this->service->overview($this->supplierId, 'production'), 'pension_request'),
+            'title',
+        );
+        sort($titles);
+        self::assertSame(['pension_request_compensation_confirmation', 'pension_request_risky_work'], $titles);
+
+        try {
+            $requests->create($this->supplierId, $this->employeeId, [
+                'request_kind' => 'legacy_confirmation',
+                'legacy_kind' => 'deep_mining',
+                'requester' => 'employee',
+                'received_on' => '2026-08-04',
+                'period_year' => 2026,
+            ], $actorId);
+            self::fail('Potvrzení podle znění do 31. 12. 2025 za rok 2026 nevzniká.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertStringContainsString('před 1. 1. 2026', $exception->getMessage());
+        }
     }
 
     /** Karta osoby zapisuje a vyřizuje žádost přes endpoint z kontejneru. */
