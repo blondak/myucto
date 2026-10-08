@@ -339,6 +339,100 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
         );
     }
 
+    /**
+     * Zkušební podání do TEST ČSSZ (8. 10. 2026): plná přihláška A1 se nedala
+     * odeslat vůbec, protože brána posílala do business matice místo druhu
+     * činnosti `null`. Druh činnosti i bližší určení jsou ve zmrazené větě.
+     */
+    public function testCompleteRegzecA1ReachesTheTransportWithActivityFromTheFrozenSentence(): void
+    {
+        $xml = self::regzecA1Xml();
+        $frozen = $this->createStub(JmhzFrozenPayloadReader::class);
+        $frozen->method('bytes')->willReturn($xml);
+        $dispatch = $this->createMock(JmhzDispatchService::class);
+        $dispatch->expects(self::once())
+            ->method('send')
+            ->with(
+                self::SUPPLIER,
+                'test',
+                self::SUBMISSION,
+                self::identicalTo($xml),
+                '1234567890',
+                'complete-a1',
+                7,
+                'CSSZ_REGZEC',
+            )
+            ->willReturn(new JmhzDispatchOutcome(self::attemptRow() + [
+                'request_sha256' => hash('sha256', $xml),
+            ]));
+
+        $result = (new PayrollRegistrationTransportService(
+            $this->repository('REGZEC25'),
+            $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
+            $frozen,
+            $dispatch,
+        ))->send(self::SUPPLIER, 'test', self::SUBMISSION, 'complete-a1', 7);
+
+        self::assertSame('CSSZ_REGZEC', $result['submission_class']);
+    }
+
+    /** Druh činnosti, který matice A1 nepřipouští, se pořád neodešle. */
+    public function testRegzecA1WithUnknownActivityNeverReachesTheTransport(): void
+    {
+        $frozen = $this->createStub(JmhzFrozenPayloadReader::class);
+        $frozen->method('bytes')->willReturn(self::regzecA1Xml('XX'));
+        $dispatch = $this->createMock(JmhzDispatchService::class);
+        $dispatch->expects(self::never())->method('send');
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('„XX" není v číselníku ČSSZ');
+
+        (new PayrollRegistrationTransportService(
+            $this->repository('REGZEC25'),
+            $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
+            $frozen,
+            $dispatch,
+        ))->send(self::SUPPLIER, 'test', self::SUBMISSION, 'unknown-activity', 7);
+    }
+
+    /**
+     * Dotaz na výsledek se ptá na podání, které ČSSZ už má. Brána odeslání
+     * ho zastavit nesmí, jinak pokus zůstane navždy čekat na protokol.
+     */
+    public function testRegzecA1PollAndCloseDoNotRunTheSendGate(): void
+    {
+        $xml = '<REGZEC xmlns="http://schemas.cssz.cz/REGZEC/2025"><employees>'
+            . '<employee act="1"><comp vs="1234567890"/></employee></employees></REGZEC>';
+        $frozen = $this->createStub(JmhzFrozenPayloadReader::class);
+        $frozen->method('bytes')->willReturn($xml);
+        $attempts = $this->createStub(PayrollSubmissionTransportAttemptRepository::class);
+        $attempts->method('find')->willReturn(self::attemptRow());
+        $dispatch = $this->createMock(JmhzDispatchService::class);
+        $dispatch->expects(self::once())
+            ->method('poll')
+            ->with(self::SUPPLIER, 'test', 5, '1234567890', 1, 'CSSZ_REGZEC')
+            ->willReturn(new JmhzDispatchOutcome(self::attemptRow()));
+        $dispatch->expects(self::once())
+            ->method('close')
+            ->with(self::SUPPLIER, 'test', 5, '1234567890', 'CSSZ_REGZEC')
+            ->willReturn([
+                'closed' => true,
+                'already_closed' => false,
+                'attempt' => self::attemptRow(),
+            ]);
+        $service = new PayrollRegistrationTransportService(
+            $this->repository('REGZEC25', 'submitted'),
+            $attempts,
+            $frozen,
+            $dispatch,
+        );
+
+        $service->poll(self::SUPPLIER, 'test', 5);
+        $closed = $service->close(self::SUPPLIER, 'test', 5);
+
+        self::assertTrue($closed['closed']);
+    }
+
     public function testIdempotencyKeyIsForwardedAndAReplayDoesNotCreateAnotherAction(): void
     {
         $xml = '<REGZEC xmlns="http://schemas.cssz.cz/REGZEC/2025"><employees>'
@@ -539,6 +633,14 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
         ]);
 
         return $repository;
+    }
+
+    private static function regzecA1Xml(string $activity = '1'): string
+    {
+        return '<REGZEC xmlns="http://schemas.cssz.cz/REGZEC/2025"><employees>'
+            . '<employee sqnr="1" act="1"><comp vs="1234567890"/>'
+            . '<job fro="2026-10-05" rel="' . $activity . '" relDetail="1"/>'
+            . '</employee></employees></REGZEC>';
     }
 
     /** @return array<string,mixed> */

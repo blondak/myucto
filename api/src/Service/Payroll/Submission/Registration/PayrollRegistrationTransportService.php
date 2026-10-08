@@ -58,6 +58,7 @@ final readonly class PayrollRegistrationTransportService
         $payload = $this->payload(
             $this->frozen->bytes($supplierId, $environment, $submissionId),
             $context['agenda_code'],
+            true,
         );
         $existing = $this->attempts->findByIdempotencyKey($idempotencyKey);
         if ($existing !== null) {
@@ -329,8 +330,11 @@ final readonly class PayrollRegistrationTransportService
     /**
      * @return array{bytes:string,sha256:string,variable_symbol:string,submission_class:string}
      */
-    private function payload(string $bytes, string $agendaCode): array
-    {
+    private function payload(
+        string $bytes,
+        string $agendaCode,
+        bool $sending = false,
+    ): array {
         $document = self::DOCUMENTS[$agendaCode];
         $dom = new DOMDocument();
         $previous = libxml_use_internal_errors(true);
@@ -371,7 +375,10 @@ final readonly class PayrollRegistrationTransportService
                 . 'zaměstnance.',
             );
         }
-        foreach ($employees as $employee) {
+        // Brány druhu podání patří jen k odeslání. Dotaz na výsledek a uzavření
+        // transakce se ptají na podání, které ČSSZ už má: kdyby je zastavila
+        // brána odeslání, zůstal by pokus navždy čekat na protokol.
+        foreach ($sending ? $employees : [] as $employee) {
             $action = $employee instanceof DOMElement
                 ? $employee->getAttribute('act')
                 : '';
@@ -392,12 +399,23 @@ final readonly class PayrollRegistrationTransportService
                 );
             }
             if ($agendaCode === 'REGZEC25' && (int) $action === 1) {
+                // Druh činnosti a bližší určení se čtou ze zmrazené věty
+                // (`job/@rel`, `job/@relDetail`), ne z karty vztahu: odchází
+                // právě tahle věta a karta se mezitím mohla změnit. Dřív se
+                // sem posílalo `null`, takže každá A1 skončila na „druh
+                // činnosti chybí" a plnou přihlášku nešlo odeslat vůbec.
+                $job = $xpath->query('r:job', $employee)->item(0);
+                $activity = $job instanceof DOMElement
+                    ? trim($job->getAttribute('rel'))
+                    : '';
+                $detail = $job instanceof DOMElement
+                    ? trim($job->getAttribute('relDetail'))
+                    : '';
                 try {
                     PayrollRegistrationBusinessMatrix::requireActionVariant(
                         1,
-                        null,
-                        null,
-                        false,
+                        $activity === '' ? null : $activity,
+                        $detail === '' ? null : $detail,
                     );
                 } catch (PayrollRegistrationXmlException $exception) {
                     // Text se záměrně nepřepisuje: business matice je jediné

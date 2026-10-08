@@ -651,7 +651,10 @@ pozdější změna osobní karty už nemění dříve zmrazené podání.
 
 Úplnou registraci REGZEC s akcí A1 aplikace nepřipraví ani neodešle, dokud
 nemá zmrazený povinný druh činnosti a úplnou datovou sadu odpovídající varianty
-OST, 10 nebo SPEC. Datová věta navazujících akcí A5 až A8 má jedinou variantu
+OST, 10 nebo SPEC. Při odeslání se druh činnosti a jeho bližší určení kontrolují
+ve zmrazené datové větě, která na ČSSZ odchází, ne na kartě vztahu. Zjištění
+výsledku a uzavření přenosu tyto kontroly neopakují, takže odeslanou přihlášku
+jde vždy dotáhnout do konce. Datová věta navazujících akcí A5 až A8 má jedinou variantu
 (OST) bez ohledu na druh činnosti; o tom, zda je zaměstnavatel smí podat,
 rozhoduje druh činnosti: storno A8 jde podat u všech druhů, přechod pod jiné
 české předpisy A6 a A7 u všech kromě 10, 11 až 14 a výkonu trestu (a navíc u druhu M),
