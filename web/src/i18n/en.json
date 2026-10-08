@@ -10861,7 +10861,7 @@
         "transferredOtherWork": "Transferred to other work",
         "transferredOn": "Transfer date",
         "transferReason": "Reason for the transfer",
-        "transferReasonHint": "If the employee was transferred because of pregnancy, maternity or breastfeeding, the decisive period may be set to the transfer date when that is more favourable (section 19(6) of Act No. 187/2006 Coll.).",
+        "transferReasonHint": "If the employee was transferred because of pregnancy, maternity or breastfeeding, the decisive period may be set to the transfer date when that is more favourable (section 19(6) of Act No. 187/2006 Coll.). The application sends one notice with the more favourable period. It does not yet build the second notice with the decisive period as of the transfer date, which ČSSZ requires at the same time: file it through the ČSSZ ePortal.",
         "transferReasons": {
           "pregnancy": "Pregnancy",
           "maternity": "Maternity",

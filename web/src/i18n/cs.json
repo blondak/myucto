@@ -10861,7 +10861,7 @@
         "transferredOtherWork": "Převedena na jinou práci",
         "transferredOn": "Den převedení",
         "transferReason": "Důvod převedení",
-        "transferReasonHint": "Byla-li zaměstnankyně převedena kvůli těhotenství, mateřství nebo kojení, může se rozhodné období určit ke dni převedení, je-li to pro ni výhodnější (§ 19 odst. 6 zákona č. 187/2006 Sb.).",
+        "transferReasonHint": "Byla-li zaměstnankyně převedena kvůli těhotenství, mateřství nebo kojení, může se rozhodné období určit ke dni převedení, je-li to pro ni výhodnější (§ 19 odst. 6 zákona č. 187/2006 Sb.). Aplikace pošle jedno oznámení s výhodnějším obdobím. Druhé oznámení s rozhodným obdobím ke dni převedení, které ČSSZ vyžaduje současně, zatím nesestaví: podejte ho přes ePortál ČSSZ.",
         "transferReasons": {
           "pregnancy": "Těhotenství",
           "maternity": "Mateřství",
