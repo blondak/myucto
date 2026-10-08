@@ -74,7 +74,12 @@ final class HealthInsurerChannelCatalogTest extends TestCase
         }
     }
 
-    public function testOnlyUndocumentedPdfRulesEndFailClosedAtEndOf2026(): void
+    /**
+     * Přechodné období pro dosavadní formáty končí 31. 12. 2026, potom zůstává
+     * jen jednotná datová věta. Od ledna 2027 tak u žádné pojišťovny nesmí
+     * chybět formát přílohy, jinak by nešlo vyrobit ani PPZ za 12/2026.
+     */
+    public function testLegacyPdfTransitionEndsWithTheSharedXmlFrom2027(): void
     {
         $catalog = new HealthInsurerChannelCatalog();
         foreach (['111', '201', '209'] as $insurerCode) {
@@ -85,10 +90,19 @@ final class HealthInsurerChannelCatalogTest extends TestCase
                 $insurerCode,
             );
             self::assertSame(
-                HealthInsurerIsdsAttachmentFormat::None,
+                HealthInsurerIsdsAttachmentFormat::Xml,
                 $channel->isdsAttachmentFormatOn('2027-01-01'),
                 $insurerCode,
             );
+        }
+        foreach ($catalog->channels() as $code => $channel) {
+            foreach (['2027-01-01', '2027-01-20', '2030-06-30'] as $date) {
+                self::assertNotSame(
+                    HealthInsurerIsdsAttachmentFormat::None,
+                    $channel->isdsAttachmentFormatOn($date),
+                    "{$code} {$date}",
+                );
+            }
         }
     }
 

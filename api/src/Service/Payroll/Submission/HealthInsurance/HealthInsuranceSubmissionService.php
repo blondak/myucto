@@ -2189,6 +2189,22 @@ final readonly class HealthInsuranceSubmissionService
         HealthPaymentOverview $overview,
         ?string $submissionKind = null,
     ): HealthPaymentOverviewPayload {
+        // E-přepážka ČPZP přehled za budoucí měsíc odmítne („Nelze podávat
+        // přehled za budoucí nebo jinak nepovolené období"); běžný měsíc
+        // projde. Schválený běh budoucího měsíce proto podání nezaloží.
+        $currentMonth = substr($this->today(), 0, 7);
+        if ($overview->period > $currentMonth) {
+            throw new HealthNotificationException(
+                'zp_period_in_future',
+                sprintf(
+                    'Přehled o platbě pojistného za %s nejde podat dřív, než '
+                    . 'období nastane - pojišťovna přehled za budoucí měsíc '
+                    . 'odmítne. Připravte ho nejdříve v měsíci %s.',
+                    $overview->period,
+                    $overview->period,
+                ),
+            );
+        }
         $employer = $this->requireEmployer(
             $supplierId,
             $overview->insurerCode,

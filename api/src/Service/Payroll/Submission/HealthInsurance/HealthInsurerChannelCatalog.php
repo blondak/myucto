@@ -36,6 +36,9 @@ final class HealthInsurerChannelCatalog
     public const REASON_SHARED_MESSAGE_UNCONFIRMED =
         'zp_shared_data_message_acceptance_unconfirmed';
 
+    /** Poslední den přechodného období pro dosavadní elektronické formáty. */
+    public const LEGACY_FORMAT_TRANSITION_END = '2026-12-31';
+
     private const RECIPIENT_CODES = [
         '111' => 'zp_vzp_111',
         '201' => 'zp_vozp_201',
@@ -102,34 +105,31 @@ final class HealthInsurerChannelCatalog
                 insurerCode: '111',
                 kind: HealthInsurerChannelKind::OwnPortal,
                 portalUrl: 'https://point.vzp.cz',
-                isdsAttachmentRules: [self::pdfBetween(
-                    '2026-01-01',
-                    '2026-12-31',
-                )],
+                isdsAttachmentRules: self::pdfUntilTransitionEndThenXml(),
                 automatedDispatchDocumented: false,
                 undocumentedReasonCode:
                     self::REASON_TRANSPORT_UNDOCUMENTED,
                 note: 'VZP zveřejňuje jednotné vydání tiskopisů 2026 '
                     . '(UNI 73.51 a UNI 76.51) i XDP šablonu pro hromadné '
                     . 'vyplnění z účetních systémů. Pro datovou schránku '
-                    . 'MyÚčto vyplní přímo připnutý úřední tiskopis a jeho '
-                    . 'integritu ověří proti připnutému otisku.',
+                    . 'MyÚčto do konce roku 2026 vyplní přímo připnutý úřední '
+                    . 'tiskopis a jeho integritu ověří proti připnutému otisku; '
+                    . 'od roku 2027 přikládá jednotnou datovou větu (XML).',
             ),
             new HealthInsurerChannel(
                 insurerCode: '201',
                 kind: HealthInsurerChannelKind::SharedPortal,
                 portalUrl: 'https://portal.vozp.cz',
-                isdsAttachmentRules: [self::pdfBetween(
-                    '2026-01-01',
-                    '2026-12-31',
-                )],
+                isdsAttachmentRules: self::pdfUntilTransitionEndThenXml(),
                 automatedDispatchDocumented: false,
                 undocumentedReasonCode:
                     self::REASON_PORTAL_GATEWAY_ON_REQUEST,
                 note: 'VoZP výslovně umožňuje podání datovou schránkou '
                     . 'a čísluje své tiskopisy 73.51 a 76.51 stejně jako '
                     . 'jednotné vydání 2026; XDP šablonu zveřejňuje shodnou '
-                    . 's VZP. MyÚčto pro ISDS vyplní tentýž úřední tiskopis.',
+                    . 's VZP. MyÚčto pro ISDS do konce roku 2026 vyplní tentýž '
+                    . 'úřední tiskopis, od roku 2027 přikládá jednotnou datovou '
+                    . 'větu (XML).',
             ),
             new HealthInsurerChannel(
                 insurerCode: '205',
@@ -157,15 +157,13 @@ final class HealthInsurerChannelCatalog
                 insurerCode: '209',
                 kind: HealthInsurerChannelKind::SharedPortal,
                 portalUrl: 'https://portal.zpskoda.cz',
-                isdsAttachmentRules: [self::pdfBetween(
-                    '2026-01-01',
-                    '2026-12-31',
-                )],
+                isdsAttachmentRules: self::pdfUntilTransitionEndThenXml(),
                 automatedDispatchDocumented: false,
                 undocumentedReasonCode:
                     self::REASON_SHARED_MESSAGE_UNCONFIRMED,
-                note: 'Datová schránka přijímá přehled ve formátu PDF. '
-                    . 'Společné XML se pro tento kanál nenabízí.',
+                note: 'Datová schránka přijímá přehled v přechodném období '
+                    . 've formátu PDF; od roku 2027 zůstává jen jednotná '
+                    . 'datová věta (XML).',
             ),
             new HealthInsurerChannel(
                 insurerCode: '211',
@@ -227,6 +225,24 @@ final class HealthInsurerChannelCatalog
             'from' => $from,
             'to' => $to,
             'format' => HealthInsurerIsdsAttachmentFormat::TextPdf,
+        ];
+    }
+
+    /**
+     * Dosavadní elektronické formáty (PDF s čitelnou textovou vrstvou) se
+     * přijímají jen v přechodném období do 31. 12. 2026; potom zůstává jen
+     * nový jednotný formát (ČPZP Změny 2026, oddíl Přechod na nové formáty).
+     * Jednotnou datovou větou je XSD sedmi pojišťoven (autor VZP), takže od
+     * 1. 1. 2027 se příloha přepne na společné XML. Bez navazujícího pravidla
+     * by od ledna 2027 nešel vyrobit ani soubor pro ruční podání.
+     *
+     * @return list<array{from:string,to:?string,format:HealthInsurerIsdsAttachmentFormat}>
+     */
+    private static function pdfUntilTransitionEndThenXml(): array
+    {
+        return [
+            self::pdfBetween('2026-01-01', self::LEGACY_FORMAT_TRANSITION_END),
+            self::xmlSince('2027-01-01'),
         ];
     }
 
