@@ -148,7 +148,15 @@ php api/bin/sample.php --list        # vypíše firmy a jestli už data mají
 php api/bin/sample.php --supplier=7  # testovací data do konkrétní prázdné firmy
 php api/bin/reset.php                # smaže všechna user-data (vyžaduje "ANO")
 php api/bin/recompute-stats.php      # přepočítá agregované statistiky
+php api/bin/delete-company.php --id=7                   # náhled, co se smaže s firmou
+php api/bin/delete-company.php --id=7 --confirm=<IČO>   # smaže firmu se všemi daty
 ```
+
+`delete-company.php` smaže jednu firmu včetně dokladů, deníku a převodů, například
+před zopakováním převodu do čisté firmy. Smazání potvrzuje IČO firmy a běží v jedné
+transakci. `--files` smaže i soubory firmy v úložišti. Má-li firma mzdová podání
+nebo jiné záznamy jen pro přidávání, je potřeba `--immutable`. Smazání nejde vrátit,
+proto si předem zálohujte databázi.
 
 > [!WARNING]
 > `reset.php` maže **uživatelská data**, ne instalaci. Globální číselníky (země, sazby
