@@ -493,7 +493,30 @@ která přišla jinou cestou (ruční zadání, AI vytěžení, převod z jinéh
 se tak nezaeviduje podruhé. Existující karta se nepřepisuje. Má-li karta už jiné
 externí ID téhož zdroje, založí se karta nová.
 
-<!-- TODO-FAKTUROID -->
+#### 21.11.5 Ceny, zaokrouhlení a výsledek importu z Fakturoidu
+
+Import přebírá ceny tak, jak jsou ve Fakturoidu. U dokladů s cenami včetně
+DPH se daň počítá shora, takže 1 210 Kč včetně 21 % dá základ 1 000 Kč a DPH
+210 Kč. U přijatých faktur se převezme zaokrouhlení a rekapitulace DPH
+dokladu; haléřový rozdíl se srovná ruční rekapitulací DPH. Liší-li se částky
+po přenosu od Fakturoidu víc, než vysvětlí zaokrouhlení, doklad se označí ke
+kontrole. Doklady bez DPH (neplátci, nulová sazba) se přenášejí beze změny.
+
+Po doběhnutí ukáže úloha počty přenesených, přeskočených, nepřenesených
+a ke kontrole označených dokladů po agendách a seznam dokladů s důvodem
+a návodem. Úloha s chybou končí stavem **Dokončeno s chybami**. Doklad se
+sazbou DPH, která není v číselníku, se nepřenese a jiná sazba se za ni
+nedosadí; po doplnění sazby stačí import spustit znovu.
+
+Zkouška nanečisto projde stejné kontroly jako ostrý import (subjekty, sazby
+DPH, přepočet a shoda částek s Fakturoidem), nic nezapíše a vypíše, co by
+import udělal.
+
+Doklady převzaté dřívější verzí opraví příkaz
+`php api/bin/fix-fakturoid-imported-amounts.php --supplier-id=N`. Bez
+`--apply` jen vypíše stav před a po. Zaúčtované a zamčené doklady, doklady
+v období s podaným přiznáním nebo hlášením k DPH a doklady s úhradou jen
+nahlásí ke kontrole.
 
 ## 21.12 Dry-run mód
 

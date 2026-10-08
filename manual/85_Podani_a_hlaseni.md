@@ -381,9 +381,37 @@ Tlačítko se objeví jen tam, kde je doložené, že odpověď nepřijde. U mě
 hlášení ČSSZ ani u registrací zaměstnanců ho nenajdete — tam protokol dorazí
 sám a aplikace podle něj podání uzavře.
 
-### 85.7.2 Podáno mimo aplikaci
+### 85.7.2 Ruční potvrzení přijetí JMHZ
 
-<!-- TODO-JMHZ-RUCNI -->
+Někdy v aplikaci ČSSZ vidíte, že měsíční hlášení bylo přijato, ale ověřený
+protokol do MyÚčta nedorazil, nebo ČSSZ hlášení v aplikaci ČSSZ upravila.
+Pak v přehledu podání nebo na kartě podání v části **Stav odeslání** použijte
+**Označit jako přijaté ručně**. Akce je dostupná u hlášení, které je odeslané,
+zpracovává se, čeká na identitu, je částečně přijaté, odmítnuté nebo vrácené
+k opravě.
+
+V dialogu zvolíte, co jste viděli:
+
+<!-- cols: 34 66 -->
+| Volba | Kdy ji použít |
+|---|---|
+| **Přijato beze změny** | ČSSZ hlášení přijala tak, jak ho MyÚčto odeslalo. Opravné i stornovací hlášení pak jde sestavit jako po ověřeném protokolu. |
+| **Přijato s úpravou v aplikaci ČSSZ** | Hlášení opravila ČSSZ nebo vy přímo v aplikaci ČSSZ. Data u ČSSZ se liší od odeslaných, takže opravné hlášení z vlastních dat aplikace nesestaví. |
+
+Povinná je **Interní poznámka** (co jste v aplikaci ČSSZ viděli, případně co
+ČSSZ upravila a kdo to ověřil). Volitelně doplníte **Datum přijetí podle
+ČSSZ** a přiložíte snímek nebo PDF z aplikace ČSSZ (PDF, PNG nebo JPEG do
+10 MB). Potvrzení se uloží natrvalo a nejde upravit ani smazat.
+
+Podání se pak chová jako přijaté: povinnost za měsíc je splněná a přijatá
+oprava nahradí původní hlášení. U podání zůstává štítek **Přijato ručně**
+s tím, kdo a kdy přijetí potvrdil a s jakou poznámkou, takže je vždy poznat,
+že ho nepotvrdil protokol ČSSZ.
+
+Dorazí-li později ověřený protokol ČSSZ, má vždy přednost. Pokud s ručním
+potvrzením nesouhlasí, u podání se objeví červený štítek **Rozpor
+s protokolem**, měsíc se vrátí ke kontrole a stav podání se řídí protokolem.
+### 85.7.3 Podáno mimo aplikaci
 
 Jiný případ je hlášení, které jste vyplnili a odeslali **na portálu úřadu**,
 ne z aplikace — typicky JMHZ přímo na ePortálu ČSSZ. Protokol na ně nikdy
@@ -399,7 +427,7 @@ Tlačítko se neobjeví u podání, o kterém už úřad rozhodl (není co potvr
 ani když zpráva ještě leží neodeslaná v odchozí frontě datové schránky —
 tu je potřeba nejdřív z fronty zrušit, jinak by totéž hlášení odešlo podruhé.
 
-### 85.7.3 Měsíc uzavírá protokol, ne jedno podání
+### 85.7.4 Měsíc uzavírá protokol, ne jedno podání
 
 Obsahová oprava měsíčního hlášení řádné podání záměrně nenahrazuje: přijaté
 formuláře zůstávají zaevidované, takže řádné podání navždy zůstane „částečně
@@ -408,7 +436,7 @@ celá povinnost za měsíc a termín ukáže **Splněno** — i když u řádné
 dál svítí „částečně přijato". Obojí je pravda: první o měsíci, druhé o jednom
 podání v jeho řetězci.
 
-### 85.7.4 Podání předchozím programem
+### 85.7.5 Podání předchozím programem
 
 **Cesta: `Mzdy → Podání → JMHZ`, oddíl *Podání předchozím programem***
 
