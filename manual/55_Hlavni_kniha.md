@@ -1,13 +1,87 @@
 # 55. Hlavní kniha
 
-**Cesta: `Účetnictví → Hlavní kniha`**
+> Přehled zaúčtovaných pohybů seskupený podle účtů: počáteční stavy, obraty a konečné zůstatky. Kapitola je pro účetní, která potřebuje zjistit, z čeho se skládá zůstatek účtu, nebo ověřit zaúčtování před výkazy.
 
-Hlavní kniha je úplný přehled zaúčtovaných pohybů seskupený podle účtů.
-Zahrnuje rozvahové, výsledkové, uzávěrkové i podrozvahové účty včetně účtové
-třídy 7. Je dostupná jen firmám s podvojným účetnictvím a navazuje na
-[Účtový rozvrh](66_Ucetni_osnova.md).
+## 55.1 Kdy to potřebujete
 
-## 55.1 Co je zdrojem sestavy
+Kapitolu otevřete, když:
+
+- chcete zjistit zůstatek nebo obrat konkrétního účtu za období,
+- potřebujete dohledat, z jakých dokladů se zůstatek účtu skládá,
+- ověřujete neobvyklý zůstatek před sestavením rozvahy nebo výsledovky,
+- čistíte průběžný účet (261 Peníze na cestě, 395 Vnitřní zúčtování, zálohy, půjčky) a párujete vyrovnávající se řádky,
+- potřebujete podklad pro auditora nebo klienta v PDF či XLSX.
+
+Hlavní kniha zahrnuje rozvahové, výsledkové, uzávěrkové i podrozvahové účty včetně účtové třídy 7. Je dostupná jen firmám s podvojným účetnictvím a navazuje na [Účtový rozvrh](66_Ucetni_osnova.md).
+
+## 55.2 Než začnete
+
+1. **Zaúčtované doklady.** Sestava čte jen zaúčtované řádky deníku. Koncepty se nezapočítají. Počet konceptů v rozsahu uvidíte ve varování nad tabulkou. Nezaúčtované doklady dořešte v [K doúčtování](54_Rucni_fronta_doctovani.md).
+2. **Účetní období.** Nejnovější otevřené období se předvyplní samo. Starší období zvolíte v poli **Období**.
+3. **Oprávnění k účetnictví.** Párování otevřených položek vyžaduje oprávnění k zápisu.
+
+## 55.3 Krok za krokem: zobrazení zůstatků účtů
+
+1. Otevřete `Účetnictví → Hlavní kniha`.
+2. V poli **Období** zvolte fiskální rok. Hodnota **Vše** spojí všechna období firmy.
+3. Chcete-li zúžit rozsah, vyplňte **Od** a **Do**.
+4. Chcete-li vidět jednotlivé analytické účty, zapněte **Rozpad po analytikách**.
+5. Hledáte-li konkrétní doklady, použijte filtry **Dodavatel**, **Odběratel** nebo **Položka faktury**. Filtry zrušíte tlačítkem **Zrušit filtry**.
+6. Prohlédněte sloupce **PS MD / PS Dal**, **Obrat MD / Obrat Dal** a **KS MD / KS Dal**. Seřadíte je kliknutím na záhlaví.
+7. Chcete-li kombinaci uložit, uložte aktuální filtr jako pohled (nabídka **Uložené pohledy**) a případně ho nastavte jako výchozí.
+
+**Jak poznáte, že je hotovo:** Řádek **Součty** má shodné obraty na straně MD a Dal a nad tabulkou není žluté upozornění na nezaúčtované koncepty.
+
+> [!TIP]
+> Do uložené kombinace se nepřenáší volba **Stav po uzavření knih**. Ovládání **Sloupce** a **Hustota** mění jen zobrazení.
+
+## 55.4 Krok za krokem: dohledání, z čeho se skládá zůstatek
+
+1. U účtu klikněte na šipku na začátku řádku. Rozbalí se obrat MD a Dal po měsících.
+2. Klikněte na měsíc s pohybem. Zobrazí se jednotlivé řádky deníku: datum, doklad, analytika, popis a částka.
+3. Klikněte na doklad. Otevře se prvotní doklad.
+4. Přesahuje-li měsíc 200 řádků, klikněte na odkaz v patičce a pokračujte v opisu účtu za stejný měsíc.
+5. Chcete-li vidět celý účet, klikněte na **kód účtu**. Otevře se karta účtu se zachovaným rozsahem **Od / Do**. Odtud otevřete **Opis účtu**.
+6. V opisu čtěte sloupec **Zůstatek**, což je běžící saldo. Kladný zůstatek znamená MD, záporný Dal.
+
+**Jak poznáte, že je hotovo:** Součet řádků opisu odpovídá zůstatku účtu v knize.
+
+## 55.5 Krok za krokem: párování otevřených položek
+
+Použijte na účtech, kde se řádky vyrovnávají dodatečně, například 261 Peníze na cestě, 395 Vnitřní zúčtování, zálohy nebo půjčky.
+
+1. Otevřete opis účtu a přepněte na **Otevřené položky - párování**.
+2. Chcete-li vidět stav k určitému dni, vyplňte **K datu**. Volba **Jen otevřené** skryje vyrovnané řádky.
+3. Zaškrtněte řádky, které se navzájem vyrovnávají. Lišta nad tabulkou průběžně ukazuje rozdíl MD a Dal vybraných řádků.
+4. Klikněte na **Spárovat**.
+5. Automatické návrhy získáte tlačítkem **Návrhy párování**. Nastavte **Okno (dní)** a klikněte na **Spárovat návrhy**. Návrhy najdou storno s původním zápisem a dvojice stejné částky na opačných stranách téhož účtu.
+6. Chybné párování opravíte kliknutím na číslo okruhu. Dole se otevřou jeho položky. Řádek odeberete tlačítkem **Odebrat z okruhu**, další zaškrtnuté řádky přidáte tlačítkem **Přidat do okruhu**, celý okruh zrušíte tlačítkem **Zrušit párování**.
+
+**Jak poznáte, že je hotovo:** Karta **Zůstatek účtu** nahoře hlásí **Otevřené položky sedí na zůstatek účtu.** a vyrovnané okruhy z pohledu **Jen otevřené** zmizely.
+
+## 55.6 Krok za krokem: export
+
+1. Nastavte období, rozsah, rozpad analytik a filtry tak, jak je chcete mít na výstupu.
+2. Klikněte na **Export PDF** nebo **Export XLSX**.
+
+**Jak poznáte, že je hotovo:** Soubor se stáhne a v názvu obsahuje fiskální rok.
+
+## 55.7 Když něco nejde
+
+<!-- cols: 30 34 36 -->
+| Co vidíte | Proč | Co udělat |
+|---|---|---|
+| Žluté upozornění **V rozsahu je N nezaúčtovaných konceptů - nejsou zahrnuty.** | Koncepty do částek nevstupují | Koncepty zaúčtujte nebo smažte. Po zaúčtování se kniha změní. |
+| **Žádné účty s pohybem nebo počátečním stavem ve zvoleném rozsahu.** | V rozsahu není žádný zaúčtovaný pohyb | Zkontrolujte **Období**, **Od** a **Do**. |
+| Server odmítl datum | Datum leží mimo období, nebo je **Od** později než **Do** | Opravte rozsah. |
+| Zůstatek k poslednímu dni uzavřeného roku je nulový | Zapnuté **Stav po uzavření knih** zahrnuje závěrkový převod | Vypněte volbu. Výchozí pohled závěrkový převod vynechává. |
+| Chybějící účet, který čekáte | Účet bez PS a bez obratu se nezobrazuje | Zkontrolujte rozsah, nebo účet v [Účtovém rozvrhu](66_Ucetni_osnova.md). |
+| Párování nejde založit | Řádky jsou z různých účtů (u syntetiky z různých analytik), nebo už jsou v jiném okruhu | Okruh drží řádky jednoho účtu a každý řádek smí být jen v jednom okruhu. |
+| Rozdíl otevřených položek proti zůstatku účtu | Karta **Zůstatek účtu** zvýrazní rozdíl | Zkontrolujte okruhy a **K datu**. Součet otevřených položek se má rovnat zůstatku účtu. |
+
+## 55.8 Podrobnosti a pravidla
+
+### 55.8.1 Co je zdrojem sestavy
 
 Sestava čte řádky účetního deníku, které mají vyplněný okamžik zaúčtování.
 Koncepty do částek nevstupují; jejich počet v nastaveném rozsahu se zobrazí
@@ -18,7 +92,7 @@ vyruší původní částku opačným zaúčtovaným zápisem.
 majetku, mezd, uzávěrky nebo ručního zápisu. Hlavní kniha mezi těmito zdroji
 částek nerozlišuje: rozhodující je účet, strana MD/Dal, částka a datum řádku.
 
-## 55.2 Období, rozsah a filtry
+### 55.8.2 Období, rozsah a filtry
 
 - **Období** určuje fiskální rok. Předvyplní se nejnovější otevřené období,
   jinak první dostupné. Při změně období se **Od / Do** nastaví na jeho hranice;
@@ -30,17 +104,17 @@ majetku, mezd, uzávěrky nebo ručního zápisu. Hlavní kniha mezi těmito zdr
   první a poslední den období. Datum mimo období nebo `Od > Do` server odmítne.
 - **Rozpad po analytikách** vypíše jednotlivé analytické účty. Bez něj se
   analytiky sečtou pod syntetický účet.
-- **Po uzavření knih** započte i vlastní závěrkový převod období. Výchozí
+- **Stav po uzavření knih** započte i vlastní závěrkový převod období. Výchozí
   pohled jej vynechává, aby zůstatky k poslednímu dni uzavřeného roku nebyly
   závěrkovým zápisem vynulované. Otevírací zápis a skladové uzávěrkové pohyby
   zůstávají součástí účetních hodnot.
-- **Dodavatel**, **Odběratel** a **Text položky** filtrují zápisy podle
+- **Dodavatel**, **Odběratel** a **Položka faktury** filtrují zápisy podle
   protistrany nebo položky zdrojové přijaté či vydané faktury. Filtr se
   uplatní na počáteční stav, obraty i měsíční rozpad vybraného výřezu.
 
 Aktuální kombinaci období, rozsahu, rozpadu analytik a vyhledávacích filtrů
 lze uložit jako vlastní sestavu a případně ji nastavit jako výchozí. Volba
-**Po uzavření knih** se do uložené kombinace nepřenáší. Ovládání **Sloupce**
+**Stav po uzavření knih** se do uložené kombinace nepřenáší. Ovládání **Sloupce**
 skrývá či zobrazuje sloupce tabulky a **Hustota** mění řádkování; obě volby
 mění jen zobrazení.
 
@@ -48,7 +122,7 @@ Kliknutím na záhlaví sloupce lze řadit účty podle kódu, názvu i částek
 Při rozpadu po analytikách zůstávají analytické účty pod svou syntetikou
 a řadí se uvnitř její skupiny.
 
-## 55.3 Výpočet PS, obratů a KS
+### 55.8.3 Výpočet PS, obratů a KS
 
 Každý řádek účtu obsahuje:
 
@@ -56,7 +130,7 @@ Každý řádek účtu obsahuje:
 |---|---|
 | **PS MD / PS Dal** | Netto zůstatek před datem `Od`, zobrazený jen na straně výsledného salda |
 | **Obrat MD / Obrat Dal** | Hrubé součty stran za dny `Od` až `Do` včetně |
-| **KS MD / KS Dal** | `PS MD − PS Dal + obrat MD − obrat Dal`, opět jen na straně výsledného salda |
+| **KS MD / KS Dal** | `PS MD - PS Dal + obrat MD - obrat Dal`, opět jen na straně výsledného salda |
 
 Otevírací zápis datovaný prvním dnem období patří do PS, nikoli do obratu.
 U rozvahových účtů se počáteční stav nese z historie; existuje-li otevírací
@@ -67,27 +141,27 @@ daného fiskálního období.
 Peníze se pro součty převádějí na haléře. Účet bez PS i bez obratu se
 nezobrazuje. Řádek **Součty** sčítá všechny zobrazené účty.
 
-## 55.4 Měsíční rozpad a řádky měsíce
+### 55.8.4 Měsíční rozpad a řádky měsíce
 
 Šipka na začátku řádku rozbalí obrat MD a Dal po kalendářních měsících
 zasahujících do nastaveného rozsahu. Jde o rozpad obratu, nikoli zůstatku:
 měsíc bez pohybu proto ukazuje nuly. Měsíční částky se seskupují stejně jako
-hlavní řádek — podle syntetiky, nebo po analytikách. Součet měsíců se rovná
+hlavní řádek - podle syntetiky, nebo po analytikách. Součet měsíců se rovná
 obratu za celý rozsah; otevírací zápis prvního dne období je i tady součástí
 počátečního stavu, ne lednového obratu.
 
 Kliknutí na měsíc s pohybem rozbalí **jednotlivé řádky deníku** za ten měsíc:
 datum, doklad, analytiku, popis a částku na správné straně. Doklad vede na
-prvotní doklad (viz [48.5](#555-opis-uctu)). Zobrazí se prvních 200 řádků;
+prvotní doklad (viz [§ 55.8.5](#5585-opis-uctu)). Zobrazí se prvních 200 řádků;
 u delších měsíců odkaz v patičce pokračuje v opisu účtu za stejný měsíc.
 
-Kliknutí na **kód účtu** otevře [kartu účtu](66_Ucetni_osnova.md#667-karta-uctu)
+Kliknutí na **kód účtu** otevře [kartu účtu](66_Ucetni_osnova.md#666-krok-za-krokem-karta-uctu)
 se zachovaným rozsahem `Od / Do`. Z karty vede odkaz zpět do hlavní knihy;
 kniha pak dotčený účet sama rozbalí a odroluje k němu.
 
-## 55.5 Opis účtu
+### 55.8.5 Opis účtu
 
-Opis účtu otevřeš z karty účtu nebo z rozbaleného měsíce; rozsah `Od / Do`
+Opis účtu otevřete z karty účtu nebo z rozbaleného měsíce; rozsah `Od / Do`
 se přenáší. Opis syntetického účtu zahrnuje i jeho analytiky a nahoře ukazuje
 PS, obrat MD, obrat Dal a KS. Je-li opis složený z víc analytik, přibude
 sloupec **Analytika** s odkazem na kartu příslušného účtu.
@@ -112,14 +186,14 @@ Každý řádek dál ukazuje:
 
 XLSX opisu nese partnera, VS, protiúčet a okruh také.
 
-### Otevřené položky a párování
+#### 55.8.5.1 Otevřené položky a párování
 
 Záložka **Otevřené položky - párování** ukazuje, z čeho se skládá zůstatek
 účtu k datu. Funguje na kterémkoli účtu, typicky na 261 Peníze na cestě
 (převody mezi účty), 395 Vnitřní zúčtování, zálohách nebo půjčkách.
 
-Řádky, které se navzájem vyrovnávají, spojíš do **okruhu**: zaškrtni je
-a klikni na **Spárovat**. Lišta nad tabulkou průběžně ukazuje rozdíl MD a Dal
+Řádky, které se navzájem vyrovnávají, spojíte do **okruhu**: zaškrtněte je
+a klikněte na **Spárovat**. Lišta nad tabulkou průběžně ukazuje rozdíl MD a Dal
 vybraných řádků. Vyrovnaný okruh je uzavřený a jeho řádky z pohledu
 **Jen otevřené** zmizí. Nevyrovnaný okruh je povolený: rozdíl zůstane otevřený
 na straně, která převažuje, a to na nejnovějším řádku.
@@ -148,7 +222,7 @@ se zápis stornuje nebo smaže, řádek z okruhu vypadne a zbytek okruhu je znov
 otevřený. Okruh, ve kterém zůstane jediný řádek, zanikne a řádek jde spárovat
 znovu. Tyto změny se zapisují do historie aktivit.
 
-## 55.6 Export a návaznosti
+### 55.8.6 Export a návaznosti
 
 **Export PDF** a **Export XLSX** používají stejné období, rozsah, rozpad
 analytik, pohled před/po uzavření a filtry jako obrazovka. Název souboru
@@ -156,5 +230,13 @@ obsahuje fiskální rok. Stejná logika PS/obrat/KS se používá také v
 [Obratové předvaze](56_Obratova_predvaha.md); výkazové mapování a zákonné
 řádky popisuje [Rozvaha](57_Rozvaha.md).
 
-> ⚠️ **Koncepty nejsou součástí částek.** Žluté upozornění znamená, že se po
+> [!WARNING]
+> **Koncepty nejsou součástí částek.** Žluté upozornění znamená, že se po
 > jejich zaúčtování hlavní kniha ještě změní.
+
+## 55.9 Související kapitoly
+
+- [Obratová předvaha](56_Obratova_predvaha.md) - stejná logika PS, obratů a KS pro všechny účty s kontrolami úplnosti
+- [Rozvaha](57_Rozvaha.md) a [Výsledovka](58_Vysledovka_druhova.md) - výkazy z týchž zápisů
+- [Účtový rozvrh](66_Ucetni_osnova.md) - karta účtu
+- [Účetní deník](52_Ucetni_denik.md) - zdrojové zápisy

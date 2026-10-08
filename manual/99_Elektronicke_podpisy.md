@@ -1,249 +1,354 @@
 # 99. Elektronické podpisy
 
-Elektronické podpisy slouží ke správě certifikátů, podpisových profilů a
-pravidel, který profil se použije pro konkrétní výstup. Aktuálně se podepisují
-PDF výstupy a vybrané odchozí e-maily.
+> Návod, jak nahrát certifikát, založit podpisový profil a zapnout elektronické podpisy PDF faktur, výkazů práce,
+> ISDOC a odchozích e-mailů (S/MIME). Pro administrátory a účetní, kteří spravují podpisy firmy.
 
-Kde funkci najdeš, závisí na roli:
+## 99.1 Kdy to potřebujete
 
-- **admin** — správu podpisů najdeš jako záložku **Certifikáty a elektronické podpisy**
-  uvnitř stránky **Systém -> E-maily** (vedle záložek Odeslané, Šablony,
-  Profily, SMTP log).
-- **accountant** (účetní) — pokud admin zapnul přepínač **Povolit uživatelům
-  správu vlastních podpisových profilů**, objeví se účetnímu v postranním menu
-  samostatná položka **Systém -> Elektronické podpisy**. Bez zapnutého
-  přepínače účetní tuto položku v menu nevidí a přímý přístup na URL ho
-  přesměruje na úvodní stránku.
+Kapitolu otevřete, když:
 
-PDF výstupy:
+- chcete, aby se faktury, výkazy práce nebo odchozí e-maily podepisovaly elektronicky,
+- dostáváte z POHODY nebo jiného programu hlášku „Chybí podpis dokumentu" u importu faktury z PDF,
+- máte nový certifikát po obnově a potřebujete ho nahrát, nebo starý odstranit,
+- potřebujete certifikát použít ve víc firmách,
+- účetní má podepisovat vlastním certifikátem,
+- chcete ověřit, že se doklad podepsal správně.
 
-- vydaná faktura,
-- samostatný výkaz práce,
-- volitelně sloučené PDF v exportu vydaných faktur.
+Aktuálně se podepisují PDF výstupy, ISDOC faktur a vybrané odchozí e-maily:
 
-Když je výkaz práce vložený jako další stránka PDF faktury, podpis výstupu
-**Vydaná faktura** pokrývá celé výsledné PDF včetně této stránky. Výstup
-**Výkaz práce** se používá pro samostatně generované PDF výkazu.
-Sloučený export se podepisuje až jako hotový celek a používá stejnou konfiguraci
-profilu jako výstup **Vydaná faktura**. Podpis se provede jen po zaškrtnutí
-volby v exportu; bez ní zůstane sloučené PDF nepodepsané.
+- **PDF výstupy:** vydaná faktura, samostatný výkaz práce, volitelně sloučené PDF v exportu vydaných faktur.
+- **ISDOC faktury:** stejným profilem jako PDF výstup Vydaná faktura (viz [§ 99.9](#999-krok-za-krokem-podpis-isdoc)).
+- **S/MIME e-mailové výstupy:** e-mail s fakturou, s upomínkou, s připomínkou zálohy, s poděkováním za úhradu, se schválením výkazu a s připomínkou pravidelné faktury.
 
-Když máte zapnutý podpis výstupu **Vydaná faktura**, podepíše se stejným
-profilem i **ISDOC** faktury: soubor `invoice.isdoc` vložený do PDF, ISDOC
-stažený z detailu faktury i ISDOC v exportech. Podrobnosti najdete v oddílu
-[99.11.1 Podpis ISDOC](#99111-podpis-isdoc).
+PDF používá podpis PAdES. Bez časového razítka jde o úroveň **PAdES-B**, s nastaveným TSA serverem o **PAdES-T**.
+Odchozí e-mail se podepisuje jako **S/MIME** zpráva. S/MIME podpis potvrzuje odesílatele a integritu zprávy, ale
+e-mail nešifruje.
 
-S/MIME e-mailové výstupy:
+> [!TIP]
+> Podpis zachovává archivní formát. Faktury se generují jako PDF/A-3b a elektronický podpis tuto archivní konformitu
+> zachová: podepsaný dokument je stále validní PDF/A-3b (ověřeno nástrojem veraPDF).
 
-- e-mail s fakturou,
-- e-mail s upomínkou,
-- e-mail s připomínkou zálohy,
-- e-mail s poděkováním za úhradu,
-- e-mail se schválením výkazu,
-- e-mail s připomínkou pravidelné faktury.
+## 99.2 Než začnete
 
-PDF používá PAdES podpis. Bez časového razítka jde o úroveň **PAdES-B**, s
-nastaveným TSA serverem o **PAdES-T**. Odchozí e-mail se podepisuje jako
-**S/MIME** zpráva. S/MIME podpis potvrzuje odesílatele a integritu zprávy,
-ale e-mail nešifruje.
+Kde funkci najdete, závisí na roli:
 
-> 📁 **Podpis zachovává archivní formát.** Faktury se generují jako PDF/A-3b
-> a elektronický podpis tuto archivní konformitu **zachová** — podepsaný
-> dokument je stále validní PDF/A-3b (ověřeno nástrojem veraPDF).
+- **admin**: správu podpisů najdete jako záložku **Certifikáty a elektronické podpisy** uvnitř stránky `Systém → E-maily a certifikáty` (vedle záložek **Odeslané e-maily**, **E-mail šablony**, **Odesílací profily** a **SMTP log analýza**).
+- **accountant** (účetní): pokud admin zapnul přepínač **Povolit uživatelům správu vlastních podpisových profilů**, objeví se účetnímu v postranním menu samostatná položka `Systém → Certifikáty a elektronické podpisy`. Bez zapnutého přepínače účetní tuto položku v menu nevidí a přímý přístup na adresu ho přesměruje na úvodní stránku.
 
-## 99.1 Základní pojmy
-
-| Pojem | Význam |
-|---|---|
-| Podpisový profil | Pojmenované nastavení podpisu. Obsahuje vlastnictví, použití, backend, volitelnou PDF/TSA konfiguraci a jeden společný certifikát profilu. |
-| Profil dodavatele | Profil vlastněný dodavatelem. Spravuje ho admin a může se použít jako centrální firemní podpis. |
-| Můj profil | Profil vlastněný konkrétním uživatelem. Použije se jen tam, kde konfigurace výstupu počítá s přihlášeným uživatelem. |
-| Konfigurace podpisů | Admin nastavení, které určuje, zda se PDF nebo e-mailový výstup podepisuje a odkud se bere podpisový profil. |
-| Mapování podpisových profilů | Uživatelské výchozí profily pro výstupy, kde admin zvolil strategii **Přihlášený uživatel**. |
-
-## 99.2 Oprávnění
-
+<!-- cols: 22 78 -->
 | Role | Co může |
 |---|---|
-| **admin** | Spravuje profily dodavatele, může spravovat i profily uživatelů, nastavuje konfiguraci podpisů a povoluje uživatelské profily. Vše najde na **Systém -> E-maily -> Elektronické podpisy**. |
-| **accountant** | Po povolení adminem může spravovat pouze vlastní podpisové profily a vlastní výchozí mapování, a to na samostatné stránce **Systém -> Elektronické podpisy**. V detailu dokladu může změnit výběr profilu, ale konkrétní profil dodavatele může vybrat jen admin. |
-| **readonly** | Může číst a stahovat doklady podle běžných oprávnění, ale nemůže měnit podpisové profily, mapování ani per-dokladový výběr podpisu. Přímý přístup na URL elektronických podpisů ho přesměruje pryč. |
+| **admin** | Spravuje profily dodavatele, může spravovat i profily uživatelů, nastavuje konfiguraci podpisů a povoluje uživatelské profily. |
+| **accountant** | Po povolení adminem může spravovat pouze vlastní podpisové profily a vlastní výchozí mapování, na samostatné stránce. V detailu dokladu může změnit výběr profilu, ale konkrétní profil dodavatele může vybrat jen admin. |
+| **readonly** | Může číst a stahovat doklady podle běžných oprávnění, ale nemůže měnit podpisové profily, mapování ani výběr podpisu na dokladu. Přímý přístup na stránku elektronických podpisů ho přesměruje pryč. |
 
-Admin povolí uživatelské profily přepínačem **Povolit uživatelům správu
-vlastních podpisových profilů** (na záložce Elektronické podpisy v E-mailech).
-Pokud není zapnutý, účetní položku elektronických podpisů v menu nevidí.
+Admin povolí uživatelské profily přepínačem **Povolit uživatelům správu vlastních podpisových profilů** (na záložce
+Certifikáty a elektronické podpisy v `Systém → E-maily a certifikáty`). Uživatelé pak smějí upravovat pouze profily,
+které vlastní.
 
-## 99.3 Založení podpisového profilu
+Základní pojmy:
 
-1. Admin otevře **Systém -> E-maily** a přepne na záložku **Elektronické
-   podpisy**. Účetní (má-li povoleno) otevře rovnou **Systém -> Elektronické
-   podpisy**.
-2. V sekci **Podpisové profily** klikni **Nový profil**.
-3. Vyplň **Název** a **Kód**. Kód je technický identifikátor profilu a musí být
-   unikátní v rámci dodavatele.
-4. Vyber **Vlastník profilu**:
-   - **Profil dodavatele** pro centrální firemní podpis,
-   - **Můj profil** pro podpis konkrétního přihlášeného uživatele,
-   - **Jiný uživatel** jen pro admina, pokud profil zakládá za konkrétního
-     uživatele.
-5. V části **Použití** vyber, k čemu se profil smí použít:
-   - **PDF** pro podpis faktur a výkazů práce,
-   - **S/MIME e-mail** pro podpis odchozích e-mailů,
-   - obě volby, pokud stejný certifikát používáš pro PDF i e-mail.
-6. Backend profilu ponech `native`. E-mailové výstupy používají S/MIME backend
-   interně podle typu výstupu.
-7. Nech profil aktivní, pokud se má dát použít při podepisování.
-8. Ulož profil.
-
-## 99.4 Certifikát P12/PFX
-
-Každý profil používá jeden certifikát. Stejný certifikát se může použít pro PDF
-podpis i pro S/MIME podpis e-mailu, pokud profil povoluje obě použití.
-
-U vlastního profilu jsou dostupné dva zdroje:
-
-| Zdroj | Kdy použít |
+<!-- cols: 28 72 -->
+| Pojem | Význam |
 |---|---|
-| **Použít osobní certifikát EPO** | Certifikát už máš uložený v osobním šifrovaném trezoru (**Systém → Certifikáty a elektronické podpisy → Certifikáty**). PFX ani heslo se neukládají podruhé. |
-| **Nahrát samostatný certifikát** | Profil dodavatele, profil jiného uživatele nebo certifikát, který nechceš používat pro EPO. |
+| Podpisový profil | Pojmenované nastavení podpisu. Obsahuje vlastnictví, použití, volitelnou konfiguraci PDF a časového razítka a jeden společný certifikát profilu. |
+| Profil dodavatele | Profil vlastněný dodavatelem. Spravuje ho admin a může se použít jako centrální firemní podpis. |
+| Můj profil | Profil vlastněný konkrétním uživatelem. Použije se jen tam, kde konfigurace výstupu počítá s přihlášeným uživatelem. |
+| Konfigurace podpisů | Nastavení admina, které určuje, zda se PDF nebo e-mailový výstup podepisuje a odkud se bere podpisový profil. |
+| Mapování podpisových profilů | Uživatelské výchozí profily pro výstupy, kde admin zvolil strategii **Přihlášený uživatel**. |
 
-### 99.4.1 Použití osobního certifikátu EPO
+Před prvním podpisem potřebujete **certifikát ve formátu P12/PFX se soukromým klíčem**. Pro S/MIME je prakticky
+důležité, aby certifikát obsahoval e-mailovou adresu používanou jako odesílatel.
 
-1. V **Systém → Certifikáty a elektronické podpisy → Certifikáty** nahraj P12/PFX a v
-   **Daně → EPO podání a archív → Certifikáty EPO** ho povol pro aktuální firmu.
-2. Založ nebo uprav profil s vlastníkem **Můj profil**.
-3. V části **Certifikát profilu** zvol **Použít osobní certifikát EPO** a vyber
-   certifikát z trezoru.
-4. Potvrď se stejně jako u trezoru certifikátů: buď tlačítkem **Ověřit
-   passkey** (po ověření se zobrazí **Passkey ověřeno** a pole pro heslo
-   zmizí), nebo aktuálním heslem do MyÚčta a při zapnutém 2FA také TOTP.
-   Ověření platí jen pro toto jedno uložení. Tím vědomě povolíš použití
-   soukromého klíče v podpisovém profilu.
-5. Ulož profil.
+## 99.3 Krok za krokem: nahrát certifikát do trezoru
 
-Profil ukládá jen vazbu a veřejná metadata certifikátu. PFX a jeho heslo
-zůstávají v původním šifrovaném trezoru, při PDF nebo S/MIME podpisu se
-dešifrují pouze v paměti serveru. Certifikát nelze z trezoru smazat ani odebrat
-z firmy, dokud ho používá její aktivní podpisový profil. Nejprve v profilu
-certifikát odeber nebo ho nahraď jiným.
+Sekce **Certifikáty** na stránce Certifikáty a elektronické podpisy je jediné místo, kam se osobní certifikát P12/PFX
+nahrává. Certifikát patří uživateli, ne firmě: v trezoru je uložený jednou a šifrovaně, firma k němu dostává jen
+povolení. Odtud si ho berou podpisové profily, podání EPO i mzdová podání.
 
-### 99.4.2 Samostatný certifikát profilu
+1. Otevřete `Systém → E-maily a certifikáty`, záložku **Certifikáty a elektronické podpisy**, sekci **Certifikáty**.
+2. V části **Nahrát certifikát** klikněte na **Vybrat soubor** a vyberte soubor P12/PFX (se soukromým klíčem).
+3. Zadejte **Heslo k certifikátu**. To je heslo, kterým je chráněný samotný soubor, ne heslo do MyÚčta.
+4. Ověřte se: tlačítkem **Ověřit passkey** (po ověření se zobrazí **Passkey ověřeno**), nebo vyplněním pole **Heslo do MyÚčta** a při zapnutém 2FA také **Kódem z autentikátoru**. Ověření platí jen pro toto jedno nahrání a nikam se neukládá.
+5. Podle potřeby zaškrtněte **Uložit i do dalších firem** a **Jen do firem bez platného certifikátu** (viz níže).
+6. Klikněte na **Uložit certifikát**.
+7. V každé firmě, kde ho chcete používat pro EPO a podpisy, ho povolte v `Daně → EPO podání a archív → Certifikáty EPO` (**Povolit pro tuto firmu**).
 
-1. Otevři editaci profilu.
-2. V části **Certifikát profilu** klikni **Vybrat soubor**.
-3. Vyber soubor ve formátu **P12/PFX** s privátním klíčem.
-4. Zadej **Heslo k certifikátu**. Aplikace ho použije pro kontrolu souboru a
-   podle zvolené politiky ho buď uloží šifrovaně, nebo jen ověří.
-5. Vyber politiku hesla.
-6. Klikni **Uložit profil** nebo **Nahrát certifikát** podle toho, jestli profil
-   teprve vytváříš, nebo upravuješ.
+**Jak poznáte, že je hotovo:** Aplikace ohlásí **Certifikát byl uložen** a v seznamu **Uložené certifikáty** je vidět
+vlastník, vydavatel, sériové číslo a platnost.
 
-Po nahrání se zobrazí metadata certifikátu: subject, e-mail v certifikátu,
-platnost, politika hesla a SHA-256 fingerprint. Soubor certifikátu se ukládá do
-interního storage aplikace. V produkci je vhodné mít `MYINVOICE_DATA_DIR`
-nastavený mimo webový root (MyÚčto je fork MyInvoice a tento název proměnné
-prostředí sdílí beze změny).
+**Dvě různá hesla.** Při nahrání se zadává **Heslo k certifikátu** a zvlášť ověření uživatele (passkey, nebo
+**Heslo do MyÚčta** případně **Kód z autentikátoru**). Obě se posílají odděleně a nezávisle. Heslo do MyÚčta tedy
+nikdy nepatří do pole s heslem k certifikátu.
 
-Certifikát bez privátního klíče nestačí. Pokud import selže s chybou špatného
-hesla nebo neplatného PKCS#12, zkontroluj, že P12/PFX opravdu obsahuje privátní
-klíč a že zadáváš správnou passphrase.
+**Povolení v dalších firmách.** Při nahrání lze zaškrtnout dvě volby:
 
-Pro S/MIME podpis je prakticky důležité, aby certifikát, včetně sdíleného
-osobního certifikátu EPO, obsahoval e-mailovou
-adresu používanou jako odesílatel nebo aby ho příjemcův klient uměl přiřadit k
-odesílateli. Aplikace podpis vytvoří, ale důvěryhodnost a shoda identity se
-vyhodnocuje až v e-mailovém klientovi příjemce.
-
-### 99.4.3 Trezor certifikátů a další firmy
-
-Sekce **Trezor certifikátů** na stránce **Systém -> Elektronické podpisy** je
-jediné místo, kam se osobní certifikát P12/PFX nahrává. Certifikát patří
-uživateli, ne firmě: v trezoru je uložený jednou a šifrovaně, firma k němu
-dostává jen povolení. Odtud si ho berou podpisové profily, podání EPO i mzdová
-podání.
-
-Při nahrání lze zaškrtnout dvě volby:
-
+<!-- cols: 36 64 -->
 | Volba | Co udělá |
 |---|---|
-| **Uložit i do dalších firem** | Certifikát se povolí i ve všech dalších firmách, kde jsi členem a smíš spravovat elektronické podpisy. Výchozí stav je vypnuto. |
-| **Jen do firem bez platného certifikátu** | Přeskočí firmy, kde už máš povolený jiný platný certifikát. |
+| **Uložit i do dalších firem** | Certifikát se povolí i ve všech dalších firmách, kde jste členem a smíte spravovat elektronické podpisy. Výchozí stav je vypnuto. |
+| **Jen do firem bez platného certifikátu** | Přeskočí firmy, kde už máte povolený jiný platný certifikát. |
 
-U každého platného certifikátu v trezoru je navíc tlačítko **Povolit v dalších
-firmách**, které udělá totéž pro certifikát nahraný dříve. Obě akce vyžadují
-stejné ověření jako nahrání certifikátu.
+U každého platného certifikátu v trezoru je navíc tlačítko **Povolit v dalších firmách**, které udělá totéž pro
+certifikát nahraný dříve. Obě akce vyžadují stejné ověření jako nahrání certifikátu. Po dokončení se zobrazí přehled
+po firmách: **Povoleno**, **Už bylo povoleno**, **Přeskočeno, má platný certifikát** a **Přeskočeno, chybí oprávnění**.
+Firmy, kde nejste členem, se akce nedotkne. Povolení certifikát ve firmě jen zpřístupní. Který certifikát se v dané
+firmě skutečně použije pro podpisový profil, EPO nebo mzdová podání, se dál volí v příslušném nastavení té firmy.
 
-**Dvě různá hesla.** Při nahrání se zadává **Heslo k certifikátu**, kterým je
-chráněný samotný soubor P12/PFX, a zvlášť ověření uživatele (passkey, nebo
-**Heslo do MyÚčta** případně **Kód z autentikátoru**). Obě se posílají odděleně
-a nezávisle; ověření platí jen pro toto jedno nahrání a nikam se neukládá.
-Heslo do MyÚčta tedy nikdy nepatří do pole s heslem k certifikátu. Nahrání se
-potvrzuje tlačítkem **Uložit certifikát**.
-
-**Soubor se zastaralým šifrováním (RC2).** Starší exporty certifikátů, zejména
-z Windows a od některých autorit, jsou chráněné zastaralou šifrou RC2, kterou
-server nepodporuje. Aplikace to ohlásí výslovnou hláškou, že soubor používá
+**Soubor se zastaralým šifrováním (RC2).** Starší exporty certifikátů, zejména z Windows a od některých autorit, jsou
+chráněné zastaralou šifrou RC2, kterou server nepodporuje. Aplikace to ohlásí výslovnou hláškou, že soubor používá
 zastaralé šifrování (RC2) a že za tím není heslo. Řešení jsou dvě:
 
-- certifikát znovu vyexportujte s moderním šifrováním (ve Windows při exportu
-  vyberte šifrování **AES256-SHA256**),
-- nebo soubor převeďte nástrojem OpenSSL na své pracovní stanici. Starý soubor
-  nejdřív rozbalte do dočasného souboru PEM pomocí `openssl pkcs12 -in stary.pfx
-  -legacy -nodes -out docasny.pem`, z něj vytvořte nový soubor příkazem
-  `openssl pkcs12 -export -in docasny.pem -out novy.pfx` (OpenSSL se zeptá na
-  nové heslo a použije moderní šifrování) a dočasný soubor PEM hned smažte,
-  protože obsahuje soukromý klíč bez ochrany heslem.
+- certifikát znovu vyexportujte s moderním šifrováním (ve Windows při exportu vyberte šifrování **AES256-SHA256**),
+- nebo soubor převeďte nástrojem OpenSSL na své pracovní stanici. Starý soubor nejdřív rozbalte do dočasného souboru PEM pomocí `openssl pkcs12 -in stary.pfx -legacy -nodes -out docasny.pem`, z něj vytvořte nový soubor příkazem `openssl pkcs12 -export -in docasny.pem -out novy.pfx` (OpenSSL se zeptá na nové heslo a použije moderní šifrování) a dočasný soubor PEM hned smažte, protože obsahuje soukromý klíč bez ochrany heslem.
 
 Nový soubor PFX pak nahrajte do trezoru stejným postupem.
 
-Po dokončení se zobrazí přehled po firmách: **Povoleno**, **Už bylo povoleno**,
-**Přeskočeno, má platný certifikát** a **Přeskočeno, chybí oprávnění**. Firmy,
-kde nejsi členem, se akce nedotkne. Každé povolení se zapíše do auditního logu
-dotčené firmy jako `certificate_vault_supplier_enabled`.
+> [!WARNING]
+> Certifikát bez soukromého klíče nestačí. Pokud nahrání selže s chybou špatného hesla nebo neplatného PKCS#12,
+> zkontrolujte, že P12/PFX opravdu obsahuje soukromý klíč a že zadáváte správnou passphrase.
 
-Povolení certifikát ve firmě jen zpřístupní. Který certifikát se v dané firmě
-skutečně použije pro podpisový profil, EPO nebo mzdová podání, se dál volí
-v příslušném nastavení té firmy.
+## 99.4 Krok za krokem: založit podpisový profil
 
-### 99.4.4 Smazání certifikátu z trezoru
+1. Admin otevře `Systém → E-maily a certifikáty` a záložku **Certifikáty a elektronické podpisy**. Účetní (má-li povoleno) otevře rovnou `Systém → Certifikáty a elektronické podpisy`.
+2. V sekci **Podpisové profily** klikněte na **Nový profil**.
+3. Vyplňte **Název** a **Kód**. Kód je technický identifikátor profilu a musí být unikátní v rámci dodavatele.
+4. Vyberte **Vlastník profilu**:
+   - **Profil dodavatele** pro centrální firemní podpis,
+   - **Můj profil** pro podpis konkrétního přihlášeného uživatele,
+   - **Jiný uživatel** jen pro admina, pokud profil zakládá za konkrétního uživatele.
+5. V části **Použití** vyberte, k čemu se profil smí použít:
+   - **PDF** pro podpis faktur a výkazů práce,
+   - **S/MIME e-mail** pro podpis odchozích e-mailů,
+   - obě volby, pokud stejný certifikát používáte pro PDF i e-mail.
+6. Backend profilu ponechte jako předvolený. E-mailové výstupy používají S/MIME interně podle typu výstupu.
+7. Ponechte **Aktivní profil** zapnutý, pokud se má dát použít při podepisování.
+8. Připojte certifikát ([§ 99.5](#995-krok-za-krokem-pripojit-certifikat-k-profilu)).
+9. Klikněte na **Vytvořit profil** (u existujícího **Uložit profil**).
+
+**Jak poznáte, že je hotovo:** Profil je v sekci Podpisové profily s metadaty certifikátu.
+
+## 99.5 Krok za krokem: připojit certifikát k profilu
+
+Každý profil používá jeden certifikát. Stejný certifikát se může použít pro PDF podpis i pro S/MIME podpis e-mailu,
+pokud profil povoluje obě použití. U vlastního profilu jsou dostupné dva zdroje v poli **Zdroj certifikátu**:
+
+<!-- cols: 36 64 -->
+| Zdroj | Kdy použít |
+|---|---|
+| **Vybrat z Certifikátů** | Certifikát už máte uložený v osobním šifrovaném trezoru (sekce **Certifikáty**). PFX ani heslo se neukládají podruhé. |
+| **Nahrát samostatný certifikát** | Profil dodavatele, profil jiného uživatele nebo certifikát, který nechcete používat pro EPO. |
+
+**Certifikát z trezoru (osobní):**
+
+1. Nejdřív nahrajte certifikát podle [§ 99.3](#993-krok-za-krokem-nahrat-certifikat-do-trezoru) a povolte ho pro aktuální firmu v `Daně → EPO podání a archív → Certifikáty EPO`.
+2. Založte nebo upravte profil s vlastníkem **Můj profil**.
+3. V části **Certifikát profilu** zvolte **Vybrat z Certifikátů** a vyberte certifikát (**Vyberte certifikát**).
+4. Potvrďte se stejně jako u trezoru certifikátů: buď tlačítkem **Ověřit passkey** (po ověření se zobrazí **Passkey ověřeno** a pole pro heslo zmizí), nebo aktuálním heslem do MyÚčta a při zapnutém 2FA také kódem z autentikátoru. Ověření platí jen pro toto jedno uložení. Tím vědomě povolíte použití soukromého klíče v podpisovém profilu.
+5. Uložte profil.
+
+Profil ukládá jen vazbu a veřejná metadata certifikátu. PFX a jeho heslo zůstávají v původním šifrovaném trezoru, při
+PDF nebo S/MIME podpisu se dešifrují pouze v paměti serveru. Certifikát nelze z trezoru smazat ani odebrat z firmy,
+dokud ho používá její aktivní podpisový profil. Nejprve v profilu certifikát odeberte nebo ho nahraďte jiným.
+
+**Samostatný certifikát profilu:**
+
+1. Otevřete editaci profilu.
+2. V části **Certifikát profilu** zvolte **Nahrát samostatný certifikát** a klikněte na **Vybrat soubor**.
+3. Vyberte soubor ve formátu **P12/PFX** s privátním klíčem.
+4. Zadejte **Heslo k certifikátu**. Aplikace ho použije pro kontrolu souboru a podle zvolené politiky ho buď uloží šifrovaně, nebo jen ověří.
+5. Vyberte **Politiku hesla** ([§ 99.12.3](#99123-politika-hesla-k-certifikatu)).
+6. Klikněte na **Uložit profil** nebo **Nahrát certifikát** podle toho, jestli profil teprve vytváříte, nebo upravujete.
+
+Po nahrání se zobrazí metadata certifikátu: subject, e-mail v certifikátu, platnost, politika hesla a otisk SHA-256.
+Soubor certifikátu se ukládá do interního úložiště aplikace. V produkci je vhodné mít datový adresář
+(`MYINVOICE_DATA_DIR`) nastavený mimo webový root (MyÚčto je fork MyInvoice a tento název proměnné prostředí sdílí
+beze změny). Certifikát z profilu odeberete s potvrzením dialogu.
+
+**Jak poznáte, že je hotovo:** U profilu vidíte subject, e-mail a platnost certifikátu.
+
+> [!WARNING]
+> Pro S/MIME podpis je prakticky důležité, aby certifikát, včetně sdíleného osobního certifikátu, obsahoval
+> e-mailovou adresu používanou jako odesílatel nebo aby ho příjemcův klient uměl přiřadit k odesílateli. Aplikace
+> podpis vytvoří, ale důvěryhodnost a shoda identity se vyhodnocuje až v e-mailovém klientovi příjemce.
+
+## 99.6 Krok za krokem: zapnout podepisování výstupů
+
+Sekci **Konfigurace podpisů** vidí admin na záložce Certifikáty a elektronické podpisy. Každý řádek nastavuje jeden
+typ výstupu: buď PDF, nebo S/MIME e-mail.
+
+1. Otevřete `Systém → E-maily a certifikáty`, záložku **Certifikáty a elektronické podpisy**, sekci **Konfigurace podpisů**.
+2. U výstupu (například **Vydaná faktura**, **Výkaz práce**, **E-mail s fakturou**) zapněte **Podepisovat**.
+3. V poli **Výběr profilu** zvolte **Profil dodavatele**, nebo **Přihlášený uživatel**. Při profilu dodavatele vyberte konkrétní aktivní **Profil**.
+4. Při volbě **Přihlášený uživatel** nastavte **Fallback uživatele** (co se stane, když uživatel nemá použitelný vlastní profil).
+5. Nastavte **Při chybě** (co se stane, když podpis selže nebo není nakonfigurovaný).
+6. U e-mailových výstupů zvolte **S/MIME identitu** ([§ 99.12.6](#99126-podepisovani-odchozich-e-mailu-smime)).
+7. U PDF výstupů klikněte na **Otestovat**. Vytvoří dočasné PDF a zkusí ho podepsat podle stejného mapování. Výsledek zobrazí stav, použitý profil a vlastníka certifikátu (CN), pokud ho aplikace zjistí.
+8. Klikněte na **Uložit konfiguraci podpisů** pod tabulkou (uloží změny všech řádků společně).
+
+**Jak poznáte, že je hotovo:** Aplikace ohlásí **Konfigurace podpisů byla uložena** a test PDF proběhne.
+
+S/MIME podpis otestujete odesláním testovacího e-mailu pro příslušný typ zprávy a ověřením podpisu v e-mailovém
+klientovi.
+
+Když je výkaz práce vložený jako další stránka PDF faktury, podpis výstupu **Vydaná faktura** pokrývá celé výsledné
+PDF včetně této stránky. Výstup **Výkaz práce** se používá pro samostatně generované PDF výkazu. Sloučený export se
+podepisuje až jako hotový celek a používá stejnou konfiguraci profilu jako výstup **Vydaná faktura**. Podpis se
+provede jen po zaškrtnutí volby v exportu; bez ní zůstane sloučené PDF nepodepsané.
+
+## 99.7 Krok za krokem: smazat certifikát z trezoru
 
 Certifikát, který už nepotřebujete (například po obnově), smažete takto:
 
-1. Otevřete **Systém → E-maily a certifikáty**, záložku **Certifikáty a elektronické podpisy**.
-2. V sekci **Certifikáty** se ověřte stejně jako při nahrání: **Ověřit
-   passkey**, nebo **Heslo do MyÚčta** a případně **Kód z autentikátoru**.
-3. U certifikátu klikněte na **Smazat** a smazání potvrďte v dialogu
-   s názvem certifikátu.
+1. Otevřete `Systém → E-maily a certifikáty`, záložku **Certifikáty a elektronické podpisy**.
+2. V sekci **Certifikáty** se ověřte stejně jako při nahrání: **Ověřit passkey**, nebo **Heslo do MyÚčta** a případně **Kód z autentikátoru**.
+3. U certifikátu klikněte na **Smazat** a smazání potvrďte v dialogu s názvem certifikátu.
 
-Smazat lze jen vlastní certifikát. Soukromý klíč se z trezoru odstraní
-nevratně a pro všechny firmy; historické pokusy o podání a otisk certifikátu
-zůstávají zachované.
+**Jak poznáte, že je hotovo:** Aplikace ohlásí **Certifikát byl smazán z trezoru** a certifikát zmizí ze seznamu.
 
-Certifikát, který se ještě používá, smazat nejde a tlačítko **Smazat** je
-neaktivní. Pod tlačítkem uvidíte, kde ho nejdřív odpojit:
+Smazat lze jen vlastní certifikát. Soukromý klíč se z trezoru odstraní nevratně a pro všechny firmy; historické pokusy
+o podání a otisk certifikátu zůstávají zachované.
 
+Certifikát, který se ještě používá, smazat nejde a tlačítko **Smazat** je neaktivní. Pod tlačítkem uvidíte, kde ho
+nejdřív odpojit:
+
+<!-- cols: 36 64 -->
 | Kde se certifikát používá | Kde ho odpojit |
 |---|---|
 | Podpisový profil (PDF, S/MIME) | Sekce **Podpisové profily** na téže stránce: v profilu certifikát odeberte nebo nahraďte jiným. |
-| Přístup k datové schránce | **Systém → Datová schránka**: přístup smažte nebo vyberte jiný certifikát. |
+| Přístup k datové schránce | `Mzdy → Datová schránka`: přístup smažte nebo vyberte jiný certifikát. |
 | Odesílací brána ISDS | **Nastavení odesílací brány**: registraci změňte na jiný certifikát. |
 
-Volba certifikátu pro mzdová podání smazání nebrání. Dialog na ni upozorní
-a se smazáním certifikátu se zruší; před dalším mzdovým podáním pak vyberte
-jiný certifikát v **Mzdy → Podání**. Smazání se zapíše do auditního logu jako
-`certificate_vault_delete`, u EPO jako `report.epo_credential_deleted`.
+Volba certifikátu pro mzdová podání smazání nebrání. Dialog na ni upozorní a se smazáním certifikátu se zruší; před
+dalším mzdovým podáním pak vyberte jiný certifikát v `Mzdy → Podání a hlášení` (**Další ▾ → Certifikát**). Smazání
+i povolení certifikátu v dalších firmách se zapisuje do auditního logu (události viz [§ 99.12.7](#99127-audit)).
 
-## 99.5 Politika hesla k certifikátu
+## 99.8 Krok za krokem: vlastní profil účetní a výběr podpisu na dokladu
 
+**Mapování vlastních profilů uživatele.** Sekce **Mapování podpisových profilů** slouží pro osobní výchozí profily
+přihlášeného uživatele. Admin ji vidí na záložce Certifikáty a elektronické podpisy, účetní (má-li povoleno) na stránce
+`Systém → Certifikáty a elektronické podpisy`. Použije se jen tehdy, když admin v **Konfiguraci podpisů** nastavil
+daný výstup na **Přihlášený uživatel**. Pokud je výstup nastavený na **Profil dodavatele**, uživatelský profil se
+ignoruje a aplikace na to upozorní.
+
+1. Otevřete sekci **Mapování podpisových profilů**.
+2. Pro každý výstup vyberte vlastní aktivní profil, který podporuje stejné použití jako výstup. Pro PDF výstupy musí profil podporovat použití **PDF**, pro e-mailové výstupy použití **S/MIME e-mail**.
+3. Výchozí profil se uloží (**Výchozí podpisový profil uložen**).
+
+**Výběr podpisu na konkrétním dokladu.** Na detailu faktury je pro uživatele s právem zápisu sekce **Elektronický podpis
+dokumentu**, která umožňuje přepsat výchozí konfiguraci pro konkrétní doklad:
+
+<!-- cols: 28 72 -->
+| Hodnota | Chování |
+|---|---|
+| **Dědit** | Použije se globální konfigurace z **Konfigurace podpisů**. |
+| **Přihlášený uživatel** | Pro tento doklad se použije výchozí podpisový profil uživatele, který PDF generuje nebo odesílá. |
+| **Profil dodavatele** | Pro tento doklad se použije profil dodavatele. Admin může vybrat konkrétní profil, účetní nechává profil zdědit z konfigurace. |
+
+Změna výběru u faktury invaliduje cache PDF, aby se další stažení nebo odeslání vygenerovalo s aktuálním podpisem.
+U uživatelských profilů cache závisí na tom, který uživatel PDF generuje, takže stejný doklad může být podepsaný
+jiným profilem podle přihlášeného uživatele. Výběr na dokladu se týká PDF dokladů. Odchozí e-maily se řídí mapováním
+e-mailových výstupů v **Konfiguraci podpisů**.
+
+**Jak poznáte, že je hotovo:** Při příštím stažení nebo odeslání je doklad podepsaný zvoleným profilem.
+
+## 99.9 Krok za krokem: podpis ISDOC
+
+**Proč se podepisuje i ISDOC.** POHODA a další účetní programy při importu faktury z PDF čtou vložený soubor
+`invoice.isdoc` a ověřují podpis přímo v něm. Podpis PDF se na vložený ISDOC nevztahuje, takže bez vlastního podpisu
+ISDOC by POHODA hlásila „Chybí podpis dokumentu", i když je PDF podepsané. Proto aplikace při zapnutém podpisu
+výstupu **Vydaná faktura** podepíše nejdřív ISDOC a teprve potom celé PDF. Podpis PDF tak kryje už podepsaný ISDOC.
+Když máte zapnutý podpis výstupu **Vydaná faktura**, podepíše se stejným profilem i ISDOC faktury: soubor
+`invoice.isdoc` vložený do PDF, ISDOC stažený z detailu faktury i ISDOC v exportech.
+
+Co pro to musíte udělat:
+
+1. Otevřete `Systém → E-maily a certifikáty`, záložku **Certifikáty a elektronické podpisy**.
+2. V **Konfiguraci podpisů** zapněte u výstupu **Vydaná faktura** volbu **Podepisovat** a vyberte profil s certifikátem.
+3. Klikněte na **Uložit konfiguraci podpisů**.
+4. V detailu faktury vygenerujte PDF znovu (starší PDF zůstávají tak, jak byla vydána).
+
+Samostatné nastavení pro ISDOC neexistuje. Platí stejný profil, stejný výběr profilu i stejná volba **Při chybě** jako
+u PDF faktury:
+
+- při **Vrátit nepodepsané** se ISDOC vydá bez podpisu a v logu uvidíte událost `signing.isdoc_failed`,
+- při **Zastavit s chybou** se PDF ani ISDOC nevydá a zobrazí se chyba „Podpis ISDOC selhal."
+
+Podepisuje se:
+
+<!-- cols: 46 54 -->
+| Kde | Co se podepíše |
+|---|---|
+| PDF faktury | Vložený soubor `invoice.isdoc` (a potom celé PDF). |
+| Detail faktury, stažení ISDOC, REST API `/api/v1/invoices/{id}/isdoc` | Stažený soubor `.isdoc`. |
+| **Exporty → ISDOC** | Každý `.isdoc` v exportu. |
+| **Hromadný export** (část Vystavené faktury, ISDOC) | Každý `.isdoc` v ZIPu. |
+
+**Jak poznáte, že je hotovo:** otevřete stažený `.isdoc` v textovém editoru. Na konci souboru, těsně před `</Invoice>`,
+je element `<Signature … Id="Signature-1">` s vaším certifikátem v `X509Certificate`. V POHODĚ se po importu faktury
+z PDF hláška o chybějícím podpisu neobjeví. Jestli POHODA podpisu důvěřuje, závisí na tom, zda jde o kvalifikovaný
+certifikát vydaný důvěryhodnou autoritou (například PostSignum, I.CA, eIdentity).
+
+Podpis odpovídá standardu ISDOC 6.0.2, kapitole 5 „Digitální podpisy": XML Signature s transformací Enveloped
+Signature a filtrem XPath `not(ancestor-or-self::dsig:Signature)` (příjemce může připojit vlastní podpis),
+kanonizace Canonical XML 1.0, otisk SHA-256 a podpis RSA-SHA256. Podepsat lze certifikátem s klíčem RSA, což jsou
+běžné kvalifikované certifikáty českých autorit.
+
+## 99.10 Krok za krokem: ověřit podepsaný PDF
+
+1. Stáhněte podepsané PDF.
+2. Otevřete ho v běžné PDF čtečce, nebo na serveru například přes `pdfsig`:
+
+```bash
+pdfsig Faktura-2606009.pdf
+```
+
+**Jak poznáte, že je hotovo:** U platného podpisu uvidíte stav podpisu jako validní. Pokud výstup hlásí, že vydavatel
+certifikátu je neznámý, znamená to obvykle chybějící důvěryhodný certifikační řetězec v prostředí ověřovatele.
+Samotný kryptografický podpis může být přesto validní.
+
+## 99.11 Když něco nejde
+
+<!-- cols: 34 66 -->
+| Problém | Co zkontrolovat |
+|---|---|
+| PDF se vygenerovalo bez podpisu | Zkontrolujte **Konfiguraci podpisů**, aktivní profil, nahraný certifikát a politiku **Při chybě**. Při volbě Vrátit nepodepsané se nepodepsané PDF vydá záměrně. |
+| Export skončil chybou „PDF podpis není nakonfigurovaný" | Výstup je nastavený na tvrdé selhání a chybí použitelný profil nebo certifikát. |
+| POHODA hlásí u importu z PDF „Chybí podpis dokumentu" | PDF bylo vygenerované dřív, než byl podpis zapnutý, nebo podpis ISDOC selhal. Vygenerujte PDF znovu a v logu hledejte `signing.isdoc_failed`. Viz [§ 99.9](#999-krok-za-krokem-podpis-isdoc). |
+| Certifikát nejde nahrát | Ověřte P12/PFX, heslo, soukromý klíč a expiraci certifikátu. Při hlášce o RC2 viz [§ 99.3](#993-krok-za-krokem-nahrat-certifikat-do-trezoru). |
+| Nelze smazat certifikát | Tlačítko **Smazat** je neaktivní, certifikát se ještě používá. Odpojte ho tam, kam odkazuje text pod tlačítkem ([§ 99.7](#997-krok-za-krokem-smazat-certifikat-z-trezoru)). |
+| Background job nepodepisuje uživatelským profilem | Background job nemá přihlášeného uživatele. Pro tyto scénáře použijte fallback na profil dodavatele nebo passphrase file. |
+| Po změně konfigurace se stále vrací staré PDF | Zkontrolujte historii PDF a cache. Změna konfigurace podpisů faktury cache invaliduje, ale starší archivované verze zůstávají jako auditní záznam. |
+| E-mail odešel bez S/MIME podpisu | Zkontrolujte, že je zapnutý konkrétní e-mailový výstup, profil podporuje **S/MIME e-mail** a politika chyby není nastavená na tichý fallback. |
+| E-mailový klient podpisu nevěří | Zkontrolujte e-mail v certifikátu, důvěryhodnost certifikační autority a to, zda po podpisu zprávu neupravuje SMTP brána nebo antispam. |
+| Účetní nevidí položku Certifikáty a elektronické podpisy v menu | Zkontrolujte v `Systém → E-maily a certifikáty`, jestli je zapnutý přepínač **Povolit uživatelům správu vlastních podpisových profilů**. |
+| Správa profilů není povolená | Admin musí nejdřív povolit uživatelům správu vlastních podpisových profilů. |
+| Vybraný profil nepodporuje použití výstupu | Profil nemá zapnuté PDF, resp. S/MIME e-mail. Upravte použití profilu. |
+
+## 99.12 Podrobnosti a pravidla
+
+### 99.12.1 Typy výstupů a úrovně podpisu
+
+PDF výstupy: vydaná faktura, samostatný výkaz práce, volitelně sloučené PDF v exportu vydaných faktur. Přehled
+e-mailových výstupů a jejich interních šablon je v [§ 99.12.6](#99126-podepisovani-odchozich-e-mailu-smime).
+
+### 99.12.2 Oprávnění rolí
+
+Viz tabulka v [§ 99.2](#992-nez-zacnete). Podpisové endpointy jsou interní administrační endpointy používané webovou
+aplikací (`/api/settings/...` a `/api/documents/.../signature-selection`). Nejsou součástí veřejného `/api/v1`
+subsetu a nejsou popsané v `api/openapi.yaml`. Veřejné endpointy pro stažení nebo odeslání PDF vrací dokument podle
+aktuální konfigurace podpisů, ale samotná správa podpisových profilů není veřejné API pro externí integrace.
+
+### 99.12.3 Politika hesla k certifikátu
+
+<!-- cols: 24 28 48 -->
 | Politika | Kdy použít | Chování |
 |---|---|---|
-| **Uložit šifrovaně** (`encrypted_store`) | Běžný produkční režim a background joby. | Heslo se uloží v DB šifrovaně pomocí aplikačního klíče. Běžný uživatel ho nevidí a API ho nikdy nevrací. |
-| **Passphrase file** (`passphrase_file`) | Když nechceš heslo ukládat do DB, ale aplikace musí podepisovat i bez interaktivního vstupu. | V profilu se uloží jen ID hesla. Skutečné heslo se čte ze serverového souboru nastaveného v konfiguraci. |
-| **Ptát se při použití** (`prompt_on_use`) | Interaktivní podpis na vyžádání. | V této iteraci není pro runtime podpisy podporováno. Pro PDF i S/MIME zvol šifrované uložení nebo passphrase file. |
+| **Uložit šifrovaně** (`encrypted_store`) | Běžný produkční režim a background joby. | Heslo se uloží v databázi šifrovaně pomocí aplikačního klíče. Běžný uživatel ho nevidí a API ho nikdy nevrací. |
+| **Passphrase file** (`passphrase_file`) | Když nechcete heslo ukládat do databáze, ale aplikace musí podepisovat i bez interaktivního vstupu. | V profilu se uloží jen ID hesla. Skutečné heslo se čte ze serverového souboru nastaveného v konfiguraci. |
+| **Ptát se při použití** (`prompt_on_use`) | Interaktivní podpis na vyžádání. | Pro runtime podpisy není podporováno. Pro PDF i S/MIME zvolte šifrované uložení nebo passphrase file. |
 
-### 99.5.1 Passphrase file
-
-Cestu k souboru nastav správce v konfiguraci:
+**Passphrase file.** Cestu k souboru nastaví správce v konfiguraci:
 
 ```php
 'signing' => [
@@ -251,9 +356,7 @@ Cestu k souboru nastav správce v konfiguraci:
 ],
 ```
 
-Kvůli zpětné kompatibilitě se bere i `pdf_signing.passphrase_file`.
-
-Soubor může být JSON:
+Kvůli zpětné kompatibilitě se bere i `pdf_signing.passphrase_file`. Soubor může být JSON:
 
 ```json
 {
@@ -274,124 +377,74 @@ passphrase=heslo-k-p12
 passphrase=jine-heslo
 ```
 
-Do pole **ID hesla v passphrase file** v profilu zadej například
-`owner_john`. Soubor musí být čitelný procesem aplikace a neměl by být
-součástí webového rootu ani gitu.
+Do pole **ID hesla v passphrase file** v profilu zadejte například `owner_john`. Soubor musí být čitelný procesem
+aplikace a neměl by být součástí webového rootu ani gitu.
 
-## 99.6 TSA a důvod podpisu
+### 99.12.4 Časové razítko a důvod podpisu
 
-V profilu je volitelná část **PDF nastavení profilu**. Tato nastavení platí jen
-pro PDF podpisy:
+V profilu je volitelná část **PDF nastavení profilu**. Tato nastavení platí jen pro PDF podpisy:
 
+<!-- cols: 30 70 -->
 | Pole | Význam |
 |---|---|
 | **Použít časové razítko** | Zapne PAdES-T. Po zapnutí je povinná TSA URL. |
 | **TSA URL** | RFC 3161 endpoint časové autority, například URL služby poskytovatele časových razítek. |
 | **TSA jméno / heslo** | HTTP Basic auth, pokud ho TSA server vyžaduje. |
-| **Důvod podpisu** | Textový důvod v PDF podpisu. Když zůstane prázdný, použije se výchozí text podle typu dokumentu: `Faktura`, `Výkaz práce` nebo `Hromadný export faktur`. |
+| **Důvod podpisu** | Textový důvod v PDF podpisu. Když zůstane prázdný, použije se výchozí text podle typu dokumentu: Faktura, Výkaz práce nebo Hromadný export faktur. |
 
-Bez TSA se dokument podepíše jako PAdES-B. Pokud je TSA nastavená a dostupná,
-přidá se důvěryhodné časové razítko a výsledkem je PAdES-T.
+Bez TSA se dokument podepíše jako PAdES-B. Pokud je TSA nastavená a dostupná, přidá se důvěryhodné časové razítko
+a výsledkem je PAdES-T. S/MIME podpis odchozího e-mailu v této implementaci TSA nepoužívá.
 
-S/MIME podpis odchozího e-mailu v této implementaci TSA nepoužívá.
+### 99.12.5 Konfigurace podpisů: sloupce a volby
 
-## 99.7 Konfigurace podpisů pro výstupy
-
-Sekci **Konfigurace podpisů** vidí admin na záložce Elektronické podpisy v
-**Systém -> E-maily**. Každý řádek nastavuje jeden typ výstupu: buď PDF, nebo
-S/MIME e-mail.
-
+<!-- cols: 26 74 -->
 | Sloupec | Význam |
 |---|---|
-| **Výstup** | Například **Vydaná faktura**, **Výkaz práce** nebo **E-mail s fakturou**. Badge **PDF** nebo **S/MIME** říká, jaký typ podpisu se použije. |
+| **Výstup** | Například **Vydaná faktura**, **Výkaz práce** nebo **E-mail s fakturou**. Štítek **PDF** nebo **S/MIME** říká, jaký typ podpisu se použije. |
 | **Podepisovat** | Zapne nebo vypne podpis pro daný výstup aktuálního dodavatele. |
 | **Výběr profilu** | Určuje, odkud se vezme podpisový profil. |
 | **Profil** | Konkrétní profil dodavatele, pokud výstup používá strategii **Profil dodavatele**. |
 | **Fallback uživatele** | Co se má stát, když je zvolen **Přihlášený uživatel**, ale uživatel nemá použitelný vlastní profil. |
 | **Při chybě** | Co se má stát, když podpis selže nebo není nakonfigurovaný. |
 
-### 99.7.1 Výběr profilu
+**Výběr profilu:**
 
+<!-- cols: 30 70 -->
 | Hodnota | Chování |
 |---|---|
 | **Profil dodavatele** | Použije se konkrétní aktivní profil dodavatele z pole **Profil**. Uživatelské profily se pro tento výstup nepoužijí. |
 | **Přihlášený uživatel** | Aplikace použije výchozí profil přihlášeného uživatele pro daný výstup. Pokud ho nenajde, použije se **Fallback uživatele**. |
 
-U automatických/background operací nemusí existovat přihlášený uživatel. Pokud
-je výstup nastavený na **Přihlášený uživatel**, je proto důležité nastavit
-rozumný fallback.
+U automatických a background operací nemusí existovat přihlášený uživatel. Pokud je výstup nastavený na
+**Přihlášený uživatel**, je proto důležité nastavit rozumný fallback.
 
-### 99.7.2 Fallback uživatele
+**Fallback uživatele:**
 
+<!-- cols: 30 70 -->
 | Hodnota | Chování |
 |---|---|
 | **Profil dodavatele** | Pokud uživatel nemá vlastní profil, použije se profil dodavatele z řádku konfigurace. |
 | **Vrátit nepodepsané** | Výstup pokračuje bez podpisu a událost se zapíše do logu. U PDF se vydá nepodepsané PDF, u e-mailu odejde nepodepsaná zpráva. |
 | **Zastavit s chybou** | Export nebo odeslání selže s chybou. |
 
-### 99.7.3 Při chybě
+**Při chybě:**
 
+<!-- cols: 36 64 -->
 | Hodnota | Chování |
 |---|---|
 | **Vrátit nepodepsané** (`fallback_unsigned`) | Při chybě podpisu výstup pokračuje bez podpisu a zapíše se auditní událost. Hodí se tam, kde je důležitější dostupnost dokladu nebo e-mailu než tvrdé vynucení podpisu. |
 | **Zastavit s chybou** (`fail_closed`) | Při chybě podpisu export nebo odeslání selže. Hodí se tam, kde podpis musí být povinný. |
 | **Přeskočit bez konfigurace** (`skip_when_unconfigured`) | Pokud chybí použitelný profil, podpis se přeskočí. |
 
-Tlačítko **Otestovat** v řádku konfigurace vytvoří dočasné PDF a zkusí ho
-podepsat podle stejného mapování. Zobrazuje se jen u PDF výstupů. Výsledek
-zobrazí stav, použitý profil a vlastníka certifikátu (CN), pokud ho backend
-zjistí.
+### 99.12.6 Podepisování odchozích e-mailů (S/MIME)
 
-Změny všech řádků se uloží společně tlačítkem **Uložit konfiguraci podpisů**
-pod tabulkou.
-
-S/MIME podpis otestuješ odesláním testovacího e-mailu pro příslušný typ zprávy
-a ověřením podpisu v e-mailovém klientovi.
-
-## 99.8 Mapování podpisových profilů uživatele
-
-Sekce **Mapování podpisových profilů** slouží pro osobní výchozí profily
-přihlášeného uživatele. Admin ji vidí na záložce Elektronické podpisy v
-**Systém -> E-maily**, účetní (má-li povoleno) na stránce **Systém ->
-Elektronické podpisy**.
-
-Použije se jen tehdy, když admin v **Konfiguraci podpisů** nastavil daný výstup
-na **Přihlášený uživatel**. Pokud je výstup nastavený na **Profil dodavatele**,
-uživatelský profil se ignoruje a UI na to upozorní.
-
-Pro každý výstup vyber vlastní aktivní profil, který podporuje stejné použití
-jako výstup. Pro PDF výstupy musí profil podporovat použití **PDF**, pro
-e-mailové výstupy použití **S/MIME e-mail**.
-
-## 99.9 Výběr podpisu na konkrétním dokladu
-
-Na detailu faktury je pro uživatele s právem zápisu sekce
-**Elektronický podpis dokumentu**. Umožňuje přepsat výchozí konfiguraci pro
-konkrétní doklad.
-
-| Hodnota | Chování |
-|---|---|
-| **Dědit** | Použije se globální konfigurace z **Konfigurace podpisů**. |
-| **Přihlášený uživatel** | Pro tento doklad se použije výchozí podpisový profil uživatele, který PDF generuje nebo odesílá. |
-| **Profil dodavatele** | Pro tento doklad se použije profil dodavatele. Admin může vybrat konkrétní profil, účetní nechává profil zdědit z konfigurace. |
-
-Změna výběru u faktury invaliduje PDF cache, aby se další stažení nebo odeslání
-vygenerovalo s aktuálním podpisem. U uživatelských profilů cache závisí na tom,
-který uživatel PDF generuje, takže stejný doklad může být podepsaný jiným
-profilem podle přihlášeného uživatele.
-
-Per-dokladový výběr se týká PDF dokladů. Odchozí e-maily se řídí mapováním
-e-mailových výstupů v **Konfiguraci podpisů**.
-
-## 99.10 Podepisování odchozích e-mailů
-
-S/MIME podpis se aplikuje při sestavení e-mailu těsně před odesláním přes SMTP.
-Podepisuje se výsledná MIME zpráva včetně HTML/textového těla a příloh, takže
-příjemce může v běžném e-mailovém klientovi ověřit, že zpráva nebyla cestou
-změněna.
+S/MIME podpis se aplikuje při sestavení e-mailu těsně před odesláním přes SMTP. Podepisuje se výsledná MIME zpráva
+včetně HTML nebo textového těla a příloh, takže příjemce může v běžném e-mailovém klientovi ověřit, že zpráva nebyla
+cestou změněna.
 
 Podporované e-mailové výstupy:
 
+<!-- cols: 56 44 -->
 | Výstup v UI | Interní šablona |
 |---|---|
 | E-mail s fakturou | `invoice_send` |
@@ -405,106 +458,40 @@ Nastavení funguje stejně jako u PDF výstupů:
 
 - admin v **Konfiguraci podpisů** zapne podpis pro konkrétní e-mailový výstup,
 - zvolí **Profil dodavatele** nebo **Přihlášený uživatel**,
-- při strategii **Přihlášený uživatel** si uživatel nastaví vlastní výchozí
-  profil v **Mapování podpisových profilů**,
-- u S/MIME identity zvolí pravidlo pro vztah mezi e-mailem v certifikátu a
-  hlavičkou **From**,
-- při chybě se použije politika **Vrátit nepodepsané** nebo
-  **Zastavit s chybou**.
+- při strategii **Přihlášený uživatel** si uživatel nastaví vlastní výchozí profil v **Mapování podpisových profilů**,
+- u **S/MIME identity** zvolí pravidlo pro vztah mezi e-mailem v certifikátu a hlavičkou **From**,
+- při chybě se použije politika **Vrátit nepodepsané** nebo **Zastavit s chybou**.
 
-Výchozí politika S/MIME identity je **Podepsat a varovat**. Pokud certifikát
-neobsahuje e-mailovou identitu nebo se liší od skutečného odesílatele ve
-**From**, e-mail se podepíše a neshoda se zapíše do activity logu. Striktní
-kontrolu lze zapnout volbou **Vyžadovat shodu From**.
+Výchozí politika S/MIME identity je **Podepsat a varovat**. Pokud certifikát neobsahuje e-mailovou identitu nebo se
+liší od skutečného odesílatele ve **From**, e-mail se podepíše a neshoda se zapíše do activity logu. Striktní kontrolu
+lze zapnout volbou **Vyžadovat shodu From**.
 
 Režimy S/MIME identity:
 
+<!-- cols: 40 60 -->
 | Režim | Chování |
 |---|---|
-| Vyžadovat shodu From | `From` se musí přesně shodovat s e-mailem v certifikátu. |
+| Vyžadovat shodu From | From se musí přesně shodovat s e-mailem v certifikátu. |
 | Podepsat a varovat | E-mail se podepíše i při neshodě a do activity logu se zapíše varování. |
-| Přepsat From při stejné doméně | Při neshodě se `From` přepíše na e-mail certifikátu jen tehdy, když původní `From` používá stejnou doménu. |
-| Přepsat From podle allowlistu | Při neshodě se `From` přepíše na e-mail certifikátu jen tehdy, když původní `From` odpovídá allowlistu e-mailů nebo domén. |
+| Přepsat From při stejné doméně | Při neshodě se From přepíše na e-mail certifikátu jen tehdy, když původní From používá stejnou doménu. |
+| Přepsat From podle allowlistu | Při neshodě se From přepíše na e-mail certifikátu jen tehdy, když původní From odpovídá allowlistu e-mailů nebo domén (jedna položka na řádek: přesný e-mail nebo doména). |
 
-Režimy s přepsáním `From` podepisují až výslednou zprávu po úpravě hlavičky.
-Activity log obsahuje původní `From`, nové `From`, e-mail certifikátu a použitý
-podpisový profil. Pokud podmínka pro přepsání neplatí, chová se režim jako
+Režimy s přepsáním From podepisují až výslednou zprávu po úpravě hlavičky. Activity log obsahuje původní From, nové
+From, e-mail certifikátu a použitý podpisový profil. Pokud podmínka pro přepsání neplatí, chová se režim jako
 striktní chyba a použije se nastavená politika chyby.
 
-Pokud je v **Odesílacím e-mailovém profilu** vybraný konkrétní S/MIME profil,
-má pro daný e-mail přednost před obecným mapováním profilu ve výstupu. Díky tomu
-může jedna odesílací identita držet pohromadě `From`, DKIM identitu a certifikát.
+Pokud je v **Odesílacím e-mailovém profilu** vybraný konkrétní S/MIME profil, má pro daný e-mail přednost před obecným
+mapováním profilu ve výstupu. Díky tomu může jedna odesílací identita držet pohromadě From, DKIM identitu
+a certifikát.
 
-S/MIME podpis e-mail nešifruje. Obsah zprávy zůstává čitelný stejně jako u
-běžného e-mailu, jen je opatřen elektronickým podpisem.
+S/MIME podpis e-mail nešifruje. Obsah zprávy zůstává čitelný stejně jako u běžného e-mailu, jen je opatřen
+elektronickým podpisem.
 
-## 99.11 Ověření podepsaného PDF
-
-Po stažení můžeš PDF ověřit v běžné PDF čtečce nebo na serveru například přes
-`pdfsig`:
-
-```bash
-pdfsig Faktura-2606009.pdf
-```
-
-U platného podpisu uvidíš stav podpisu jako validní. Pokud výstup hlásí, že
-vydavatel certifikátu je neznámý, znamená to obvykle chybějící důvěryhodný
-certifikační řetězec v prostředí ověřovatele. Samotný kryptografický podpis
-může být přesto validní.
-
-### 99.11.1 Podpis ISDOC
-
-**Proč se podepisuje i ISDOC.** POHODA a další účetní programy při importu
-faktury z PDF čtou vložený soubor `invoice.isdoc` a ověřují podpis přímo v něm.
-Podpis PDF se na vložený ISDOC nevztahuje, takže bez vlastního podpisu ISDOC
-by POHODA hlásila „Chybí podpis dokumentu“, i když je PDF podepsané. Proto
-aplikace při zapnutém podpisu výstupu **Vydaná faktura** podepíše nejdřív
-ISDOC a teprve potom celé PDF. Podpis PDF tak kryje už podepsaný ISDOC.
-
-Co pro to musíte udělat:
-
-1. Otevřete **Systém -> E-maily -> Elektronické podpisy**.
-2. V **Konfiguraci podpisů** zapněte u výstupu **Vydaná faktura** volbu
-   **Podepisovat** a vyberte profil s certifikátem.
-3. Klikněte na **Uložit konfiguraci podpisů**.
-4. V detailu faktury vygenerujte PDF znovu (starší PDF zůstávají tak, jak byla
-   vydána).
-
-Samostatné nastavení pro ISDOC neexistuje. Platí stejný profil, stejný výběr
-profilu i stejná volba **Při chybě** jako u PDF faktury:
-
-- při **Vrátit nepodepsané** se ISDOC vydá bez podpisu a v logu uvidíte
-  událost `signing.isdoc_failed`,
-- při **Zastavit s chybou** se PDF ani ISDOC nevydá a zobrazí se chyba
-  „Podpis ISDOC selhal.“
-
-Podepisuje se:
-
-| Kde | Co se podepíše |
-|---|---|
-| PDF faktury | Vložený soubor `invoice.isdoc` (a potom celé PDF). |
-| Detail faktury -> stažení ISDOC, REST API `/api/v1/invoices/{id}/isdoc` | Stažený soubor `.isdoc`. |
-| **Exporty -> ISDOC** | Každý `.isdoc` v exportu. |
-| **Hromadný export** (část Vystavené faktury -> ISDOC) | Každý `.isdoc` v ZIPu. |
-
-**Jak poznáte, že je hotovo:** otevřete stažený `.isdoc` v textovém editoru.
-Na konci souboru, těsně před `</Invoice>`, je element `<Signature …
-Id="Signature-1">` s vaším certifikátem v `X509Certificate`. V POHODĚ se po
-importu faktury z PDF hláška o chybějícím podpisu neobjeví. Jestli POHODA
-podpisu důvěřuje, závisí na tom, zda jde o kvalifikovaný certifikát vydaný
-důvěryhodnou autoritou (například PostSignum, I.CA, eIdentity).
-
-Podpis odpovídá standardu ISDOC 6.0.2, kapitole 5 „Digitální podpisy“: XML
-Signature s transformací Enveloped Signature a filtrem XPath
-`not(ancestor-or-self::dsig:Signature)` (příjemce může připojit vlastní
-podpis), kanonizace Canonical XML 1.0, otisk SHA-256 a podpis RSA-SHA256.
-Podepsat lze certifikátem s klíčem RSA, což jsou běžné kvalifikované
-certifikáty českých autorit.
-
-## 99.12 Audit a řešení problémů
+### 99.12.7 Audit
 
 Správa i použití podpisů se zapisuje do activity logu. Typické události:
 
+<!-- cols: 56 44 -->
 | Událost | Význam |
 |---|---|
 | `signing.profile_created` / `signing.profile_updated` / `signing.profile_deleted` | Změna podpisového profilu. |
@@ -521,28 +508,12 @@ Správa i použití podpisů se zapisuje do activity logu. Typické události:
 | `signing.email_identity_warning` | S/MIME podpis proběhl v režimu varování, přestože e-mail v certifikátu neodpovídá hlavičce From. |
 | `signing.email_failed` | S/MIME podpis e-mailu selhal. |
 | `signing.email_skipped` | S/MIME podpis e-mailu byl přeskočen, například kvůli chybějící konfiguraci. |
+| `certificate_vault_delete` | Certifikát byl smazán z trezoru. |
+| `report.epo_credential_deleted` | Smazáním certifikátu z trezoru zanikla jeho volba pro EPO. |
+| `certificate_vault_supplier_enabled` | Certifikát byl povolen v další firmě (zapisuje se do logu dotčené firmy, při nahrání i při **Povolit v dalších firmách**). |
 
-Časté problémy:
+## 99.13 Související kapitoly
 
-| Problém | Co zkontrolovat |
-|---|---|
-| PDF se vygenerovalo bez podpisu | Zkontroluj **Konfiguraci podpisů**, aktivní profil, nahraný certifikát a politiku **Při chybě**. Při `fallback_unsigned` se nepodepsané PDF vydá záměrně. |
-| Export skončil chybou `PDF podpis není nakonfigurovaný` | Výstup je nastavený na tvrdé selhání a chybí použitelný profil nebo certifikát. |
-| POHODA hlásí u importu z PDF „Chybí podpis dokumentu“ | PDF bylo vygenerované dřív, než byl podpis zapnutý, nebo podpis ISDOC selhal. Vygenerujte PDF znovu a v logu hledejte `signing.isdoc_failed`. Viz [99.11.1 Podpis ISDOC](#99111-podpis-isdoc). |
-| Certifikát nejde nahrát | Ověř P12/PFX, heslo, privátní klíč a expiraci certifikátu. |
-| Background job nepodepisuje uživatelským profilem | Background job nemá přihlášeného uživatele. Pro tyto scénáře použij fallback na profil dodavatele nebo passphrase file. |
-| Po změně konfigurace se stále vrací staré PDF | Zkontroluj PDF historii a cache. Změna konfigurace podpisů faktury cache invaliduje, ale starší archivované verze zůstávají jako auditní záznam. |
-| E-mail odešel bez S/MIME podpisu | Zkontroluj, že je zapnutý konkrétní e-mailový výstup, profil podporuje **S/MIME e-mail** a politika chyby není nastavená na tichý fallback. |
-| E-mailový klient podpisu nevěří | Zkontroluj e-mail v certifikátu, důvěryhodnost certifikační autority a to, zda po podpisu zprávu neupravuje SMTP brána nebo antispam. |
-| Účetní nevidí položku Elektronické podpisy v menu | Zkontroluj v **Systém -> E-maily -> Elektronické podpisy**, jestli je zapnutý přepínač **Povolit uživatelům správu vlastních podpisových profilů**. |
-
-## 99.13 Poznámka k REST API
-
-Podpisové endpointy jsou interní administrační endpointy používané SPA
-aplikací (`/api/settings/...` a `/api/documents/.../signature-selection`).
-Nejsou součástí veřejného `/api/v1` subsetu a nejsou popsané v
-`api/openapi.yaml`.
-
-Veřejné endpointy pro stažení nebo odeslání PDF vrací dokument podle aktuální
-konfigurace podpisů, ale samotná správa podpisových profilů není veřejné
-API pro externí integrace.
+- [Datová schránka](97_Datova_schranka.md)
+- [Odesílací brána ISDS](98_Odesilaci_brana_ISDS.md)
+- [Nastavení](96_Nastaveni.md)

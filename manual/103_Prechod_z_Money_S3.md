@@ -1,6 +1,198 @@
 # 103. Přechod z Money S3
 
+> Návod, jak převést účetní agendu z Money S3 do firmy v MyÚčtu: od zálohy
+> agendy v Money přes zkoušku nanečisto a ostrý převod až po kontrolu převzatých
+> dat. Pro účetní a správce, kteří přecházejí z Money S3.
+
 **Cesta: `Systém → Přechod z jiných účetních systémů → Money S3`**
+
+## 103.1 Kdy to potřebujete
+
+- Firma dosud účtovala v Money S3 a chce pokračovat v MyÚčtu s kompletním
+  deníkem, doklady, bankou a pokladnou.
+- Převádíte víc firem najednou (účetní kancelář, skupina firem).
+- Převod skončil chybou nebo rozdílem v protokolu a potřebujete vědět, co dál.
+- Chcete po převodu ověřit, že MyÚčto sedí na Money na haléř.
+
+<!-- cols: 24 40 36 -->
+| Fáze | Co udělat | Kde |
+|---|---|---|
+| 1 | Zálohovat agendu v Money S3 | Money S3, funkce *Zálohovat agendu* |
+| 2 | Nahrát zálohu a zkontrolovat náhled | `Systém → Přechod z jiných účetních systémů → Money S3`, krok **Záloha agendy** |
+| 3 | Zkouška nanečisto | krok **Zkouška nanečisto** |
+| 4 | Ostrý převod | krok **Převod** |
+| 5 | Kontrola převzetí | protokol, `Účetnictví`, obratová předvaha |
+| 6 | Navázání číselné řady, skeny dokladů, zaměstnanci | `Nastavení`, `Dokumenty`, `Mzdy` |
+
+## 103.2 Než začnete
+
+1. **Cílová firma.** Vyberte (nebo založte) firmu v MyÚčtu, do které se bude
+   převádět. Firma, která dosud vede daňovou evidenci, se převodem přepne na
+   podvojné účetnictví. Má-li se skupina firem sdílet jako projekty, založte
+   skupinu před převodem.
+2. **Oprávnění.** Zkoušku nanečisto spustí uživatel s oprávněním k zápisu
+   importů. Ostrý převod zapisuje účetní deník, mění nastavení firmy a
+   uzavírá roky, proto vyžaduje navíc zápis do účetního deníku, do nastavení
+   firmy a uzavírání období. Chybějící oprávnění průvodce ukáže a převod
+   nespustí. Položka je v menu Systém, které vidí administrátor; jiný
+   uživatel otevře průvodce přímým odkazem `/imports/money-s3`.
+3. **Klid ve firmě.** Zkouška nanečisto drží zámky převáděných období,
+   spouštějte ji mimo běžnou práci.
+4. **Volné místo na disku** pro zálohu (až 4 GB).
+
+> [!TIP]
+> Převod je určen pro menší množství dat. Převody z jiných systémů jejich
+> výrobci nepodporují a export se mezi verzemi liší. Průvodce nabízí
+> kontakt na podporu, která převod provede nebo upraví na míru. Převzatá data
+> si ověřte vždy.
+
+## 103.3 Krok za krokem: záloha agendy v Money S3
+
+1. V Money S3 otevřete agendu firmy, kterou chcete převést.
+2. Zvolte funkci *Zálohovat agendu* a uložte soubor. Money vytvoří jeden
+   soubor s příponou `.lz`, jehož jméno obsahuje IČO firmy a číslo agendy,
+   například `12345678ag001.lz`. Jedna záloha obsahuje všechny roky agendy.
+3. Soubor nerozbalujte. Přijímá se i stejný soubor s příponou `.zip`.
+4. Chcete-li při kontrole porovnat výsledek se sestavou z Money, vyexportujte
+   z Money ke každému převáděnému roku obratovou předvahu do CSV (účet v prvním
+   sloupci, dál PS MD, PS D, obrat MD, obrat D, KS MD, KS D).
+
+**Jak poznáte, že je hotovo:** Máte soubor `.lz` (případně CSV s předvahami).
+Instalace Money se zálohou nijak nemění.
+
+## 103.4 Krok za krokem: nahrání zálohy a zkouška nanečisto
+
+1. Otevřete `Systém → Přechod z jiných účetních systémů → Money S3`.
+2. V kroku **Záloha agendy** klikněte na **Soubor zálohy agendy (.lz)**,
+   vyberte soubor a klikněte na **Nahrát a načíst**. Stránku nechte během
+   nahrávání otevřenou. Průvodce ukazuje procenta a při výpadku spojení naváže.
+3. V kroku **Náhled a volby** zkontrolujte agendu (**IČO**, **DIČ**, **Sídlo**,
+   **Verze Money**, **Záloha pořízena**) a tabulku **Účetní roky v záloze**.
+   Část **Kontrola před převodem** musí ukázat, že je záloha v pořádku.
+4. Nastavte **Volby převodu**:
+   - **Převést od roku** (výchozí je rok, od kterého navazují stavy; **Všechny
+     roky zálohy** převede celou zálohu),
+   - **Uzavřít historické roky průvodcem uzávěrkou** (výchozí zapnuto),
+   - **Začátek prvního účetního období** jen u firmy založené během prvního
+     převáděného roku,
+   - volitelně sestavy z Money v části **Sestavy z Money ke kontrole**
+     (**Nahrát předvahu {rok}**).
+5. Klikněte na **Pokračovat**.
+6. V kroku **Zkouška nanečisto** klikněte na **Spustit zkoušku nanečisto**.
+   Proběhne celý převod včetně uzávěrky a rekonciliace, na konci se ale
+   všechno vrátí. V MyÚčtu nezůstane nic.
+7. Přečtěte protokol zkoušky. Chyby opravte a zkoušku zopakujte (**Zkoušku
+   zopakovat**).
+
+**Jak poznáte, že je hotovo:** Zkouška skončí stavem **V pořádku** nebo
+**S upozorněními** a rekonciliace nehlásí chybu. Selže-li zkouška jen na
+**Rozdílech k přijetí**, rozhodnete se podle [§ 103.10.5.1](#1031051-chyby-upozorneni-a-rozdily-k-prijeti).
+
+Kontrola před převodem zastaví převod, když záloha patří firmě s jiným IČO, účetní
+období v MyÚčtu už obsahuje zápisy, které nevznikly převodem, období je
+uzavřené, nebo agenda vede hospodářský rok odlišný od kalendářního. Chybí-li
+IČO v záloze nebo ve firmě, zkouška jen upozorní a ostrý převod se spustí až po
+výslovném potvrzení.
+
+## 103.5 Krok za krokem: ostrý převod
+
+1. V kroku **Převod** zaškrtněte potvrzení, že rozumíte dopadu převodu
+   (u neověřeného IČO i potvrzení, že záloha patří této firmě).
+2. Po zkoušce, která selhala jen na rozdílech k přijetí, zaškrtněte navíc
+   **Převést i přes rozdíly** (viz [§ 103.10.5.1](#1031051-chyby-upozorneni-a-rozdily-k-prijeti)).
+3. Klikněte na **Spustit převod**. Převod běží na pozadí, stránku můžete
+   zavřít. Průběh ukazuje počty zápisů, už převedených a chyb. Převod můžete
+   zastavit tlačítkem **Zastavit převod**.
+4. Po dokončení klikněte na **Otevřít účetní deník** nebo **Obratová předvaha**.
+
+**Jak poznáte, že je hotovo:** Převod skončí stavem **V pořádku** nebo **S
+upozorněními**. Protokol je v přehledu **Protokoly převodů** pod průvodcem. Převod
+jedné firmy běží vždy jen jeden, druhý se do jeho konce nespustí.
+
+## 103.6 Krok za krokem: kontrola převzetí
+
+1. Otevřete protokol ostrého převodu. U každého roku zkontrolujte rekonciliaci:
+   obratová předvaha MyÚčta proti předvaze z deníku Money (na haléř), případně
+   proti nahrané sestavě z Money; obraty MD = D, předvaha = deník, vyrovnané
+   počáteční stavy; doklady proti deníku (přijaté faktury proti 321, vydané
+   proti 311, pokladna proti 211, banka proti 221).
+2. Projděte upozornění a **Rozdíly k přijetí**. Každý nepřevedený doklad
+   doplňte ručně, nebo opravte příčinu a převod zopakujte (doplní jen to,
+   co chybí).
+3. V `Účetnictví` otevřete obratovou předvahu a porovnejte syntetické účty
+   s výstupy Money.
+4. Doklady označené v protokolu jako **doklad bez zápisu** zaúčtujte v
+   `Účetnictví → Doúčtovat doklady`. Koncepty k ruční kontrole (zálohové
+   faktury, dobropisy, doklady s nejistým členěním DPH) opravte a potvrďte.
+5. Zkontrolujte kroky **Dlouhodobý majetek** a **Drobný majetek** (porovnání
+   karet se zůstatky účtů) a krok **Mzdy** (kontrolní úhrny po měsících,
+   návrh kontací).
+6. Zkontrolujte, zda se historické roky uzavřely. Rok, jehož konečné stavy
+   nesedí na počáteční stavy dalšího roku, zůstává otevřený (viz
+   [§ 103.10.6](#103106-uzaverka-historickych-let)).
+7. Doplňte, co se nepřevádí: skeny dokladů v `Dokumenty → Skeny k dokladům`,
+   zaměstnance importem podání JMHZ v `Mzdy → Importy`.
+
+**Jak poznáte, že je hotovo:** Všechny kontroly K1 až K4 (viz
+[§ 103.10.9](#103109-davkovy-prevod-vice-firem)) projdou, nezbývají doklady bez
+zápisu ani nepřijaté rozdíly a obraty v MyÚčtu odpovídají Money.
+
+## 103.7 Krok za krokem: navázání číselné řady
+
+Převod přenáší doklady s čísly z Money S3, ale počítadlo nové řady nenastaví.
+
+1. Otevřete `Nastavení → Doklady → Číslování faktur` a vyberte šablonu řady.
+2. Do pole **Příští číslo** zadejte číslo, kterým má řada pokračovat.
+3. Klikněte na **Nastavit počítadlo**. Ukládá se samostatně, mimo tlačítko
+   **Uložit**, a po potvrzení se ukáže náhled výsledného čísla.
+
+**Jak poznáte, že je hotovo:** Náhled ukazuje očekávané příští číslo.
+
+> [!WARNING]
+> Zkontrolujte, že perioda resetu sedí se šablonou: u masky bez `{MM}` a
+> měsíčního resetu by počítadlo prvního dne dalšího měsíce spadlo zpátky na
+> začátek a čísla by kolidovala. Viz
+> [§ 95.6](95_Multi_supplier.md#956-krok-za-krokem-cislovani-faktur).
+
+## 103.8 Krok za krokem: dávkový převod více firem
+
+1. V průvodci otevřete záložku **Dávka více firem** a vyberte zálohy `.lz`
+   všech firem najednou.
+2. Zkontrolujte u každé firmy IČO, název, roky, doporučený rok „od" a cílovou
+   firmu. Zvolte **Firma už v MyÚčtu je** (převést, nebo přeskočit).
+3. Volitelně přiložte EPO XML podaných přiznání k DPPO, zvolte skupinu firem
+   a **Firmy dávky jsou spřízněné osoby** (jen pro skupinu, ne pro nezávislé
+   klienty).
+4. Spusťte zkoušku nanečisto, pak ostrý převod. Dávka běží jako jeden úkol na
+   pozadí.
+5. V protokolu dávky zkontrolujte u každé firmy stav a kontroly K1 až K4.
+
+**Jak poznáte, že je hotovo:** U každé firmy je stav převedena nebo
+přeskočena a kontroly K1 až K4 jsou v pořádku. Podrobný protokol firmy je v
+záložce **Jedna firma**.
+
+Pravidla dávky včetně příkazové řádky jsou v
+[§ 103.10.9](#103109-davkovy-prevod-vice-firem).
+
+## 103.9 Když něco nejde
+
+<!-- cols: 30 34 36 -->
+| Co vidíte | Proč | Co udělat |
+|---|---|---|
+| Kontrola před převodem hlásí chybu | Jiné IČO, zápisy v období, uzavřené období, nebo hospodářský rok mimo kalendářní | Opravte příčinu a nahrajte zálohu znovu; hospodářský rok převod nepodporuje |
+| Nahrávání se přerušilo | Výpadek spojení | Vyberte soubor a nahrajte ho znovu |
+| Zkouška selhala jen na rozdílech k přijetí | Doklad se nepřevedl nebo výsledek nesedí na Money | Zaškrtněte **Převést i přes rozdíly**, nebo rozdíl opravte a zkoušku zopakujte |
+| Rok se neuzavřel | Konečné stavy nesedí na počáteční stavy dalšího roku | Rok zůstává otevřený; důvod je v protokolu, rozdíl opravte a převod zopakujte |
+| Doklad je koncept | Zálohová faktura, dobropis, stornovaný doklad nebo členění DPH mimo tuzemské řádky | Opravte druh dokladu nebo klasifikaci DPH a potvrďte ho |
+| Číslo dokladu má příponu roku (např. `FP001/2025`) | Číslo už ve firmě existuje; Money čísluje řady každý rok od začátku | Není chyba |
+| Chybí zaměstnanci | Převod osoby a mzdy zaměstnanců nepřebírá | Importujte podání JMHZ v `Mzdy → Importy` |
+| Chybí přílohy a archiv dokumentů | Money je ukládá šifrovaně | Připojte skeny v `Dokumenty → Skeny k dokladům` |
+| Kontrola K1 hlásí rozdíl pod 1,00 Kč | Zaokrouhlení dokladů ve zdroji | Je to upozornění, kontrola platí |
+| Je potřeba převést znovu od začátku | Firma byla smazána | Před smazáním stáhněte profil firmy a po převodu ho nahrajte zpět ([§ 103.10.8](#103108-opakovany-prevod)) |
+
+## 103.10 Podrobnosti a pravidla
+
+### 103.10.1 Soubor zálohy agendy a oprávnění
 
 Průvodce převede účetní agendu z Money S3 do firmy v MyÚčtu. Vstupem je záloha
 agendy, kterou si firma nebo účetní vytvoří v Money funkcí *Zálohovat agendu*
@@ -9,7 +201,7 @@ agendy, kterou si firma nebo účetní vytvoří v Money funkcí *Zálohovat age
 Položka je v menu Systém, které vidí administrátor. Jiný uživatel s potřebnými
 oprávněními otevře průvodce přímým odkazem `/imports/money-s3`.
 
-### 103.1.1 Co je soubor zálohy agendy
+#### 103.10.1.1 Co je soubor zálohy agendy
 
 - Záloha agendy je jeden soubor s příponou `.lz`, který Money S3 vytvoří
   funkcí *Zálohovat agendu*. Jméno obsahuje IČO firmy a číslo agendy, například
@@ -37,7 +229,7 @@ Chybějící oprávnění průvodce ukáže a převod nespustí.
 Průvodce je dostupný i firmě, která zatím vede daňovou evidenci: převod ji sám
 přepne do podvojného účetnictví.
 
-## 103.2 Co převod přenese
+### 103.10.2 Co převod přenese
 
 | Z Money | Do MyÚčta |
 |---|---|
@@ -55,7 +247,7 @@ přepne do podvojného účetnictví.
 | karty dlouhodobého majetku a jejich pohyby | karty majetku s počátečními stavy, technickými zhodnoceními a odpisy převedených let, viz níže |
 | karty drobného majetku | evidence drobného majetku včetně vyřazených karet |
 
-### 103.2.1 Majetek
+#### 103.10.2.1 Majetek
 
 Převod přebírá evidenci majetku Money (karty a jejich pohyby). Zařazení, odpisy
 i vyřazení jsou už v převedeném deníku, karta proto vzniká bez zápisu v deníku.
@@ -86,7 +278,7 @@ Na konci kroku převod porovná karty se zůstatky majetkových a oprávkových 
 po syntetikách. Rozdíl, který je už v evidenci Money (majetek účtovaný bez karty),
 protokol označí zvlášť.
 
-### 103.2.2 Mzdy
+#### 103.10.2.2 Mzdy
 
 Zápisy mezd jsou v převedeném deníku a znovu nevznikají. Z mzdových dokladů
 (závazky a interní doklady mzdového modulu Money) převod v kroku **Mzdy** udělá
@@ -95,7 +287,7 @@ tři věci:
 - **Návrh kontací mezd.** Z mzdových zápisů posledního převáděného roku odvodí,
   které účty firma používá pro hrubé mzdy, pojistné, daň a srážky, a uloží je jako
   návrh v Mzdy → Importy → **Kontace mezd** (viz
-  [§ 108.11](108_Prechod_z_PAMICA.md#10811-kontace-mezd-z-puvodniho-programu)).
+  [§ 108.9.11](108_Prechod_z_PAMICA.md#108911-kontace-mezd-z-puvodniho-programu)).
   Nastavení mezd se nemění, dokud návrh nepotvrdíte. Význam zápisu se bere
   z druhu mzdového dokladu, který Money u novějších dokladů vede (sociální,
   zdravotní pojištění, daň, srážky…); starší doklady bez druhu se zařadí podle
@@ -114,7 +306,7 @@ tři věci:
   a výchozími předkontacemi. Variabilní symbol ČSSZ, kód OSSZ a číslo plátce
   zdravotního pojištění, které firma vede v Nastavení firmy, převezme do Mezd
   a k variabilnímu symbolu založí registraci účtárny s účinností od začátku
-  vedení mezd (viz [§ 90.8](90_Nastaveni_mezd.md#908-podrobny-pracovni-postup-a-kontroly)).
+  vedení mezd (viz [§ 90.14.1](90_Nastaveni_mezd.md#90141-mzdove-uctarny-a-registrace-u-cssz)).
   Co v Nastavení firmy není, ani účty institucí převod nevymýšlí; protokol
   vypíše k doplnění v Mzdy → Nastavení jen to, co opravdu chybí. Zapnutý
   modul, jeho začátek ani existující nastavení převod nemění. Firmě, jejíž mzdy
@@ -125,7 +317,7 @@ jednotlivých zaměstnanců v šifrované databázi agendy, kterou převod pře�
 nemůže. Starší čitelné tabulky mzdového modulu v záloze (u agend vedených dlouho
 končí typicky rokem 2020) převod také nepřebírá: historie osob se nepřevádí.
 Zaměstnance i historii jejich mezd převezměte importem přijatých podání JMHZ a registrací
-v Mzdy → Importy, viz [§ 90.9.1](90_Nastaveni_mezd.md#9091-jmhz-registrace-a-mesicni-hlaseni).
+v Mzdy → Importy, viz [§ 90.14.10](90_Nastaveni_mezd.md#901410-import-jmhz-registrace-a-mesicni-hlaseni).
 
 **Zaúčtování se nepřepočítává.** Deník je přesná kopie toho, co bylo v Money,
 a doklady se k němu jen připojí. Z dokladu je proto vidět jeho zápis a naopak,
@@ -154,14 +346,14 @@ s daným typem nesou tutéž; hlavičku, kterou už někdo vyplnil, převod nem�
 
 Dimenze dostanou i zápisy z let, která převod uzavřel už dříve; obraty ani výkazy
 se tím nemění. U řádků převzatých z Money platí Money: opakovaný převod přepíše
-středisko, projekt nebo vozidlo, které jsi u nich změnil ručně.
+středisko, projekt nebo vozidlo, které jste u nich změnili ručně.
 
 **Popisy zápisů se dogenerují.** Money veze v řádku deníku jen pole `Popis`, které
 je u celé řady dokladů shodné. Po navázání dokladů proto převod popisy přeskládá do
-tvaru **doklad — protistrana — obsah**, aby se zápisy v deníku daly rozlišit; v protokolu
-to uvidíš jako *„U N převedených zápisů se popis doplnil o číslo dokladu a protistranu."*
-Částek, účtů ani dat se to nedotýká a jde to kdykoli zopakovat — viz
-[§ 52.12.1](52_Ucetni_denik.md#52121-dogenerovani-popisu-u-prevzatych-zapisu).
+tvaru **doklad - protistrana - obsah**, aby se zápisy v deníku daly rozlišit; v protokolu
+to uvidíte jako *„U N převedených zápisů se popis doplnil o číslo dokladu a protistranu."*
+Částek, účtů ani dat se to nedotýká a jde to kdykoli zopakovat - viz
+[§ 52.14.13.1](52_Ucetni_denik.md#5214131-dogenerovani-popisu-u-prevzatych-zapisu).
 
 **Doklady k ruční kontrole.** Fakturu, jejíž daňovou povahu záloha Money
 spolehlivě neurčuje, převod převezme jako koncept:
@@ -187,19 +379,19 @@ převezme bez nároku na odpočet.
 v dalším roce je běžné. Stejně se rozliší doklady se stejným číslem na dvou
 bankovních účtech nebo ve dvou pokladnách.
 
-## 103.3 Co převod nepřenese
+### 103.10.3 Co převod nepřenese
 
 - **Přílohy a elektronický archiv.** Money je drží v šifrovaných souborech,
   které ze zálohy číst nejde. Skeny dokladů se připojují zvlášť.
 - **Zaměstnanci, mzdy osob a sklad.** Zápisy mezd a zásob jsou v převedeném
-  deníku; zaměstnance převezmete z podání JMHZ (viz 103.2.2), zásoby se zakládají
+  deníku; zaměstnance převezmete z podání JMHZ (viz [§ 103.10.2.2](#1031022-mzdy)), zásoby se zakládají
   v MyÚčtu.
 - **Interní doklady, kniha pohledávek a závazků.** V deníku jsou jako ruční
   zápisy s původním číslem dokladu, samostatný doklad z nich nevzniká.
 - **Číselné řady a řádky DPH pokladních dokladů.** Podaná přiznání k DPH za
   převáděné roky zůstávají v Money.
 
-## 103.4 Postup
+### 103.10.4 Postup
 
 1. **Záloha agendy.** Nahrajte soubor `.lz`. Průvodce ho rozbalí (jen datové
    soubory agendy) a načte. Rozbalení a načtení běží na serveru na pozadí,
@@ -216,11 +408,11 @@ bankovních účtech nebo ve dvou pokladnách.
    výslovném potvrzení.
 
    Volby:
-   - *Uzavřít historické roky* — viz 83a.5, ve výchozím stavu zapnuto.
-   - *Začátek prvního účetního období* — jen u firmy založené během prvního
+   - *Uzavřít historické roky* - viz [§ 103.10.6](#103106-uzaverka-historickych-let), ve výchozím stavu zapnuto.
+   - *Začátek prvního účetního období* - jen u firmy založené během prvního
      převáděného roku. Bez něj začíná první období 1. 1., u roku bez počátečních
      stavů prvním zápisem deníku.
-   - *Sestavy z Money* — ke každému roku můžete nahrát obratovou předvahu
+   - *Sestavy z Money* - ke každému roku můžete nahrát obratovou předvahu
      vyexportovanou z Money do CSV (účet v prvním sloupci, dál PS MD, PS D,
      obrat MD, obrat D, KS MD, KS D). Rekonciliace ji porovná s předvahou MyÚčta.
 3. **Zkouška nanečisto.** Proběhne celý převod včetně uzávěrky a rekonciliace,
@@ -232,7 +424,7 @@ bankovních účtech nebo ve dvou pokladnách.
    dokončení průvodce nabídne účetní deník a obratovou předvahu. Převod jedné
    firmy běží vždy jen jeden, druhý se do jeho konce nespustí.
 
-### 103.4.1 Navázání na existující číselnou řadu
+#### 103.10.4.1 Navázání na existující číselnou řadu
 
 Převod přenáší doklady s čísly, která měly v Money S3, ale počítadlo nové řady
 tím sám nenastaví. Číslo, kterým má řada v MyÚčtu pokračovat, zadejte
@@ -244,15 +436,17 @@ Vlastní řadu může mít i jednotlivý zákazník nebo kategorie tržby; pole 
 číslo* je pak u jejich šablony. U zděděné šablony se pole nenabízí, protože se
 čísluje řadou dodavatele a počítadlo je společné.
 
-> ⚠️ Zkontrolujte, že **perioda resetu sedí se šablonou**: u masky bez `{MM}`
+> [!WARNING]
+> Zkontrolujte, že **perioda resetu sedí se šablonou**: u masky bez `{MM}`
 > a měsíčního resetu by počítadlo prvního dne dalšího měsíce spadlo zpátky na
 > začátek a čísla by kolidovala. Podrobně viz
-> [§ 95.5.3](95_Multi_supplier.md#9553-cislovani-faktur).
+> [§ 95.6](95_Multi_supplier.md#956-krok-za-krokem-cislovani-faktur).
 
-> 🛈 Sestava *Úplnost číselné řady* začne řadu počítat až od nastaveného čísla,
+> [!TIP]
+> Sestava *Úplnost číselné řady* začne řadu počítat až od nastaveného čísla,
 > takže začátek řady na vyšším čísle nehlásí jako chybějící doklady.
 
-## 103.5 Rekonciliace a protokol
+### 103.10.5 Rekonciliace a protokol
 
 Každý běh (zkouška i převod) končí protokolem. Najdete v něm kroky převodu
 s počty, upozornění a chyby a pro každý rok rekonciliaci:
@@ -278,7 +472,7 @@ spárování. Spárovaná faktura dostane stav uhrazeno.
 Protokoly všech běhů zůstávají v přehledu pod průvodcem. Protokol zkoušky
 nanečisto z přehledu smažete, protokol ostrého převodu zůstává.
 
-### 103.5.1 Chyby, upozornění a rozdíly k přijetí
+#### 103.10.5.1 Chyby, upozornění a rozdíly k přijetí
 
 Zprávy protokolu mají tři váhy. Platí stejně pro převod z Money S3, POHODY,
 PAMICA i PREMIER.
@@ -304,9 +498,9 @@ opravte a spusťte převod znovu; opakovaný převod doplní jen to, co chybí.
 
 Při přijatých rozdílech se automatika účtování po převodu obnoví stejně jako
 po převodu bez chyb. Převod více roků pokračuje dalšími roky. Převod z PREMIER
-rok s přijatými rozdíly neuzavírá ([§ 109.6.1](109_Prechod_z_PREMIER.md#10961-uzaverka-uzavrenych-roku)).
+rok s přijatými rozdíly neuzavírá ([§ 109.8.6.1](109_Prechod_z_PREMIER.md#109861-uzaverka-uzavrenych-roku)).
 
-## 103.6 Uzávěrka historických let
+### 103.10.6 Uzávěrka historických let
 
 Money převáděné roky uzavřelo, převod je ale naveze otevřené. Průvodce je pak
 uzavře průvodcem uzávěrkou MyÚčta od nejstaršího roku, a jen tehdy, když konečné
@@ -324,7 +518,7 @@ nezaúčtuje, takže se počáteční stavy nezdvojí. Poslední převedený rok
 otevřený. Rok, jehož knihy se uzavřely, ale další rok se otevřít nepodařilo,
 opakovaný převod dotáhne.
 
-## 103.7 Režim účetnictví a automatika
+### 103.10.7 Režim účetnictví a automatika
 
 Převod zapíše podvojné účetnictví od začátku prvního převáděného období do
 nastavení firmy i do historie režimů. Automatika účtování je během převodu
@@ -341,7 +535,7 @@ natrvalo: další úspěšný běh ji vrátí na stav před prvním převodem.
 Záznam daňové evidence, který v historii režimů firmy leží uvnitř převáděných
 let, převod odstraní, protože v Money byly tyto roky podvojné.
 
-## 103.8 Opakovaný převod
+### 103.10.8 Opakovaný převod
 
 Převod si pamatuje, co z které agendy už vzniklo. Opakovaný převod téže nebo
 novější zálohy založí jen to, co ještě chybí, a nic nezdvojí. Převod přerušený
@@ -358,9 +552,9 @@ se s ní i nastavení, které převod nezakládá: výjimky mapování výkazů,
 výkazů a uzávěrky, daňový profil, dimenze, předkontace a pravidla banky. Před
 smazáním proto v průvodci (nebo v Nastavení) stáhněte **profil firmy** a po
 ostrém převodu ho nahrajte zpět. Výkazy pak vyjdou stejně jako před smazáním.
-Popis profilu je v [§ 96.18](96_Nastaveni.md#9618-profil-firmy).
+Popis profilu je v [§ 96.13](96_Nastaveni.md#9613-krok-za-krokem-profil-firmy).
 
-## 103.9 Dávkový převod více firem
+### 103.10.9 Dávkový převod více firem
 
 Účetní kancelář nebo skupina firem převede víc agend najednou v záložce
 **Dávka více firem** nahoře v průvodci. Dávka dělá u každé firmy totéž co
@@ -381,7 +575,7 @@ najde nebo založí.
   zakládat firmy. Firmu, ke které přístup nemáte, dávka nepřevede a vypíše ji
   jako chybu. E-mail založené firmy doplňte v nastavení firmy.
 - **Rok „od" automaticky.** U každé firmy začne převod prvním rokem, od kterého
-  v Money navazují konečné a počáteční stavy (viz 103.6). Starší roky zůstanou
+  v Money navazují konečné a počáteční stavy (viz [§ 103.10.6](#103106-uzaverka-historickych-let)). Starší roky zůstanou
   v archivu Money. Volbou *Všechny roky* převedete celou zálohu.
 - **Podaná přiznání k DPPO (volitelné).** Přiložte EPO XML podaných přiznání
   (DPPDP9). Přiřadí se podle IČO, za každý rok platí poslední podání (dodatečné
@@ -392,7 +586,7 @@ najde nebo založí.
   rozpracované přiznání nepřepíše a finální nikdy nemění.
 - **Skupina firem.** Firmy lze zařadit do skupiny aktuální firmy nebo do nové
   skupiny. Zařazení proběhne před převodem, takže zakázky Money se převedou jako
-  globální projekty skupiny (viz 103.2). Volba *Firmy dávky jsou spřízněné osoby*
+  globální projekty skupiny (viz [§ 103.10.2](#103102-co-prevod-prenese)). Volba *Firmy dávky jsou spřízněné osoby*
   označí partnery s IČO jiné firmy dávky nebo skupiny jako spřízněné osoby, a to
   nově založené i ty, které už v adresáři firmy byly. Karta, která už spřízněnou
   osobou je, si ponechá svůj typ vztahu i doložení. Pro nezávislé klienty kanceláře
@@ -422,7 +616,7 @@ přepnutí do firmy). Předchozí dávky zůstávají v přehledu pod průvodcem
 
 **Opakování.** Dávku jde spustit znovu se stejnými nebo novějšími zálohami.
 S volbou *Převést znovu* se do existujících firem doplní jen to, co chybí
-(viz 103.8), nic se nezdvojí; firma, která minule selhala, se převede znovu.
+(viz [§ 103.10.8](#103108-opakovany-prevod)), nic se nezdvojí; firma, která minule selhala, se převede znovu.
 Profil nastavení existující firmy si dávka před převodem odloží a po úspěšném
 převodu ho obnoví, takže ho při opakování není potřeba stahovat ručně.
 
@@ -445,7 +639,7 @@ MyÚčto s výstupy Money nebo s novou zálohou agendy na stránce
 [Souběh se starým systémem](111_Soubeh_se_starym_systemem.md)). Záloha se tam
 čte bez zápisu do MyÚčta.
 
-## 103.10 Omezení
+### 103.10.10 Omezení
 
 - Formát dat Money není veřejně dokumentovaný. Čtení je ověřené na verzi
   Money S3 26.600; u jiné verze průvodce upozorní a výsledek je o to důležitější
@@ -456,3 +650,11 @@ MyÚčto s výstupy Money nebo s novou zálohou agendy na stránce
   jen datové soubory agendy s omezeným počtem i velikostí.
 - Nahraná záloha zůstává na serveru pro další běh. Po úspěšném ostrém převodu
   se smaže, jinak ji denní úklid smaže po týdnu bez práce s ní.
+
+## 103.11 Související kapitoly
+
+- [Souběh se starým systémem](111_Soubeh_se_starym_systemem.md)
+- [Účetní deník](52_Ucetni_denik.md)
+- [Uzávěrka](72_Uzaverka.md)
+- [Přechod z PAMICA](108_Prechod_z_PAMICA.md)
+- [Řešení problémů](999_Reseni_problemu.md)

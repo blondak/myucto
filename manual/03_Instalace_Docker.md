@@ -1,327 +1,528 @@
-# 3. Instalace — Docker
+# 3. Instalace - Docker
 
-Docker je nejrychlejší cesta (cca 3 minuty) a doporučená pro nové instalace.
-Předpoklady: **Docker Desktop** (Windows / macOS) nebo **Docker Engine
-+ compose-plugin** (Linux).
+> Návod, jak nainstalovat MyÚčto v Dockeru za několik minut. Pro správce, který
+> má server nebo počítač s Dockerem a chce mít aplikaci rychle v provozu.
 
-Klon repa je společný krok pro většinu variant:
+## 3.1 Kdy to potřebujete
+
+Kapitolu otevřete, když:
+
+- instalujete MyÚčto poprvé a chcete nejrychlejší, doporučenou cestu (cca 3 minuty),
+- chcete aplikaci nasadit na server jen s Dockerem, bez klonu repozitáře,
+- spravujete kontejnery přes Portainer nebo Dockge a nechcete používat příkazovou řádku,
+- potřebujete před aplikaci dát HTTPS,
+- chcete změnit port, zapnout Redis nebo ušetřit paměť na malém stroji,
+- chcete aplikaci aktualizovat nebo zapnout tlačítko **Aktualizovat** v aplikaci.
+
+<!-- cols: 40 60 -->
+| Situace | Kam jít |
+|---|---|
+| Chci nejrychlejší instalaci z hotového image | [§ 3.3](#33-krok-za-krokem-instalace-z-hotoveho-image-ghcr) |
+| Chci image sestavit lokálně z repozitáře | [§ 3.4](#34-krok-za-krokem-instalace-sestavenim-ze-zdrojovych-kodu) |
+| Na serveru nechci klon repozitáře | [§ 3.5](#35-krok-za-krokem-instalace-bez-klonu-repozitare) |
+| Používám Portainer nebo Dockge | [§ 3.9](#39-krok-za-krokem-instalace-pres-portainer-nebo-dockge) |
+| Potřebuji HTTPS | [§ 3.8](#38-krok-za-krokem-https-pres-reverse-proxy) |
+| Chci aktualizovat | [§ 3.7](#37-krok-za-krokem-aktualizace) |
+
+## 3.2 Než začnete
+
+Potřebujete:
+
+1. **Docker Desktop** (Windows, macOS) nebo **Docker Engine s compose pluginem** (Linux).
+2. U variant s klonem repozitáře příkaz `git`.
+3. Na Windows **PowerShell 7** (`pwsh`). Windows PowerShell 5.1 instalační skripty odmítne.
+
+Klon repozitáře je společný krok většiny variant:
 
 ```bash
 git clone https://github.com/radekhulan/myucto.git myucto
 cd myucto
 ```
 
-Pak si vyber variantu podle toho, jestli chceš stavět image lokálně, nebo
-si stáhnout pre-built z GHCR.
+Pak zvolte variantu podle toho, jestli chcete stáhnout hotový image z GHCR (rychlejší, bez lokálního buildu), nebo ho sestavit lokálně (vhodné pro vývoj a vlastní úpravy).
 
-## 3.1 Varianta A — pre-built image z GHCR (rychlejší, bez local buildu)
+> [!WARNING]
+> Na WSL2 nebo Linuxu může po klonu skript `./cmd/docker-ghcr.sh` hlásit `Permission denied` nebo `/usr/bin/env: 'bash\r': No such file…`. Příčinou je `core.autocrlf=true`, který na checkoutu převádí LF na CRLF. Opravte to jednorázově (viz [§ 3.11](#311-kdyz-neco-nejde)). Na Linuxu nesmí být autocrlf nikdy zapnutý.
 
-Stáhne hotový multi-arch image (`ghcr.io/radekhulan/myucto:latest`,
-`linux/amd64` + `linux/arm64`). Nepotřebuješ na hostu `pnpm`/`composer`
-ani několikaminutový build.
+## 3.3 Krok za krokem: instalace z hotového image (GHCR)
 
-```bash
-# Linux / macOS
-cmd/docker-ghcr.sh
+Stáhne hotový multi-arch image `ghcr.io/radekhulan/myucto:latest` (`linux/amd64` a `linux/arm64`). Na hostu nepotřebujete `pnpm`, `composer` ani několikaminutový build.
 
-# Windows — v PowerShellu 7 (pwsh); Windows PowerShell 5.1 skript odmítne
-pwsh -File .\cmd\docker-ghcr.ps1
-```
+1. Naklonujte repozitář a přejděte do něj (viz [§ 3.2](#32-nez-zacnete)).
+2. Spusťte instalační skript.
 
-Skript `docker-ghcr` postupně:
+   ```bash
+   # Linux / macOS
+   cmd/docker-ghcr.sh
 
-1. Vygeneruje `.env` s náhodnými DB hesly (28 znaků base64)
-2. Vygeneruje `cfg.docker.php` z `cfg.sample.php` (host=db / redis,
-   randomized `app.pepper` + `secret_encryption_key`, dev-friendly cookies)
-3. `docker compose pull` — stáhne image z GHCR
-4. `up -d` + počká na DB healthy + spustí migrace
+   # Windows - v PowerShellu 7 (pwsh)
+   pwsh -File .\cmd\docker-ghcr.ps1
+   ```
 
-Používá `docker-compose.production.yml` (image-only, žádný `build:` block),
-takže další compose příkazy vyžadují flag `-f docker-compose.production.yml`
-(viz [§ 3.6 Daily ops](#36-daily-ops)).
+3. Počkejte, až skript doběhne. Postupně:
+   1. vygeneruje `.env` s náhodnými hesly databáze (28 znaků base64),
+   2. vygeneruje `cfg.docker.php` z `cfg.sample.php` (host `db` / `redis`, náhodné `app.pepper` a `secret_encryption_key`, cookies vhodné pro HTTP na lokálním stroji),
+   3. provede `docker compose pull` (stáhne image z GHCR),
+   4. spustí stack, počká na zdravou databázi a spustí migrace.
+4. Otevřete aplikaci (viz [§ 3.6](#36-krok-za-krokem-prvni-otevreni-aplikace)).
 
-> 💡 V produkci pinuj konkrétní neměnný release tag — uprav `docker-compose.production.yml`
-> a změň `:latest` na konkrétní tag (např. `:X.Y.Z`). Aktualizaci pak proveď přes
-> `cmd/docker-update.{sh,ps1}` (auto-detekuje registry mode = `pull` + `up -d`
-> + migrace).
+**Jak poznáte, že je hotovo:** skript skončí bez chyby a na `http://localhost:8080` se zobrazí průvodce prvním spuštěním.
 
-**Aktualizace na novou verzi:**
+Tato varianta používá `docker-compose.production.yml` (jen image, žádný blok `build:`). Další příkazy `docker compose` proto potřebují volbu `-f docker-compose.production.yml` (viz [§ 3.12.5](#3125-denni-provoz)).
 
-```bash
-# Linux / macOS
-cmd/docker-update.sh
+> [!TIP]
+> V produkci připněte konkrétní neměnný release tag. V `docker-compose.production.yml` změňte `:latest` na konkrétní tag (například `:X.Y.Z`). Aktualizaci pak provádějte přes `cmd/docker-update.{sh,ps1}`.
 
-# Windows — v PowerShellu 7 (pwsh); Windows PowerShell 5.1 skript odmítne
-pwsh -File .\cmd\docker-update.ps1
-```
+## 3.4 Krok za krokem: instalace sestavením ze zdrojových kódů
 
-Skript v registry módu sám zavolá `docker compose pull app` (stáhne nový
-image z GHCR), restartuje stack a doběhne pending migrace. Volumes (DB data)
-zůstávají zachovány. Režim **detekuje z image běžícího kontejneru**:
-`ghcr.io/...` → registry (`pull`), lokální build → source (`git pull` + rebuild).
-Když stack zrovna neběží, ale máš lokálně stažený GHCR image, bere to taky jako
-registry. Přebít lze `MYINVOICE_UPDATE_MODE=registry|source`.
+Postaví image lokálně z repozitáře. Vhodné pro vývoj a vlastní úpravy.
 
-Nový image se publikuje automaticky při každém release tagu `v*.*.*`,
-takže aktualizace je otázkou jednoho příkazu.
+1. Naklonujte repozitář a přejděte do něj (viz [§ 3.2](#32-nez-zacnete)).
+2. Spusťte instalační skript.
 
-> 🔔 **Upgrade přímo z UI:** admin vidí v **Systém →
-> Aktualizace** stav verze + tlačítko *Aktualizovat*, které pull image
-> + restart spustí přes host-side watcher. Detaily včetně instalace
-> watcheru jako systemd unit / Scheduled Task → [§ 3.9 Update watcher](#39-update-watcher-jednoclick-upgrade-z-ui-volitelne)
-> nebo kapitola [Aktualizace](102_Aktualizace.md).
-> Pro denní kontrolu nové verze nezapomeň naplánovat
-> `php api/bin/cron-version-check.php` (1× denně, viz [Aktualizace](102_Aktualizace.md)).
+   ```bash
+   # Linux / macOS
+   cmd/docker-install.sh
 
-> **WSL2 / Linux po klonu:** pokud `./cmd/docker-ghcr.sh` hlásí
-> `Permission denied` nebo `/usr/bin/env: 'bash\r': No such file…`,
-> má tvůj git zapnutý `core.autocrlf=true`, který na checkoutu konvertuje
-> LF → CRLF. Oprav jednorázově existující soubory a vypni autocrlf
-> globálně (na Linuxu nikdy nemá být zapnutý):
->
-> ```bash
-> sed -i 's/\r$//' cmd/*.sh
-> chmod +x cmd/*.sh
-> git config --global core.autocrlf input
-> ```
->
-> Repo má `.gitattributes` s `*.sh text eol=lf`, takže příští `git clone`
-> bude LF i bez tohoto kroku.
+   # Windows - v PowerShellu 7 (pwsh)
+   pwsh -File .\cmd\docker-install.ps1
+   ```
 
-## 3.2 Varianta B — build z source
+3. Počkejte, až skript doběhne. Postupně:
+   1. vygeneruje `.env` s náhodnými hesly databáze (28 znaků base64),
+   2. vygeneruje `cfg.docker.php` z `cfg.sample.php` (host `db` / `redis`, náhodné `app.pepper` a `secret_encryption_key`, cookies vhodné pro HTTP na lokálním stroji),
+   3. postaví image `myucto:latest` (multi-stage: build Vue, composer, PHP 8.5 + nginx + php-fpm z `Dockerfile.alpine`),
+   4. spustí stack: **app** (nginx na portu 80, na hostu `8080`) a **db** (MariaDB 11.8),
+   5. počká na zdravou databázi a spustí migrace.
+4. Otevřete aplikaci (viz [§ 3.6](#36-krok-za-krokem-prvni-otevreni-aplikace)).
 
-Postaví image lokálně z repa — vhodné pro vývoj a vlastní úpravy.
+**Jak poznáte, že je hotovo:** skript skončí bez chyby a na `http://localhost:8080` se zobrazí průvodce prvním spuštěním.
 
-```bash
-# Linux / macOS
-cmd/docker-install.sh
+## 3.5 Krok za krokem: instalace bez klonu repozitáře
 
-# Windows — v PowerShellu 7 (pwsh); Windows PowerShell 5.1 skript odmítne
-pwsh -File .\cmd\docker-install.ps1
-```
+Hodí se pro produkční Linux server, kde je jen Docker. GHCR image obsahuje veškerý kód i migrace, z repozitáře potřebujete jen tři malé soubory.
 
-Skript `docker-install` postupně:
+### 3.5.1 Varianta C1: jedním skriptem (doporučeno)
 
-1. Vygeneruje `.env` s náhodnými DB hesly (28 znaků base64)
-2. Vygeneruje `cfg.docker.php` z `cfg.sample.php` (host=db / redis,
-   randomized `app.pepper` + `secret_encryption_key`, dev-friendly cookies pro
-   HTTP loopback)
-3. Postaví image `myucto:latest` (multi-stage: Vue build → composer →
-   PHP 8.5 + nginx + php-fpm z `Dockerfile.alpine`)
-4. Spustí stack: **app** (nginx:80 → host:8080) + **db** (MariaDB 11.8)
-5. Počká, až bude DB healthy, a spustí migrace
+Skript se chová stejně jako [§ 3.3](#33-krok-za-krokem-instalace-z-hotoveho-image-ghcr): náhodná hesla, vygenerovaný `cfg.docker.php`, stažení image, migrace.
 
-## 3.3 Varianta C — bez klonování repa (jen Docker)
+1. Vytvořte adresář a stáhněte soubory.
 
-Pokud nechceš mít na hostiteli klon repa (typicky produkční Linux server,
-jen Docker daemon), GHCR image obsahuje veškerý PHP/JS kód i migrace —
-z repa potřebuješ jen **3 malé soubory**.
+   ```bash
+   mkdir myucto && cd myucto
+   curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/docker-compose.production.yml
+   curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/cfg.sample.php
+   curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/cmd/docker-ghcr.sh
+   curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/cmd/lib/env-load.sh
+   chmod +x docker-ghcr.sh
+   ```
 
-#### Varianta C1 — one-click přes `docker-ghcr.sh` (doporučeno)
+2. Spusťte `./docker-ghcr.sh`. Skript najde `docker-compose.production.yml` v aktuálním adresáři, nic nepřejmenovávejte.
 
-Stáhne si i instalační skript a chová se stejně jako Varianta A
-(random hesla, vygenerovaný `cfg.docker.php`, pull image, migrace):
+**Jak poznáte, že je hotovo:** skript skončí bez chyby a na `http://localhost:8080` se zobrazí průvodce prvním spuštěním.
 
-```bash
-mkdir myucto && cd myucto
-curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/docker-compose.production.yml
-curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/cfg.sample.php
-curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/cmd/docker-ghcr.sh
-curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/cmd/lib/env-load.sh
-chmod +x docker-ghcr.sh
-./docker-ghcr.sh
-```
+`env-load.sh` je parser souboru `.env` (skript ho jinak dotáhne sám). Díky němu smí být v `.env` i hodnota s mezerou bez uvozovek.
 
-> 🛈 `env-load.sh` je parser `.env` (skript ho jinak dotáhne sám). Díky němu
-> smí být v `.env` i hodnota s mezerou bez uvozovek — viz **§ 77.7**.
+### 3.5.2 Varianta C2: ručně, bez skriptu
 
-Skript najde `docker-compose.production.yml` v aktuálním adresáři, takže
-nemusíš nic přejmenovávat. Update na novou verzi:
+Zvolte ji, když chcete plnou kontrolu nad `cfg.docker.php` a `.env`. Hesla a klíče se negenerují automaticky, musíte je doplnit sami.
+
+1. Stáhněte soubory a připravte konfiguraci.
+
+   ```bash
+   mkdir myucto && cd myucto
+   curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/docker-compose.production.yml
+   curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/cfg.sample.php
+   mv docker-compose.production.yml docker-compose.yml
+   cp cfg.sample.php cfg.docker.php
+   ```
+
+2. V `cfg.docker.php` nastavte minimálně:
+   - `db.host` na `db`, `db.user` na `myucto`, `db.pass` na heslo z `.env`,
+   - `app.pepper` a `secret_encryption_key` (obojí `openssl rand -base64 32`).
+3. Vytvořte `.env` s hesly.
+
+   ```bash
+   cat > .env <<EOF
+   DB_PASSWORD=$(openssl rand -base64 28)
+   DB_ROOT_PASSWORD=$(openssl rand -base64 28)
+   EOF
+   ```
+
+4. Spusťte stack a migrace.
+
+   ```bash
+   docker compose up -d
+   docker compose exec --user www-data app php api/bin/migrate.php
+   ```
+
+**Jak poznáte, že je hotovo:** `docker compose ps` ukazuje běžící služby **app** a **db** a na `http://localhost:8080` se zobrazí průvodce prvním spuštěním.
+
+> [!TIP]
+> V Dockeru se migrace spouštějí automaticky při startu kontejneru. Ruční `php api/bin/migrate.php` zůstává bezpečným záložním postupem, protože migrace jsou idempotentní.
+
+## 3.6 Krok za krokem: první otevření aplikace
+
+1. V prohlížeči otevřete **`http://localhost:8080`**. Použijte `http://` a explicitní port `:8080`.
+2. Projděte průvodce prvním spuštěním (viz [7. První spuštění](07_Setup_wizard.md)).
+
+**Jak poznáte, že je hotovo:** zobrazí se průvodce prvním spuštěním a po jeho dokončení přihlašovací stránka.
+
+Přístup z jiného stroje (LAN IP, hostname) funguje také, například `http://10.0.0.8:8080`. Adresa `app.url` se uloží podle URL, kterou v průvodci použijete. Potřebujete-li ji znát předem (produkční doména a reverse proxy), spusťte kontejner s `-e MYINVOICE_APP_URL=https://invoice.example.com`.
+
+> [!WARNING]
+> Docker stack běží na prostém HTTP. Při zadání `https://` nebo výchozího portu prohlížeč hlásí `SSL_ERROR_RX_RECORD_TOO_LONG` nebo `ERR_SSL_PROTOCOL_ERROR`. HTTPS zajistíte podle [§ 3.8](#38-krok-za-krokem-https-pres-reverse-proxy).
+
+Přístup z LAN přes IP (`10.*`, `172.16-31.*`, `192.168.*`), `127.*`, `localhost` a `*.local` je vyjmut z přesměrování na HTTPS v `.htaccess` a `web.config`. Přesměrování se přeskočí i u požadavku s hlavičkou `X-Forwarded-Proto: https` (reverse proxy s TLS terminací).
+
+> [!WARNING]
+> Přístup přes LAN IP a prosté HTTP je vhodný pro prvotní instalaci, ale passkeys na něm nejsou podporované. Pro passkeys použijte stabilní hostname, důvěryhodné HTTPS a nastavte `app.url` na přesný veřejný origin. Výjimkou pro lokální vývoj je `http://localhost`.
+
+## 3.7 Krok za krokem: aktualizace
+
+Aktualizace stáhne nový image, restartuje stack a doběhne čekající migrace. Data v databázi zůstávají zachována.
+
+1. Přejděte do adresáře instalace.
+2. Spusťte aktualizační skript.
+
+   ```bash
+   # Linux / macOS
+   cmd/docker-update.sh
+
+   # Windows - v PowerShellu 7 (pwsh)
+   pwsh -File .\cmd\docker-update.ps1
+   ```
+
+3. Počkejte na dokončení skriptu.
+
+**Jak poznáte, že je hotovo:** skript skončí bez chyby a v `Systém → Aktualizace` ukazuje **Aktuální verze** novou verzi.
+
+Skript režim detekuje z image běžícího kontejneru: `ghcr.io/...` znamená registry (`pull`), lokální build znamená source (`git pull` a rebuild). Když stack neběží, ale máte lokálně stažený GHCR image, bere to také jako registry. Režim lze přebít proměnnou `MYINVOICE_UPDATE_MODE=registry|source`. Nový image se publikuje automaticky při každém release tagu `v*.*.*`.
+
+Instalace bez klonu repozitáře (varianta C) se aktualizuje takto:
 
 ```bash
 docker compose -f docker-compose.production.yml pull
 docker compose -f docker-compose.production.yml up -d
 ```
 
-#### Varianta C2 — manuálně, bez skriptu
+> [!TIP]
+> Administrátor může aktualizovat i tlačítkem **Aktualizovat na {verze}** v `Systém → Aktualizace`. Aby tlačítko fungovalo, musí na hostu běžet watcher (viz [§ 3.10](#310-krok-za-krokem-tlacitko-aktualizovat-v-aplikaci-update-watcher)). Aby aplikace sama ukazovala, že je dostupná nová verze, naplánujte `php api/bin/cron-version-check.php` jednou denně (viz [Aktualizace](102_Aktualizace.md)).
 
-Když chceš plnou kontrolu nad `cfg.docker.php` a `.env`:
+## 3.8 Krok za krokem: HTTPS přes reverse proxy
+
+Docker stack sám TLS nedělá. Nginx v kontejneru poslouchá na portu 80 a mapuje se na host port `8080`. Pro HTTPS postavte před stack reverse proxy s TLS terminací. Tři rozumné cesty:
+
+1. **Caddy** (nejjednodušší): automatický Let's Encrypt pro doménu nebo self-signed certifikát pro IP.
+2. **Nginx s vlastním certifikátem** (`mkcert` nebo `openssl`): pro intranet bez veřejné domény.
+3. **Cloudflare Tunnel nebo Tailscale Funnel**: veřejný přístup bez otevírání portů na firewallu.
+
+Postup s Caddy jako dalším kontejnerem vedle stacku:
+
+1. V kořeni repozitáře (vedle `docker-compose.production.yml`) vytvořte soubor `Caddyfile`.
+
+   ```
+   faktury.tvojefirma.cz {
+       reverse_proxy localhost:8080
+   }
+   ```
+
+2. Spusťte Caddy na síti hostu, aby viděl port `8080`.
+
+   ```bash
+   docker run -d --name caddy --restart unless-stopped \
+     --network host \
+     -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
+     -v caddy_data:/data \
+     -v caddy_config:/config \
+     caddy:2
+   ```
+
+3. V `cfg.docker.php` přepněte produkční nastavení.
+
+   ```php
+   'app' => [
+       'url' => 'https://faktury.tvojefirma.cz',  // doslova to, co uživatel vidí v adresním řádku
+       ...
+   ],
+   'session' => [
+       'cookie_secure'   => true,
+       'cookie_name'     => '__Host-myinvoice_session',
+       'cookie_samesite' => 'Lax',
+   ],
+   ```
+
+4. Restartujte aplikaci: `docker compose -f docker-compose.production.yml restart app` (u varianty B bez volby `-f`).
+
+**Jak poznáte, že je hotovo:** `https://faktury.tvojefirma.cz` se otevře s platným certifikátem a přihlášení funguje.
+
+Caddy si certifikát vyžádá sám (potřebuje veřejně dostupné porty 80 a 443 a A/AAAA záznam domény) a sám ho obnovuje. Hlavičku `X-Forwarded-Proto: https` posílá automaticky. To je důležité: `.htaccess` v repozitáři bez ní vynucuje přesměrování HTTP na HTTPS a vzniká nekonečná smyčka přesměrování.
+
+> [!WARNING]
+> Cookie s prefixem `__Host-` vyžaduje HTTPS. Pokud po této změně otevřete aplikaci přes `http://`, přihlášení se rozbije, protože se cookie neuloží.
+
+`app.url` se používá v odkazech v e-mailech (faktury, reset hesla, upomínky). Musí přesně odpovídat veřejné URL, jinak odkazy povedou na špatnou doménu nebo na `localhost:8080`. Pokud instance z internetu dostupná není (jen LAN nebo VPN), vypněte odkaz na web fakturu v e-mailech klientům (viz [§ 16.5.1](16_Faktura_PDF.md#161012-vypnuti-web-faktury-na-instalaci)).
+
+Stejná hodnota je bezpečnostní autoritou pro WebAuthn. Určuje přesný origin a hostname (RP ID), pro který lze passkey vytvořit a použít. Neodvozuje se z hlavičky `Host` ani z hlaviček proxy. Změna `app.url` na jiný hostname proto zneplatní dříve registrované passkeys. Před změnou ověřte TOTP nebo jinou cestu obnovy přístupu.
+
+## 3.9 Krok za krokem: instalace přes Portainer nebo Dockge
+
+Protože je image veřejný na GHCR, jde MyÚčto nasadit přes webové rozhraní správce kontejnerů, bez klonování repozitáře, bez SSH a bez `cfg.docker.php`. Konfigurace se předává proměnnými prostředí. K tomu slouží samostatný soubor `docker-compose.portainer.yml` (jen `image:` z GHCR a `environment:`, bez `build:` a bez bind-mountu cfg souboru).
+
+Nejdřív vygenerujte a poznamenejte si povinné hodnoty:
 
 ```bash
-mkdir myucto && cd myucto
-curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/docker-compose.production.yml
-curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/cfg.sample.php
-mv docker-compose.production.yml docker-compose.yml
-cp cfg.sample.php cfg.docker.php
-# uprav cfg.docker.php — minimálně:
-#   db.host => 'db', db.user => 'myucto', db.pass => '<heslo z .env níže>'
-#   app.pepper a secret_encryption_key (oboje: openssl rand -base64 32)
-
-cat > .env <<EOF
-DB_PASSWORD=$(openssl rand -base64 28)
-DB_ROOT_PASSWORD=$(openssl rand -base64 28)
-EOF
-
-docker compose up -d
-docker compose exec --user www-data app php api/bin/migrate.php
+openssl rand -base64 28   # DB_PASSWORD
+openssl rand -base64 28   # DB_ROOT_PASSWORD
+openssl rand -base64 32   # MYINVOICE_PEPPER
+openssl rand -base64 32   # MYINVOICE_SECRET_KEY (doporučené, jinak fallback z pepperu)
 ```
 
-> 🛈 V Dockeru se migrace spouštějí automaticky při startu kontejneru
-> (`docker-entrypoint.sh`). Ruční `php api/bin/migrate.php` zůstává bezpečný
-> idempotentní fallback.
+### 3.9.1 Portainer: šablona aplikace (one-click)
 
-> ⚠️ Varianta C2 NEgeneruje hesla a secrets automaticky — musíš je do
-> `cfg.docker.php` doplnit ručně. Pro one-click bez klonu repa použij **C1**.
+1. V Portaineru otevřete **Settings → App Templates** a do pole **URL** vložte `https://raw.githubusercontent.com/radekhulan/myucto/master/portainer-template.json`. Uložte.
+2. Otevřete **App Templates**, najděte dlaždici **MyÚčto.cz** a klikněte na ni.
+3. Vyplňte proměnné (povinná hesla DB a pepper, ostatní mají rozumnou výchozí hodnotu) a klikněte na **Deploy the stack**.
+4. Otevřete `http://<host>:8080`. Spustí se průvodce prvním spuštěním (viz [7. První spuštění](07_Setup_wizard.md)).
 
-> 📖 **Manuál na `/manual`:** GHCR image má vygenerovaný HTML
-> manuál i PDF (`tools/generateManualHtml.php` +
-> `tools/exportManualToPdf.php` se volají build-time v `Dockerfile`),
-> takže `http://localhost:8080/manual` funguje bez dalších kroků a v sidebaru
-> je button **„Stáhnout PDF"**. Update na nový obsah = `cmd/docker-update.{sh,ps1}`
-> (pull novějšího image z GHCR stáhne i nové vygenerované kapitoly).
->
-> Kdyby `/manual` vrátil 503 *„Manuál není zatím vygenerovaný“*, regeneruješ
-> manuál ručně bez rebuildu:
->
-> ```bash
-> docker compose -f docker-compose.production.yml exec app \
->   php tools/generateManualHtml.php
-> docker compose -f docker-compose.production.yml exec app \
->   php tools/exportManualToPdf.php
-> ```
+**Jak poznáte, že je hotovo:** stack je ve stavu běžící a na portu 8080 se zobrazí průvodce.
 
-## 3.4 Po dokončení (všechny varianty)
+Portainer si compose stáhne z repozitáře sám (`repository.stackfile = docker-compose.portainer.yml`), stáhne image z GHCR a stack spustí. Migrace databáze proběhnou automaticky při startu kontejneru.
 
-**Otevři: 👉 http://localhost:8080**
+### 3.9.2 Portainer: ruční stack (webový editor)
 
-V prohlížeči naskočí setup wizard — viz [7. První spuštění](07_Setup_wizard.md).
+1. Otevřete **Stacks → Add stack → Web editor**.
+2. Vložte obsah `docker-compose.portainer.yml` (zkopírujte z [repozitáře](https://github.com/radekhulan/myucto/blob/master/docker-compose.portainer.yml)).
+3. V části **Environment variables** přidejte `DB_PASSWORD`, `DB_ROOT_PASSWORD`, `MYINVOICE_PEPPER`, případně `MYINVOICE_SECRET_KEY` a `APP_PORT`.
+4. Klikněte na **Deploy the stack**.
 
-> ⚠️ **Použij `http://`, ne `https://`, a explicitní port `:8080`.** Docker
-> stack běží na plain HTTP — pokud zadáš `https://...` nebo defaultní port,
-> dostaneš `SSL_ERROR_RX_RECORD_TOO_LONG` / `ERR_SSL_PROTOCOL_ERROR`. Pro
-> HTTPS na LAN/produkčním serveru viz [§ 3.8 HTTPS / TLS terminace](#38-https-tls-terminace).
+Alternativně použijte **Add stack → Repository** s URL `https://github.com/radekhulan/myucto` a cestou compose `docker-compose.portainer.yml`.
 
-> 🌐 **Přístup z jiného stroje (LAN IP, hostname)?** Setup wizard funguje
-> z libovolného hostu (např. `http://10.0.0.8:8080`) a `app.url` se automaticky
-> uloží podle URL, kterou v wizardu použiješ. Pokud potřebuješ URL znát už
-> před setupem (např. produkční doména + reverzní proxy), spusť kontejner
-> s `-e MYINVOICE_APP_URL=https://invoice.example.com`.
->
-> 🛈 **Přístup z LAN přes IP** (např. `http://192.168.1.50:8080`)
-> automaticky funguje. RFC1918 privátní IP (`10.*`, `172.16-31.*`, `192.168.*`),
-> `127.*`, `localhost` a `*.local` jsou vyjmuty z HTTPS redirectu v `.htaccess`
-> a `web.config`. Také požadavek s hlavičkou `X-Forwarded-Proto: https`
-> (reverse proxy s TLS terminací) redirect přeskočí.
->
-> ⚠️ Přístup přes LAN IP a plain HTTP je vhodný pro prvotní instalaci, ale
-> **passkeys na něm nejsou podporované**. Pro passkeys použij stabilní hostname,
-> důvěryhodné HTTPS a nastav `app.url` na přesný veřejný origin. Výjimkou pro
-> lokální vývoj je `http://localhost`.
+### 3.9.3 Dockge
 
-## 3.5 Změna portu
+Dockge drží stacky jako soubory na disku, takže pasuje na compose 1:1.
 
-Edituj `.env` (vznikl po prvním spuštění):
+1. Klikněte na **+ Compose** a zadejte název stacku (například `myucto`).
+2. Do editoru vložte `docker-compose.portainer.yml`.
+3. Do panelu `.env` doplňte proměnné.
+
+   ```env
+   DB_PASSWORD=...
+   DB_ROOT_PASSWORD=...
+   MYINVOICE_PEPPER=...
+   MYINVOICE_SECRET_KEY=...
+   APP_PORT=8080
+   ```
+
+4. Klikněte na **Save** a potom na **Start**. Logy a interaktivní terminál máte přímo v Dockge.
+
+### 3.9.4 HTTPS a produkce v Portaineru a Dockge
+
+Výchozí compose používá cookies vhodné pro HTTP (`MYINVOICE_SESSION_COOKIE_SECURE=false`, `MYINVOICE_SESSION_COOKIE_NAME=myinvoice_session`), takže přihlášení funguje hned přes `http://host:8080`. Jakmile před stack dáte HTTPS reverse proxy (viz [§ 3.8](#38-krok-za-krokem-https-pres-reverse-proxy)), přepněte proměnné:
+
+```env
+MYINVOICE_APP_URL=https://faktury.firma.cz
+MYINVOICE_SESSION_COOKIE_SECURE=true
+MYINVOICE_SESSION_COOKIE_NAME=__Host-myinvoice_session
+```
+
+Pak stack znovu vytvořte (Portainer: **Update the stack**, Dockge: **Restart**). Proxy musí posílat `X-Forwarded-Proto: https`, jinak vznikne smyčka přesměrování.
+
+### 3.9.5 Aktualizace v Portaineru a Dockge
+
+Aktualizace stáhne aktuální image a znovu vytvoří kontejner. Migrace doběhnou při startu.
+
+- **Portainer:** otevřete **Stacks**, vyberte stack MyÚčto a klikněte na **Update the stack** se zapnutou volbou *Re-pull image and redeploy* (u šablony nebo git stacku *Pull and redeploy*).
+- **Dockge:** klikněte na tlačítko **Update** u stacku.
+
+> [!TIP]
+> V produkci připněte konkrétní neměnný release tag (v compose změňte `:latest` například na `:X.Y.Z`) a aktualizujte vědomě. U účetní aplikace nedoporučujeme slepý automatický update přes Watchtower na `:latest`. Aktualizace z aplikace i watcher z [§ 3.10](#310-krok-za-krokem-tlacitko-aktualizovat-v-aplikaci-update-watcher) jsou pro Portainer a Dockge zbytečné.
+
+### 3.9.6 Redis v Portaineru a Dockge
+
+Služba `redis` je ve stacku pod profilem `redis`. Profil se zapíná proměnnou `COMPOSE_PROFILES=redis`, kterou formulář šablony aplikace nenabízí. Přes one-click šablonu ([§ 3.9.1](#391-portainer-sablona-aplikace-one-click)) tedy Redis nasadit nejde. Použijte ruční stack ([§ 3.9.2](#392-portainer-rucni-stack-webovy-editor)) nebo Dockge ([§ 3.9.3](#393-dockge)) a doplňte proměnné:
+
+```env
+COMPOSE_PROFILES=redis
+MYINVOICE_REDIS_ENABLED=true
+MYINVOICE_REDIS_HOST=redis
+```
+
+Bez Redisu aplikace běží na databázovém fallbacku (sessions v tabulce `sessions`, rate limit v `rate_limit_counters`), takže je Redis čistě volitelný. Samotné `MYINVOICE_REDIS_ENABLED=true` bez aktivního profilu znamená, že se aplikace pokouší spojit s neexistujícím hostem.
+
+## 3.10 Krok za krokem: tlačítko Aktualizovat v aplikaci (update watcher)
+
+Administrátor vidí v `Systém → Aktualizace` stav verze a tlačítko **Aktualizovat na {verze}**, které zařadí upgrade do fronty. Aby ho někdo provedl, musí na hostu běžet **watcher**. Je to proces, který přes `docker compose exec` sleduje příznakový soubor uvnitř kontejneru a spouští `cmd/docker-update.(sh/ps1)`. Bez watcheru tlačítko nikam nedojede (aplikace zůstane ve stavu „Upgrade probíhá…") a upgrade musíte provést ručně přes shell (viz [§ 3.7](#37-krok-za-krokem-aktualizace)).
+
+### 3.10.1 Test v popředí
+
+Než z watcheru uděláte službu, vyzkoušejte ho v běžícím okně.
+
+1. Spusťte watcher.
+
+   ```bash
+   # Linux / macOS
+   cd /opt/myucto
+   bash cmd/docker-update-watcher.sh
+   ```
+
+   ```powershell
+   # Windows - PowerShellem, který máte (upravte cd na SVOU instalační cestu)
+   cd C:\inetpub\myucto
+   pwsh -NoProfile -ExecutionPolicy Bypass -File cmd\docker-update-watcher.ps1
+   # nemáte-li PowerShell 7, použijte místo `pwsh` příkaz `powershell` (Windows PS 5.1)
+   ```
+
+2. Ověřte, že vidíte `[watcher] start, polling storage/upgrade-requested.json inside container every 30s`.
+3. V aplikaci klikněte na **Aktualizovat na {verze}**. Do 30 sekund watcher příznak zachytí, spustí `cmd/docker-update.(sh/ps1)` a výsledek zapíše zpět.
+4. Watcher zastavíte klávesou `Ctrl+C`.
+
+Watcher spouští aktualizaci stejným PowerShell hostem, pod kterým sám běží (`pwsh` i `powershell`), a cesty řeší z umístění skriptu. Funguje proto i z jiného adresáře a na strojích jen s PowerShell 7.
+
+### 3.10.2 Linux: služba systemd (produkce)
+
+1. Vytvořte jednotku.
+
+   ```bash
+   sudo tee /etc/systemd/system/myucto-update-watcher.service <<'EOF'
+   [Unit]
+   Description=MyUcto update watcher
+   After=docker.service
+
+   [Service]
+   Type=simple
+   WorkingDirectory=/opt/myucto
+   ExecStart=/opt/myucto/cmd/docker-update-watcher.sh
+   Restart=always
+
+   [Install]
+   WantedBy=multi-user.target
+   EOF
+   ```
+
+2. Zapněte ji.
+
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now myucto-update-watcher
+   ```
+
+Logy: `journalctl -u myucto-update-watcher -f`.
+
+### 3.10.3 Windows: naplánovaná úloha (produkce)
+
+```powershell
+# Upravte cestu k SVÉ instalaci. Máte-li jen Windows PowerShell 5.1, nahraďte
+# `pwsh.exe` za `powershell.exe`.
+schtasks /create /tn "MyUcto Update Watcher" `
+  /tr "pwsh.exe -NoProfile -ExecutionPolicy Bypass -File C:\inetpub\myucto\cmd\docker-update-watcher.ps1" `
+  /sc onstart /ru SYSTEM /rl HIGHEST
+schtasks /run /tn "MyUcto Update Watcher"
+```
+
+Stav úlohy: `schtasks /query /tn "MyUcto Update Watcher" /v /fo list`.
+
+`pwsh.exe` musí být v PATH (dává ji tam instalátor PowerShell 7). Pokud ji naplánovaná úloha nenajde, zadejte plnou cestu `C:\Program Files\PowerShell\7\pwsh.exe`, nebo použijte `powershell.exe` (PS 5.1).
+
+**Jak poznáte, že je hotovo:** po kliknutí na **Aktualizovat na {verze}** se stav v aplikaci změní na „Upgrade probíhá…" a po dokončení na „Upgrade úspěšně dokončen".
+
+### 3.10.4 Denní kontrola dostupné aktualizace
+
+Watcher reaguje jen na kliknutí. Aby administrátor viděl, že je dostupná aktualizace (štítek v patičce a stav v `Systém → Aktualizace`), musí běžet denní úloha `cmd/cron-version-check.(sh/cmd)` (viz [Aktualizace](102_Aktualizace.md)). Obnovu zaseknutého upgradu, test z `master` a externí monitoring přes `/api/version` popisuje také kapitola [Aktualizace](102_Aktualizace.md).
+
+## 3.11 Když něco nejde
+
+<!-- cols: 34 30 36 -->
+| Co vidíte | Proč | Co udělat |
+|---|---|---|
+| Prohlížeč hlásí `SSL_ERROR_RX_RECORD_TOO_LONG` nebo `ERR_SSL_PROTOCOL_ERROR` | Prohlížeč mluví TLS, ale server odpovídá prostým HTTP | Použijte `http://` a port `:8080`, nebo nastavte HTTPS podle [§ 3.8](#38-krok-za-krokem-https-pres-reverse-proxy) |
+| `Permission denied` nebo `/usr/bin/env: 'bash\r': No such file…` při spuštění `.sh` skriptu | Git s `core.autocrlf=true` převedl LF na CRLF | Spusťte `sed -i 's/\r$//' cmd/*.sh`, potom `chmod +x cmd/*.sh` a `git config --global core.autocrlf input`. Repozitář má `.gitattributes` s `*.sh text eol=lf`, takže další `git clone` bude v pořádku i bez toho |
+| Smyčka přesměrování po nasazení HTTPS | Proxy neposílá `X-Forwarded-Proto: https` | Nastavte hlavičku na proxy (Caddy ji posílá sám) |
+| Po přepnutí na `__Host-` cookie nejde přihlášení | Aplikace je otevřená přes `http://` | Otevřete ji přes `https://` |
+| Odkazy v e-mailech vedou na `localhost:8080` | `app.url` neodpovídá veřejné URL | Nastavte `app.url` na přesnou veřejnou adresu |
+| Passkey po změně hostname nefunguje | WebAuthn je svázaný s hostname z `app.url` | Přihlaste se přes TOTP nebo jinou cestou obnovy a passkey zaregistrujte znovu |
+| `/manual` vrací 503 „Manuál není zatím vygenerovaný" | HTML manuál nebyl vygenerován | Spusťte `docker compose -f docker-compose.production.yml exec app php tools/generateManualHtml.php` a potom stejně `php tools/exportManualToPdf.php` |
+| Kontrola prostředí hlásí „Bez práva zápisu: cache" | Cache vytvořil root | Postup v [§ 3.12.6](#3126-opravneni-cache-pri-rucnim-spusteni-php) |
+| Tlačítko **Aktualizovat na {verze}** nic neudělá, stav „Upgrade probíhá…" trvá | Na hostu neběží watcher | Spusťte watcher ([§ 3.10](#310-krok-za-krokem-tlacitko-aktualizovat-v-aplikaci-update-watcher)), nebo klikněte na **Zrušit / odblokovat** a aktualizujte ručně ([§ 3.7](#37-krok-za-krokem-aktualizace)) |
+| Aplikace po přepnutí layoutu úložiště ukazuje prázdná data | Aplikace se dívá do prázdného `/data` | Nikdy nepřepínejte layout bez migrace, viz [§ 3.12.4](#3124-single-volume-uloziste) |
+| Aplikace se nemůže spojit s Redisem | `MYINVOICE_REDIS_ENABLED=true` bez aktivního profilu `redis` | Zapněte profil (`COMPOSE_PROFILES=redis`), nebo Redis vypněte |
+| Vlastní doména se nepodaří ověřit | Chybí routing, certifikát nebo TXT záznam | Postup v [§ 3.12.8](#3128-vlastni-domeny-klientskych-portalu) |
+
+## 3.12 Podrobnosti a pravidla
+
+### 3.12.1 Změna portu
+
+Upravte `.env` (vznikl po prvním spuštění):
 
 ```
 APP_PORT=9000          # místo 8080
 DB_PORT=3308           # místo 3307 (vázán jen na 127.0.0.1)
 ```
 
-a `docker compose up -d`. URL pak `http://localhost:9000`.
+Pak spusťte `docker compose up -d`. URL bude `http://localhost:9000`.
 
-### 3.5.1 Runtime env pro auto-migrace (Docker)
+### 3.12.2 Proměnné prostředí kontejneru
 
-Vstupní skript image podporuje tyto proměnné:
+Vstupní skript image podporuje:
 
 ```bash
 MYINVOICE_SKIP_MIGRATIONS=1     # vypne auto-migraci při startu
-MYINVOICE_MIGRATE_ATTEMPTS=20   # počet retry pokusů migrace
+MYINVOICE_MIGRATE_ATTEMPTS=20   # počet opakování migrace
 MYINVOICE_MIGRATE_DELAY=3       # pauza mezi pokusy (sekundy)
-MYINVOICE_DATA_DIR=/data        # default v compose souborech; sjednocuje
+MYINVOICE_DATA_DIR=/data        # výchozí v compose souborech; sjednocuje
                                 # log/, storage/, private/ a cfg.local.php pod /data
 MYINVOICE_AUTH_REQUIRE_MFA=true  # vyžadovat passkey nebo TOTP
 MYINVOICE_AUTH_MFA_METHODS=passkey,totp
-MYINVOICE_AUTH_PASSWORDLESS_LOGIN=true # povolit passkey login bez e-mailu a hesla; default false
+MYINVOICE_AUTH_PASSWORDLESS_LOGIN=true # povolit passkey login bez e-mailu a hesla; výchozí false
 MYINVOICE_SESSION_LOCK_AFTER_MINUTES=15 # výchozí interval a maximum osobní volby; 0 nic nevynucuje
 ```
 
-Default je `20` pokusů s pauzou `3` sekundy. Pokud proměnné nenastavíš, použije
-se výchozí chování.
+Výchozí je `20` pokusů s pauzou `3` sekundy. Pokud proměnné nenastavíte, použije se výchozí chování.
 
-**`MYINVOICE_DATA_DIR`** je **default** v `docker-compose.yml` i
-`docker-compose.production.yml` (single-volume layout `app-data:/data`). Drží
-log/, storage/, private/dkim/ **i `cfg.local.php`** — per-instance konfigurace
-z setup wizardu tak přežije image update. Viz **[§ 3.5.3 Single-volume úložiště](#353-single-volume-uloziste)** níže.
-Pokud používáš původní třísvazkové úložiště, `cmd/docker-update.{sh,ps1}` ho
-detekuje a před `up -d` automaticky spustí `cmd/docker-migrate-volumes.{sh,ps1}`.
-Podrobný popis aktuálního ukládání dat je v
-[§ 103.5](102_Aktualizace.md#1025-persistentni-data-v-dockeru).
+`MYINVOICE_DATA_DIR` je výchozí v `docker-compose.yml` i `docker-compose.production.yml` (single-volume layout `app-data:/data`). Drží `log/`, `storage/`, `private/dkim/` i `cfg.local.php`, takže konfigurace instance z průvodce přežije aktualizaci image (viz [§ 3.12.4](#3124-single-volume-uloziste)). Používáte-li původní třísvazkové úložiště, `cmd/docker-update.{sh,ps1}` ho detekuje a před `up -d` automaticky spustí `cmd/docker-migrate-volumes.{sh,ps1}`. Aktuální ukládání dat popisuje [§ 102.5](102_Aktualizace.md#10285-persistentni-data-v-dockeru).
 
-**Mount `cfg.docker.php` je volitelný** — image obsahuje stub `cfg.php`
-(`<?php return [];`) a vše lze předat přes ENV (12-factor). Pro full-ENV deploy
-(Railway, Heroku, Fly.io) bind-mount `./cfg.docker.php:/var/www/html/cfg.php:ro`
-v `docker-compose.yml` zakomentuj nebo odstraň.
+Mount `cfg.docker.php` je volitelný. Image obsahuje stub `cfg.php` (`<?php return [];`) a vše lze předat přes proměnné prostředí (12-factor). Pro nasazení čistě přes proměnné (Railway, Heroku, Fly.io) bind-mount `./cfg.docker.php:/var/www/html/cfg.php:ro` v `docker-compose.yml` zakomentujte nebo odstraňte.
 
-### 3.5.2 Railway / PaaS specifika
+### 3.12.3 Railway a jiné PaaS
 
-Některé PaaS (typicky Railway) injectují nevyřešené placeholdery jako
-`${VAR}`, pokud proměnná není definovaná. MyÚčto je v env
-overridech ignoruje, takže nepřepíší validní hodnoty z `cfg.php`/`cfg.docker.php`.
-Pokud chybí `secret_encryption_key`, aplikace fallbackuje na HKDF z `app.pepper`.
+Některé PaaS (typicky Railway) vkládají nevyřešené zástupné hodnoty jako `${VAR}`, pokud proměnná není definovaná. MyÚčto je v přepisech z prostředí ignoruje, takže nepřepíší platné hodnoty z `cfg.php` nebo `cfg.docker.php`. Pokud chybí `secret_encryption_key`, aplikace použije HKDF odvozený z `app.pepper`.
 
-### 3.5.3 Single-volume úložiště
+### 3.12.4 Single-volume úložiště
 
-> 🛈 **TL;DR:** Výchozí je single-volume layout. Všechen stavový obsah
-> (log/, storage/, private/dkim/ **+ `cfg.local.php`**) leží v jediném
-> persistent volumu `app-data:/data`. Image updaty jsou tak bezpečné —
-> per-instance konfigurace přežije.
+Výchozí je single-volume layout. Všechen stavový obsah (`log/`, `storage/`, `private/dkim/` a `cfg.local.php`) leží v jediném trvalém volumu `app-data:/data`. Aktualizace image jsou tak bezpečné, konfigurace instance přežije.
 
-**Výchozí layout:**
+| Vlastnost | Single-volume |
+|---|---|
+| Volume | `app-data` (a `db-data` pro MariaDB) |
+| Mount point | `/data` |
+| Proměnná | `MYINVOICE_DATA_DIR=/data` |
+| Compose | `docker compose up -d` (výchozí) |
+| Záloha | jeden `tar czf` nad `app-data` a dump DB |
+| Aktualizace image | bezpečná, `cfg.local.php` v `/data` přežije |
 
-| Vlastnost     | Single-volume                                |
-|---------------|----------------------------------------------|
-| Volume        | `app-data` (+ `db-data` pro MariaDB)         |
-| Mount point   | `/data`                                      |
-| Env           | `MYINVOICE_DATA_DIR=/data`                   |
-| Compose       | `docker compose up -d` (default)             |
-| Backup        | jeden `tar czf` nad `app-data` + dump DB     |
-| Image update  | bezpečný — `cfg.local.php` v `/data` přežije |
+Aplikace přes `Config::applyDataDirOverrides()` přesměruje:
 
-**Co je pod `/data`.** Aplikace přes `Config::applyDataDirOverrides()` přepíše:
+- `log/` na `/data/log`,
+- `storage/invoices/`, `storage/uploads/`, `storage/backup/`, `storage/sessions/`, `storage/cache/` na `/data/storage/…`,
+- `private/dkim/` na `/data/private/dkim`,
+- zápisy `cfg.local.php` z průvodce, `bin/setup.php` a `bin/reset.php` na `/data/cfg.local.php`.
 
-- `log/` → `/data/log`
-- `storage/invoices/`, `storage/uploads/`, `storage/backup/`, `storage/sessions/`, `storage/cache/` → `/data/storage/…`
-- `private/dkim/` → `/data/private/dkim`
-- `cfg.local.php` zápisy ze setup wizardu / `bin/setup.php` / `bin/reset.php` → `/data/cfg.local.php`
+Žádné jiné cesty se nemění (kód, vendor, `web/dist` zůstávají v `/var/www/html` pouze pro čtení).
 
-Žádné jiné cesty se nemění (kód, vendor, web/dist zůstávají uvnitř `/var/www/html`, čistě read-only).
-
-#### Pro novou instalaci
-
-`cmd/docker-install.{sh,ps1}` použije default `docker-compose.yml` se single-volume
-layoutem — nemusíš nic nastavovat navíc.
-
-Ověření, že běží single-volume layout:
+Nová instalace přes `cmd/docker-install.{sh,ps1}` používá výchozí `docker-compose.yml` se single-volume layoutem, nic dalšího nenastavujete. Layout ověříte takto:
 
 ```bash
-docker compose exec app sh -c 'echo $MYINVOICE_DATA_DIR'   # → /data
-docker compose exec app ls /data                            # → log  storage  private  cfg.local.php (po setupu)
-docker volume ls | grep myucto                           # vidíš pouze app-data + db-data
+docker compose exec app sh -c 'echo $MYINVOICE_DATA_DIR'   # /data
+docker compose exec app ls /data                            # log  storage  private  cfg.local.php (po setupu)
+docker volume ls | grep myucto                              # pouze app-data + db-data
 ```
 
-#### Pro instalaci s původním třísvazkovým úložištěm
+> [!WARNING]
+> U instalace s původním třísvazkovým úložištěm nikdy nepřepínejte layout bez migrace. Aplikace by se dívala do prázdného `/data` a tvářila se, že data zmizela. `cmd/docker-update.{sh,ps1}` migraci provede automaticky před `up -d`.
 
-**Nikdy nepřepínej layout bez migrace** — aplikace by nahlížela do prázdného
-`/data` a tvářila se, že data zmizela. `cmd/docker-update.{sh,ps1}` to dělá
-automaticky před `up -d`. Aktuální rozložení dat popisuje
-[§ 103.5 Persistentní data v Dockeru](102_Aktualizace.md#1025-persistentni-data-v-dockeru).
+`cmd/docker-migrate-volumes.{sh,ps1}` zálohuje `cfg.local.php` z běžícího kontejneru, zkopíruje data ze starých volumes do nového `app-data` přes dočasný sidecar `alpine` a obnoví `cfg.local.php`. Staré volumes nemaže (smažete je ručně po ověření). Skript je idempotentní. Rozložení dat popisuje [§ 102.5 Persistentní data v Dockeru](102_Aktualizace.md#10285-persistentni-data-v-dockeru).
 
-Shrnutí: `cmd/docker-migrate-volumes.{sh,ps1}` snapshotne `cfg.local.php`
-z běžícího kontejneru, zkopíruje data ze starých volumes do nového `app-data`
-přes dočasný `alpine` sidecar a obnoví `cfg.local.php`. Staré volumes nesmaže
-(musíš ručně po ověření). Skript je idempotentní.
-
-#### Backup single-volume layoutu
+#### Záloha single-volume layoutu
 
 ```bash
 docker run --rm \
@@ -330,151 +531,56 @@ docker run --rm \
   alpine tar czf /backup/myucto-data-$(date +%F).tar.gz -C /data .
 ```
 
-Plus dump MariaDB (viz [§ 103.7 Záloha a obnova](102_Aktualizace.md)) — to jsou dohromady **dvě entity** k zálohování (db + app-data).
+Spolu s dumpem MariaDB (viz [Aktualizace](102_Aktualizace.md)) jsou to dvě entity k zálohování: databáze a `app-data`.
 
-## 3.6 Daily ops
+### 3.12.5 Denní provoz
 
 ```bash
 docker compose up -d                                 # start
-docker compose down                                  # stop (data v named volumes přežijí)
-docker compose down -v                               # stop + WIPE volumes (ZNIČÍ DB!)
-docker compose logs -f app                           # live logs
-docker compose exec app bash                         # shell do kontejneru
+docker compose down                                  # stop (data v pojmenovaných volumes přežijí)
+docker compose down -v                               # stop a SMAZÁNÍ volumes (ZNIČÍ DB!)
+docker compose logs -f app                           # živé logy
+docker compose exec app bash                         # shell v kontejneru
 docker compose exec --user www-data app php api/bin/migrate.php # CLI uvnitř kontejneru
-cmd/docker-build.sh --no-cache                       # rebuild image (po PHP/JS změnách, jen Varianta B)
+cmd/docker-build.sh --no-cache                       # rebuild image (po změnách PHP/JS, jen varianta B)
 ```
 
-> 💡 Pokud jsi instaloval přes **Variantu A (docker-ghcr)**, všechny
-> `docker compose` příkazy potřebují flag `-f docker-compose.production.yml`,
-> např. `docker compose -f docker-compose.production.yml logs -f app`.
+> [!TIP]
+> Po instalaci variantou z GHCR ([§ 3.3](#33-krok-za-krokem-instalace-z-hotoveho-image-ghcr)) potřebují všechny příkazy `docker compose` volbu `-f docker-compose.production.yml`, například `docker compose -f docker-compose.production.yml logs -f app`.
 
-### 3.6.1 Oprávnění cache při ručním spuštění PHP
+### 3.12.6 Oprávnění cache při ručním spuštění PHP
 
-Aplikační PHP příkazy spouštěj v kontejneru vždy s `--user www-data`, stejně
-jako web a vestavěný cron. Spuštění pod rootem může vytvořit cache a její
-soubory zámků bez práva zápisu pro web.
+Aplikační PHP příkazy spouštějte v kontejneru vždy s `--user www-data`, stejně jako web a vestavěný cron. Spuštění pod rootem může vytvořit cache a její soubory zámků bez práva zápisu pro web.
 
-Pokud kontrola prostředí hlásí „Bez práva zápisu: cache“ a cache vlastní root,
-oprav ve výchozím layoutu vlastníka adresáře včetně jeho obsahu:
+Pokud kontrola prostředí hlásí „Bez práva zápisu: cache" a cache vlastní root, opravte ve výchozím layoutu vlastníka adresáře včetně jeho obsahu:
 
 ```powershell
 docker compose exec --user root app chown -R www-data:www-data /data/storage/cache
 ```
 
-Příkaz nic nemaže ani nemění databázi. Potom obnov stránku kontroly prostředí.
-Při vlastním `MYINVOICE_DATA_DIR` nahraď `/data` jeho skutečnou hodnotou;
-ve starším layoutu bez této proměnné je cesta `/var/www/html/storage/cache`.
-Používáš-li `docker-compose.production.yml`, přidej za `docker compose`
-volbu `-f docker-compose.production.yml`. Oprava platí pro běžící kontejner;
-ruční PHP příkazy nadále spouštěj jako `www-data`.
+Příkaz nic nemaže ani nemění databázi. Potom obnovte stránku kontroly prostředí. Při vlastním `MYINVOICE_DATA_DIR` nahraďte `/data` jeho skutečnou hodnotou. Ve starším layoutu bez této proměnné je cesta `/var/www/html/storage/cache`. Používáte-li `docker-compose.production.yml`, přidejte za `docker compose` volbu `-f docker-compose.production.yml`. Oprava platí pro běžící kontejner, ruční PHP příkazy nadále spouštějte jako `www-data`.
 
-## 3.7 Volitelný Redis
+### 3.12.7 Volitelný Redis
 
 ```bash
 docker compose --profile redis up -d
 ```
 
-a v `cfg.docker.php` nastav `redis.enabled => true`. Restart appky.
+V `cfg.docker.php` nastavte `redis.enabled => true` a aplikaci restartujte. Pro Portainer a Dockge viz [§ 3.9.6](#396-redis-v-portaineru-a-dockge).
 
-## 3.8 HTTPS / TLS terminace
+### 3.12.8 Vlastní domény klientských portálů
 
-Docker stack sám TLS nedělá — web server (nginx) uvnitř kontejneru poslouchá na
-portu 80 (HTTP) a mapuje se na host port `8080`. Pokud potřebuješ HTTPS (LAN
-server, produkce, doménové jméno), postav před stack reverse proxy s TLS terminací.
-
-**Symptom špatné konfigurace:** prohlížeč hodí `SSL_ERROR_RX_RECORD_TOO_LONG`
-(Firefox) nebo `ERR_SSL_PROTOCOL_ERROR` (Chrome) — znamená to, že browser mluví
-TLS, ale server odpovídá plain HTTP.
-
-**Tři rozumné cesty:**
-
-1. **Caddy (nejjednodušší)** — automatický Let's Encrypt pro doménu nebo
-   self-signed pro IP, jeden Caddyfile řádek:
-   ```
-   vase-domena.cz {
-       reverse_proxy localhost:8080
-   }
-   ```
-
-2. **Nginx + self-signed cert** (`mkcert` nebo `openssl`) — pro intranet
-   bez veřejného doménového jména.
-
-3. **Cloudflare Tunnel / Tailscale Funnel** — pokud chceš veřejný přístup
-   bez otevírání portů na firewallu.
-
-**Konkrétní recept — Caddy jako další container vedle stacku:**
-
-V kořeni repa (vedle `docker-compose.production.yml`) vytvoř `Caddyfile`:
-
-```
-faktury.tvojefirma.cz {
-    reverse_proxy localhost:8080
-}
-```
-
-Pak Caddy spusť na host síti, aby viděl port `8080`:
-
-```bash
-docker run -d --name caddy --restart unless-stopped \
-  --network host \
-  -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
-  -v caddy_data:/data \
-  -v caddy_config:/config \
-  caddy:2
-```
-
-Caddy si vyžádá Let's Encrypt cert sám (potřebuje veřejně dostupné porty
-80/443 a A/AAAA záznam pro doménu). Auto-renewuje. `X-Forwarded-Proto: https`
-posílá automaticky — to je důležité, protože `.htaccess` v repu bez tohoto
-hlavičky vynucuje HTTP→HTTPS redirect a vzniká redirect loop.
-
-**A v `cfg.docker.php` přepni production nastavení:**
-
-```php
-'app' => [
-    'url' => 'https://faktury.tvojefirma.cz',  // doslova to, co user vidí v adresáku
-    ...
-],
-'session' => [
-    'cookie_secure'   => true,
-    'cookie_name'     => '__Host-myinvoice_session',
-    'cookie_samesite' => 'Lax',
-],
-```
-
-`app.url` se používá v emailových odkazech (faktury, reset hesla, upomínky) —
-musí přesně odpovídat veřejné URL, jinak budou linky vést na špatnou doménu
-nebo `localhost:8080`. Pokud instance z internetu dostupná není (jen LAN/VPN),
-vypněte odkaz na web fakturu v e-mailech klientům — viz
-[§ 16.5.1](16_Faktura_PDF.md#1651-vypnuti-web-faktury-na-instalaci). `__Host-` cookie prefix vyžaduje HTTPS — pokud jsi po
-této změně zkusil load přes `http://`, login se rozbije (cookie se neuloží).
-
-Stejná hodnota je bezpečnostní autoritou pro WebAuthn: určuje přesný origin a
-hostname (RP ID), pro který lze passkey vytvořit a použít. Neodvozuje se
-z `Host` ani proxy hlaviček. Změna `app.url` na jiný hostname proto zneplatní
-použitelnost dříve registrovaných passkeys; před změnou ověř TOTP nebo jinou
-recovery cestu.
-
-### 3.8.1 Vlastní domény klientských portálů
-
-Vlastní doména firmy **nenahrazuje** `app.url`. Canonical `app.url` zůstává
-stabilní adresou interního rozhraní, resetů hesla a WebAuthn RP ID. Další
-hostname pouze nasměruj na stejnou instanci a následně jej založ v
-**Nastavení → Firma → Vlastní domény**.
+Vlastní doména firmy nenahrazuje `app.url`. Kanonická `app.url` zůstává stabilní adresou interního rozhraní, resetů hesla a WebAuthn RP ID. Další hostname pouze nasměrujte na stejnou instanci a potom ho založte v `Firma → Nastavení` na záložce **Údaje firmy** v sekci **Klientské domény** tlačítkem **Přidat doménu** (viz [9. Klientský portál](09_Klientsky_portal.md)).
 
 Pro každý vlastní hostname musí provozní vrstva zajistit:
 
-1. veřejný A/AAAA nebo CNAME záznam směrovaný na reverse proxy;
-2. důvěryhodný TLS certifikát platný pro přesný hostname;
-3. předání původní hlavičky `Host` a `X-Forwarded-Proto: https` do aplikace;
-4. DNS TXT challenge zobrazenou v administraci;
-5. přidání hostname do seznamu povolených domén Cloudflare Turnstile, pokud je
-   CAPTCHA zapnutá.
+1. veřejný A/AAAA nebo CNAME záznam směrovaný na reverse proxy,
+2. důvěryhodný TLS certifikát platný pro přesný hostname,
+3. předání původní hlavičky `Host` a `X-Forwarded-Proto: https` do aplikace,
+4. DNS TXT záznam podle výzvy zobrazené v administraci,
+5. přidání hostname do seznamu povolených domén Cloudflare Turnstile, pokud je CAPTCHA zapnutá.
 
-Aplikace certifikáty sama nevydává. Doménu aktivuje až po kontrole TXT a po
-HTTPS požadavku na přesný challenge endpoint bez redirectu. Reverse proxy tedy
-musí routing a certifikát připravit **před** stisknutím Ověřit. Caddy může více
-hostname obsloužit jedním blokem a pro každý automaticky získat certifikát:
+Aplikace certifikáty sama nevydává. Doménu aktivuje až po kontrole TXT záznamu a po HTTPS požadavku na přesný endpoint výzvy bez přesměrování. Reverse proxy tedy musí routing a certifikát připravit před kliknutím na **Ověřit DNS a HTTPS**. Caddy může více hostname obsloužit jedním blokem a pro každý automaticky získá certifikát:
 
 ```caddyfile
 faktury.tvojefirma.cz, portal.klient-a.cz, portal.klient-b.cz {
@@ -482,293 +588,75 @@ faktury.tvojefirma.cz, portal.klient-a.cz, portal.klient-b.cz {
 }
 ```
 
-U nginx, Traefiku nebo Cloudflare Tunnel platí stejný princip: všechny hostname
-vedou do stejné aplikace, ale `Host` se nesmí přepsat na interní název služby.
-Neznámý nebo neaktivní Host aplikace odmítne; nestačí tedy pouze přidat DNS a
-certifikát. Konfigurace Apache, IIS i nginx v repozitáři posílá SPA fallback
-přes stejnou serverovou kontrolu hostname.
+U nginx, Traefiku nebo Cloudflare Tunnel platí stejný princip: všechny hostname vedou do stejné aplikace, ale `Host` se nesmí přepsat na interní název služby. Neznámý nebo neaktivní Host aplikace odmítne, nestačí tedy přidat DNS a certifikát. Konfigurace Apache, IIS i nginx v repozitáři posílá SPA fallback přes stejnou serverovou kontrolu hostname.
 
-Aktivní vlastní doména používá oddělenou host-only session cookie. Přihlášení
-včetně passkey proběhne na canonical `app.url` a prohlížeč se vrátí jednorázovým
-PKCE tokem; není potřeba a ani správné registrovat novou WebAuthn RP doménu pro
-každého klienta.
+Aktivní vlastní doména používá oddělenou host-only session cookie. Přihlášení včetně passkey proběhne na kanonické `app.url` a prohlížeč se vrátí jednorázovým PKCE tokenem. Pro každého klienta proto nemusíte (a nesmíte) registrovat novou WebAuthn RP doménu.
 
-Restart stacku: `docker compose -f docker-compose.production.yml restart app`
-(nebo bez `-f` flagu pro Variantu B).
+### 3.12.9 Image: Alpine/nginx (výchozí) a Debian
 
-## 3.9 Update watcher — jednoclick upgrade z UI (volitelné)
+Pro hosting s omezeným diskem a pamětí je výchozí image **Alpine/nginx**: `php:8.5-fpm-alpine` + nginx + php-fpm místo Debian/Apache. Funkčně je identický (stejné API, `.htaccess` přeložený 1:1 do konfigurace nginx), jen štíhlejší.
 
-Admin vidí v **Systém → Aktualizace** stav verze + tlačítko
-*Aktualizovat*, které zařadí upgrade do fronty. Aby ho někdo aplikoval,
-musí na hostu běžet **watcher** — proces, který přes `docker compose
-exec` poslouchá flag soubor uvnitř kontejneru a spouští
-`cmd/docker-update.(sh/ps1)`. Bez watcheru tlačítko *Aktualizovat*
-nikam nedojede (UI zůstane věčně ve stavu „Upgrade probíhá…") a musíš
-upgrade aplikovat ručně přes shell.
+| Metrika | Debian/Apache (fallback) | **Alpine/nginx (výchozí)** |
+|---|---|---|
+| Velikost image (`docker image inspect .Size`) | ~328 MB | **~132 MB** (-60 %) |
+| RAM aplikace (idle) | desítky MB (Apache prefork) | **~26 MB** (php-fpm ondemand) |
+| Web server | Apache + `.htaccess` | nginx |
 
-#### Test režim (foreground)
+Obě varianty obsahují PHP rozšíření **imagick** (+35-40 MB), bez kterého by nefungovaly náhledy PDF dokumentů a import fotek ve formátu HEIC/HEIF z iPhonu. GHCR `:latest` (i `:X.Y.Z`, `:X.Y`) používá Alpine. Lokální build (`docker compose build`) staví také Alpine z `Dockerfile.alpine`.
 
-Než ho udělej daemon, otestuj ho v běžícím okně:
+#### Migrace stávající instalace
 
-```bash
-# Linux / macOS
-cd /opt/myucto
-bash cmd/docker-update-watcher.sh
-```
-
-```powershell
-# Windows — spusť tím PowerShellem, který máš (uprav cd na SVOU instalační cestu)
-cd C:\inetpub\myucto
-pwsh -NoProfile -ExecutionPolicy Bypass -File cmd\docker-update-watcher.ps1
-# nemáš-li PowerShell 7, použij místo `pwsh` příkaz `powershell` (Windows PS 5.1)
-```
-
-> 🛈 Watcher si vlastní update spouští **tímtéž** PowerShell hostem, pod kterým
-> běží (`pwsh` i `powershell`), a cesty řeší z umístění skriptu — funguje proto
-> i z jiného adresáře a na strojích jen s PowerShell 7 (`pwsh`).
-
-Vidíš `[watcher] start, polling storage/upgrade-requested.json inside
-container every 30s` — od té chvíle hlídá flag. Klikni v UI
-**„Aktualizovat"** a do 30 s zachytí flag, spustí
-`cmd/docker-update.(sh/ps1)`, výsledek napíše zpátky. Watcher zastav
-`Ctrl+C`.
-
-#### Linux — systemd unit (produkce)
-
-```bash
-sudo tee /etc/systemd/system/myucto-update-watcher.service <<'EOF'
-[Unit]
-Description=MyUcto update watcher
-After=docker.service
-
-[Service]
-Type=simple
-WorkingDirectory=/opt/myucto
-ExecStart=/opt/myucto/cmd/docker-update-watcher.sh
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now myucto-update-watcher
-```
-
-Logy: `journalctl -u myucto-update-watcher -f`.
-
-#### Windows — Scheduled Task (produkce)
-
-```powershell
-# Uprav cestu k SVÉ instalaci. Máš-li jen Windows PowerShell 5.1, nahraď
-# `pwsh.exe` za `powershell.exe`.
-schtasks /create /tn "MyUcto Update Watcher" `
-  /tr "pwsh.exe -NoProfile -ExecutionPolicy Bypass -File C:\inetpub\myucto\cmd\docker-update-watcher.ps1" `
-  /sc onstart /ru SYSTEM /rl HIGHEST
-schtasks /run /tn "MyUcto Update Watcher"
-```
-
-> 🛈 `pwsh.exe` musí být v PATH (dává ji tam instalátor PowerShell 7). Pokud ji
-> Scheduled Task nenajde, zadej plnou cestu `C:\Program Files\PowerShell\7\pwsh.exe`,
-> nebo použij `powershell.exe` (PS 5.1).
-
-Stav úlohy: `schtasks /query /tn "MyUcto Update Watcher" /v /fo list`.
-
-#### Denní kontrola dostupné aktualizace
-
-Watcher jen reaguje na *kliknutí*. Aby admin **viděl**, že je dostupná
-aktualizace (badge v patičce + stav na `/admin/update`), musí běžet
-denní cron `cmd/cron-version-check.(sh/cmd)` — viz [Aktualizace](102_Aktualizace.md).
-
-#### Plné detaily
-
-Recovery při zaseknutém upgradu, test workflow z `master`, externí
-monitoring přes `/api/version` → kapitola [Aktualizace](102_Aktualizace.md).
-
-## 3.10 Image: alpine/nginx (default) + Debian fallback
-
-Pro hosting s omezeným diskem a pamětí je **default image alpine/nginx** —
-běží na `php:8.5-fpm-alpine` + **nginx** + **php-fpm** místo Debian/Apache.
-Funkčně je identický (stejné API, `.htaccess` přeložený 1:1 do nginx configu),
-jen výrazně štíhlejší:
-
-| Metrika                         | Debian/Apache (fallback) | **Alpine/nginx (default)** |
-|---------------------------------|---------------|--------------|
-| Velikost image (`docker image inspect .Size`) | ~328 MB | **~132 MB** (−60 %) |
-| RAM aplikace (idle)             | desítky MB (Apache prefork) | **~26 MB** (php-fpm ondemand) |
-| Web server                      | Apache + `.htaccess` | nginx |
-
-Obě varianty obsahují PHP rozšíření **imagick** (+~35–40 MB), bez kterého by
-nefungovaly náhledy PDF dokumentů a import fotek ve formátu HEIC/HEIF z iPhonu.
-
-GHCR `:latest` (i `:X.Y.Z`, `:X.Y`) používá **Alpine Linux**. Lokální build
-(`docker compose build`) staví taky alpine z `Dockerfile.alpine`.
-
-### 3.10.1 Migrace existující instalace = nic navíc
-
-`/data` i DB volume jsou **plně kompatibilní** mezi variantami (www-data má
-v obou uid 33). Existující Debian instalace se proto zmigruje **sama při
-příštím updatu**:
+`/data` i DB volume jsou plně kompatibilní mezi variantami (`www-data` má v obou uid 33). Existující Debian instalace se proto přesune sama při příští aktualizaci:
 
 ```bash
 cmd/docker-update.sh        # registry: pull :latest (= alpine) + recreate; data zůstanou
 ```
 
-### 3.10.2 Lokální Debian varianta
+#### Lokální Debian varianta
 
-Pokud pro své prostředí potřebuješ Debian/Apache, sestav image lokálně ze
-souboru `Dockerfile`; CI tuto variantu do GHCR nepublikuje:
+Potřebujete-li Debian/Apache, sestavte image lokálně ze souboru `Dockerfile`. CI tuto variantu do GHCR nepublikuje.
 
 ```bash
-# source: postav Debian image lokálně z Dockerfile
 docker build -f Dockerfile -t myucto:latest .
 docker compose up -d
 ```
 
-### 3.10.3 RAM tuning
+#### Ladění paměti
 
-Pro stroje s ~512 MB–1 GB RAM lze sáhnout na tyto proměnné (alpine entrypoint
-je čte při startu):
+Pro stroje s ~512 MB-1 GB RAM lze nastavit proměnné, které Alpine entrypoint čte při startu:
 
 ```bash
-PHP_FPM_MAX_CHILDREN=4    # méně php-fpm workerů (každý ~30–60 MB); default 8
-OPCACHE_MEMORY=64         # menší opcache shared paměť v MB; default 128
+PHP_FPM_MAX_CHILDREN=4    # méně php-fpm workerů (každý ~30-60 MB); výchozí 8
+OPCACHE_MEMORY=64         # menší opcache v MB; výchozí 128
 ```
 
-MariaDB tuning je už v obou compose souborech: `performance-schema=OFF`
-(~100–200 MB méně RAM), buffer pool 128 MB (RAM) a **redo log 48 MB** místo
-defaultních 96 MB (~50 MB méně na disku — fresh MariaDB data dir tak spadne
-z ~173 MB na ~120 MB; vlastní data faktur jsou jen jednotky MB). Pro nejmenší
-stroje přidej do `.env`:
+Ladění MariaDB je už v obou compose souborech: `performance-schema=OFF` (~100-200 MB méně RAM), buffer pool 128 MB a redo log 48 MB místo výchozích 96 MB (~50 MB méně na disku, čerstvý datový adresář MariaDB tak klesne z ~173 MB na ~120 MB; vlastní data faktur jsou jen jednotky MB). Pro nejmenší stroje přidejte do `.env`:
 
 ```bash
 DB_INNODB_BUFFER_POOL=64M   # RAM (buffer pool)
-DB_INNODB_LOG_SIZE=32M      # disk (redo log) — ušetří dalších ~16 MB
+DB_INNODB_LOG_SIZE=32M      # disk (redo log) - ušetří dalších ~16 MB
 ```
 
-> 🛈 MariaDB redo log se při startu s jinou velikostí bezpečně přesází (po čistém
-> shutdownu), data zůstávají. Změna se projeví při příštím recreatnutí db kontejneru.
+Redo log MariaDB se při startu s jinou velikostí bezpečně přesází (po čistém vypnutí), data zůstávají. Změna se projeví při příštím znovuvytvoření kontejneru `db`.
 
-### 3.10.4 Úklid starých image (uvolnění disku)
+### 3.12.10 Úklid starých image
 
-Po updatech zůstávají osiřelé image. `docker-update` sám uklidí dangling
-vrstvy; staré **tagované** verze smaž explicitně:
+Po aktualizacích zůstávají osiřelé image. `docker-update` sám uklidí visící vrstvy, staré tagované verze smažte explicitně:
 
 ```bash
-cmd/docker-prune-images.sh --dry-run   # napřed vypiš, co by smazal
-cmd/docker-prune-images.sh             # smaže obsolete (běžící + compose image chrání)
+cmd/docker-prune-images.sh --dry-run   # nejdřív vypíše, co by smazal
+cmd/docker-prune-images.sh             # smaže zastaralé (běžící a compose image chrání)
 ```
 
-## 3.11 Instalace přes Portainer / Dockge (GUI, bez příkazové řádky)
+### 3.12.11 Manuál na /manual
 
-Protože je image veřejný na GHCR, jde MyÚčto nasadit i čistě přes webové
-GUI správce kontejnerů — **bez klonování repa, bez SSH, bez `cfg.docker.php`**.
-Veškerá konfigurace se předává proměnnými prostředí (12-factor).
+GHCR image má vygenerovaný HTML manuál i PDF (`tools/generateManualHtml.php` a `tools/exportManualToPdf.php` se volají při buildu v `Dockerfile`). Adresa `http://localhost:8080/manual` proto funguje bez dalších kroků a v postranním panelu je tlačítko **Stáhnout PDF**. Nový obsah získáte aktualizací (`cmd/docker-update.{sh,ps1}` stáhne novější image i s novými kapitolami). Při chybě 503 viz [§ 3.11](#311-kdyz-neco-nejde).
 
-K tomu slouží samostatný compose **`docker-compose.portainer.yml`** (nemá
-`build:` ani bind-mount cfg souboru — jen `image:` z GHCR a `environment:`).
+## 3.13 Související kapitoly
 
-> 🔑 **Povinné proměnné** (vygeneruj a poznač si):
->
-> ```bash
-> openssl rand -base64 28   # → DB_PASSWORD
-> openssl rand -base64 28   # → DB_ROOT_PASSWORD
-> openssl rand -base64 32   # → MYINVOICE_PEPPER
-> openssl rand -base64 32   # → MYINVOICE_SECRET_KEY (doporučené, jinak fallback z pepperu)
-> ```
-
-### 3.11.1 Portainer — App Template (one-click)
-
-Nejjednodušší cesta. Přidej katalog šablon a nasaď z formuláře:
-
-1. **Settings → App Templates → URL** vlož:
-   ```
-   https://raw.githubusercontent.com/radekhulan/myucto/master/portainer-template.json
-   ```
-   a ulož.
-2. **App Templates** → najdi dlaždici **MyÚčto.cz** → klikni.
-3. Vyplň proměnné (povinné DB hesla + pepper; ostatní mají rozumný default) →
-   **Deploy the stack**.
-4. Otevři **http://&lt;host&gt;:8080** → doběhne [setup wizard](07_Setup_wizard.md).
-
-Portainer si compose stáhne z repa sám (`repository.stackfile =
-docker-compose.portainer.yml`), pulne image z GHCR a spustí stack. DB migrace
-se spustí automaticky při startu kontejneru.
-
-### 3.11.2 Portainer — ruční Stack (web editor)
-
-Když nechceš přidávat katalog šablon:
-
-1. **Stacks → Add stack → Web editor**.
-2. Vlož obsah `docker-compose.portainer.yml` (zkopíruj z
-   [repa](https://github.com/radekhulan/myucto/blob/master/docker-compose.portainer.yml)).
-3. Dole v **Environment variables** přidej proměnné (`DB_PASSWORD`,
-   `DB_ROOT_PASSWORD`, `MYINVOICE_PEPPER`, případně `MYINVOICE_SECRET_KEY`,
-   `APP_PORT`) → **Deploy the stack**.
-
-Alternativně **Add stack → Repository**: URL `https://github.com/radekhulan/myucto`,
-Compose path `docker-compose.portainer.yml`.
-
-### 3.11.3 Dockge
-
-Dockge drží stacky jako reálné soubory na disku, takže pasuje na compose 1:1:
-
-1. **+ Compose** → název stacku (např. `myucto`).
-2. Do editoru vlož `docker-compose.portainer.yml`.
-3. Do `.env` panelu doplň proměnné:
-   ```env
-   DB_PASSWORD=...
-   DB_ROOT_PASSWORD=...
-   MYINVOICE_PEPPER=...
-   MYINVOICE_SECRET_KEY=...
-   APP_PORT=8080
-   ```
-4. **Save → Start**. Logy a interaktivní terminál máš přímo v Dockge.
-
-### 3.11.4 HTTPS / produkce
-
-Default compose jede HTTP-friendly cookies (`MYINVOICE_SESSION_COOKIE_SECURE=false`,
-`MYINVOICE_SESSION_COOKIE_NAME=myinvoice_session`) — login funguje hned přes
-`http://host:8080`. Jakmile dáš před stack **HTTPS reverse proxy**
-(viz [§ 3.8](#38-https-tls-terminace)), přepni v proměnných:
-
-```env
-MYINVOICE_APP_URL=https://faktury.firma.cz
-MYINVOICE_SESSION_COOKIE_SECURE=true
-MYINVOICE_SESSION_COOKIE_NAME=__Host-myinvoice_session
-```
-
-a stack překresli (Portainer: *Update the stack* / Dockge: *Restart*). Proxy musí
-posílat `X-Forwarded-Proto: https`, jinak vznikne redirect loop.
-
-### 3.11.5 Aktualizace v GUI
-
-Aktualizace stáhne aktuální image a znovu vytvoří kontejner; migrace doběhnou
-při startu:
-
-- **Portainer:** Stacks → MyÚčto → **Update the stack** se zapnutým
-  *Re-pull image and redeploy* (u App Template / git stacku *Pull and redeploy*).
-- **Dockge:** tlačítko **Update** u stacku.
-
-> 💡 V produkci radši **pinni konkrétní neměnný release tag** (v compose změň
-> `:latest` například na `:X.Y.Z`) a aktualizuj vědomě — u účetní aplikace
-> nedoporučujeme
-> slepý auto-update přes Watchtower na `:latest`. In-app upgrade z UI (Systém →
-> Aktualizace) i host watcher z [§ 3.9](#39-update-watcher-jednoclick-upgrade-z-ui-volitelne)
-> jsou pro Portainer/Dockge zbytečné — update je tu otázkou jednoho tlačítka.
-
-> 🛈 **Redis (volitelné):** stack má `redis` službu pod profilem `redis`.
-> Profil se aktivuje proměnnou `COMPOSE_PROFILES=redis`, kterou **formulář App
-> Template nenabízí** — přes one-click šablonu (§ 3.11.1) tedy Redis nasadit
-> nejde. Použij ruční stack (§ 3.11.2) nebo Dockge (§ 3.11.3) a doplň proměnné:
->
-> ```env
-> COMPOSE_PROFILES=redis
-> MYINVOICE_REDIS_ENABLED=true
-> MYINVOICE_REDIS_HOST=redis
-> ```
->
-> Bez Redisu appka jede na databázovém fallbacku (sessiony v `sessions`,
-> rate limit v `rate_limit_counters`), takže je to čistě volitelné.
-> Pozor: samotné `MYINVOICE_REDIS_ENABLED=true` bez aktivního profilu znamená,
-> že se aplikace pokouší spojit s neexistujícím hostem.
+- [1. Úvod](01_Uvod.md)
+- [2. Instalace - Quickstart](02_Instalace_Quickstart.md)
+- [4. Instalace - Nativní](04_Instalace_Nativni.md)
+- [5. Po instalaci](05_Po_instalaci.md)
+- [7. První spuštění](07_Setup_wizard.md)
+- [102. Aktualizace](102_Aktualizace.md)

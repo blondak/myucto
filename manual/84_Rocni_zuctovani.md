@@ -1,132 +1,172 @@
 # 84. Roční zúčtování
 
-## 84.1 Účel
+> Návod, jak po skončení roku provést zaměstnancům roční zúčtování záloh na
+> daň a daňového zvýhodnění a jak vrátit přeplatek. Pro mzdové účetní.
 
-Roční zúčtování zpracuje podporované roční daňové údaje zaměstnance a připraví kontrolovatelný výsledek pro navazující mzdu a dokumenty.
+## 84.1 Kdy to potřebujete
 
-## 84.2 Předpoklady a oprávnění
+Kapitolu otevřete, když:
 
-Uživatel potřebuje mzdové oprávnění a úplné podklady za rok. Ověřte žádost zaměstnance, prohlášení, příjmy a zálohy od všech relevantních plátců a podporu konkrétních slev či odpočtů v aplikaci.
+- skončil rok a zaměstnanci vás žádají o roční zúčtování,
+- měl zaměstnanec v roce i jiného zaměstnavatele a přinesl jeho potvrzení,
+- chcete zúčtovat všechny žadatele najednou,
+- se blíží březnová výplata a musíte vrátit přeplatky.
 
-## 84.3 Krokový postup
+<!-- cols: 24 44 32 -->
+| Kdy | Co udělat | Kde v aplikaci |
+|---|---|---|
+| do 15. 2. | Přijmout žádosti a potvrzení od jiných plátců | `Mzdy → Roční zúčtování` |
+| do 31. 3. | Provést roční zúčtování | `Mzdy → Roční zúčtování`, **Provést roční zúčtování** |
+| se mzdou za březen | Vrátit přeplatek | mzdový vstup, `Mzdy → Mzdové složky a vstupy` |
+| do 20. 3. (elektronicky) | Vyúčtování daně finančnímu úřadu | `Mzdy → Přehled mezd`, panel **Roční vyúčtování daně** |
 
-1. Otevřete **Mzdy → Roční zúčtování** a zvolte rok a zaměstnance.
-2. Zkontrolujte měsíční údaje a vložte doložené externí podklady.
-3. Vyplňte pouze slevy a odpočty, které obrazovka skutečně podporuje.
-4. Spusťte výpočet, zkontrolujte souhrn a případná omezení.
-5. Výsledek promítněte do určeného běhu a vytvořte navazující dokument.
+## 84.2 Než začnete
 
-## 84.4 Stavy
+1. **Mzdové oprávnění.** Provést zúčtování a zadávat potvrzení od jiných
+   plátců smí jen uživatel s právem schvalovat mzdy.
+2. **Schválené mzdy za celý rok** v `Mzdy → Mzdové běhy`.
+3. **Prohlášení poplatníka a nároky na slevy** v zákonné evidenci osoby
+   (viz [Zaměstnanci](86_Zamestnanci.md#86124-prohlaseni-k-dani-ma-jedine-misto)).
+4. **Ověřená legislativní pravidla** pro zúčtovávaný rok
+   ([Legislativní pravidla mezd](92_Legislativni_pravidla_mezd.md#9281-ktere-roky-jsou-pokryte)).
+5. **Podklady od zaměstnance:** žádost, potvrzení od všech dalších
+   zaměstnavatelů v roce a odpověď, zda podává daňové přiznání.
 
-Rozpracované zúčtování je měnitelné, vypočtené čeká na kontrolu a dokončené je podkladem pro vypořádání. Blokovaný či nepodporovaný případ dokončete mimo aplikaci; nevynucujte jej jiným polem.
+## 84.3 Krok za krokem: roční zúčtování jednoho zaměstnance
 
-## 84.5 Kontroly a bezpečnost
+1. Otevřete `Mzdy → Roční zúčtování` a zvolte zdaňovací období.
+2. Vlevo vyberte zaměstnance. Seznam zúžíte hledáním jména nebo stavem
+   **Požádali, nezúčtováno**, **Bez zúčtování**, **Zúčtováno**.
+3. Vpravo zapište žádost s **Datum žádosti** a zodpovězte všechny otázky
+   (předchozí zaměstnavatelé, daňové přiznání, roční položky).
+4. Měl-li zaměstnanec jiného zaměstnavatele, zapište jeho potvrzení
+   ([§ 84.4](#844-krok-za-krokem-potvrzeni-od-jineho-platce-dane)).
+5. Zkontrolujte výpočet podle § 38ch a případné nesplněné podmínky.
+6. Klikněte na **Provést roční zúčtování**.
+7. Je-li přeplatek vyšší než 50 Kč, založte jeho výplatu jako mzdový vstup
+   ve mzdě za březen. Nedoplatek se nesráží.
 
-Ověřte úplnost roku, souběhy plátců, podepsané dokumenty a platná pravidla pro daný rok. Některé roční odpočty aplikace nepokrývá; tyto případy zpracujte ručně nebo předejte daňovému specialistovi. Podklady uchovávejte podle retenčních pravidel.
+**Jak poznáte, že je hotovo:** Zaměstnanec má stav **Zúčtováno** a mezi
+ročními dokumenty je neměnný doklad **Roční zúčtování záloh**.
 
-## 84.6 Časté chyby
+> [!WARNING]
+> Provedené zúčtování nejde v aplikaci zrušit. Další pokus vrátí původní
+> výsledek. Podklady zkontrolujte před spuštěním. Zjistíte-li chybu,
+> vypořádejte ji mimo aplikaci a rozdíl doložte.
 
-- Zúčtování zaměstnance, který nesplňuje podmínky.
-- Pokus o zúčtování roku, který ještě neskončil.
-- Podepsané prohlášení bez evidovaného nároku na slevu na poplatníka.
-- Chybějící příjem od jiného plátce.
-- Použití pravidel jiného roku.
-- Nahrazení nepodporovaného odpočtu obecnou částkou.
+## 84.4 Krok za krokem: potvrzení od jiného plátce daně
 
-## 84.7 Návaznosti
+1. U zaměstnance otevřete sekci **Potvrzení od jiného plátce daně**.
+2. Opište údaje z tiskopisu *Potvrzení o zdanitelných příjmech ze závislé
+   činnosti* (25 5460, vzor č. 33) podle tabulky v
+   [§ 84.7.3](#8473-potvrzeni-od-jineho-platce-dane). Pole, které na
+   potvrzení je s nulou, vyplňte nulou; prázdné nechte jen to, co na
+   potvrzení chybí.
+3. Potvrzení označte jako **Doložené**.
 
-Osobní a vztahové údaje jsou v [kapitole 58k](86_Zamestnanci.md), účinná pravidla v [58q](92_Legislativni_pravidla_mezd.md), promítnutí výsledku v [mzdovém běhu](80_Mzdove_behy.md) a doklad v [58h](83_Dokumenty_a_vystupy.md).
+**Jak poznáte, že je hotovo:** U potvrzení nesvítí chybějící údaje a výpočet
+ukazuje úhrn rozepsaný na tohoto a předchozí zaměstnavatele.
 
-Vyplacený **doplatek na daňovém bonusu** z ročního zúčtování se do rozpočtu
-firmy nevrátí sám: pokud vyplacené bonusy převýšily sražené zálohy, požádej
-o rozdíl finanční úřad, viz
-[Žádost o poukázání chybějící částky na daňovém bonusu](85_Podani_a_hlaseni.md#851424-zadost-o-poukazani-chybejici-castky-na-danovem-bonusu).
-Zda zaměstnanec prohlášení k dani vůbec podepsal, se nastavuje jen v zákonné
-evidenci osoby, viz
-[§ 74.8.4](86_Zamestnanci.md#8684-prohlaseni-k-dani-ma-jedine-misto).
+## 84.5 Krok za krokem: zúčtování všem žadatelům najednou
 
+1. V `Mzdy → Roční zúčtování` zvolte rok.
+2. Klikněte na **Provést zúčtování všem žadatelům** a potvrďte.
+3. Počkejte na výsledek. Zúčtování běží na serveru, stránku můžete zavřít.
+4. Projděte přeskočené: u každého je jméno a seznam toho, co chybí. Po
+   doplnění je zúčtujte jednotlivě, nebo hromadné zúčtování spusťte znovu.
 
+**Jak poznáte, že je hotovo:** Zpráva ukáže „Zúčtováno: N, přeskočeno: N,
+selhalo: N“. Už zúčtované osoby se přeskočí.
 
-## 84.8 Podrobný pracovní postup a kontroly
+## 84.6 Když něco nejde
 
-V **Mzdy → Roční zúčtování** zvol zdaňovací období. Vlevo je seznam zaměstnanců
-se stavem žádosti a výsledkem, vpravo evidence podkladů a výpočet vybrané osoby.
-Rok, který ještě neskončil, se nezúčtovává — stránka proto po otevření nabízí
-uplynulé období.
+<!-- cols: 30 34 36 -->
+| Co vidíte | Proč | Co udělat |
+|---|---|---|
+| **Provést roční zúčtování** je zašedlé | Některá podmínka § 38ch není splněná nebo zodpovězená | Přečtěte vypsané věty a doplňte, co chybí ([§ 84.7.2](#8472-kdy-se-zuctovani-provede)). |
+| Zúčtování roku nejde spustit | Rok ještě neskončil | Počkejte do 1. ledna následujícího roku. |
+| „U podané žádosti chybí datum podání. Bez něj nejde doložit, že žádost přišla do 15. února…“ | Žádost nemá datum | Doplňte **Datum žádosti**. |
+| Zastaveno kvůli prohlášení | V některém měsíci trvání vztahu je prohlášení výslovně neověřené, nebo jde o nerezidenta | Opravte zákonnou evidenci osoby. |
+| Zastaveno kvůli slevě na poplatníka | Prohlášení je podepsané, ale za rok není ani jeden měsíc nároku na základní slevu | Doplňte evidenci nároku a spusťte znovu. |
+| Zastaveno kvůli potvrzení od jiného plátce | Potvrzení chybí, je nedoložené, má prázdné pole, nebo bylo doručeno po 15. únoru | Doplňte údaje nebo zúčtování proveďte mimo aplikaci. |
+| Zastaveno kvůli ročním položkám | Zaměstnanec uplatňuje dary, úroky, penzijní nebo životní pojištění, DIP, pojištění dlouhodobé péče, slevu na manžela nebo za zastavenou exekuci | Zúčtování proveďte mimo aplikaci, nebo ať zaměstnanec podá přiznání. |
+| Výpočet roku 2025 se zastaví | Výpočet potřebuje hodnotu, která pro rok 2025 není potvrzená | Viz [Legislativní pravidla mezd](92_Legislativni_pravidla_mezd.md#9281-ktere-roky-jsou-pokryte). |
+
+Časté chyby: zúčtování zaměstnance, který nesplňuje podmínky, pokus
+o zúčtování roku, který neskončil, podepsané prohlášení bez evidovaného
+nároku na slevu na poplatníka, chybějící příjem od jiného plátce, pravidla
+jiného roku, nahrazení nepodporovaného odpočtu obecnou částkou.
+
+## 84.7 Podrobnosti a pravidla
+
+### 84.7.1 Co roční zúčtování je
+
+Roční zúčtování je právní úkon zaměstnavatele podle § 38ch zákona o daních
+z příjmů, ne dopočet. Aplikace zpracuje podporované roční daňové údaje
+a připraví kontrolovatelný výsledek. Blokovaný nebo nepodporovaný případ
+dokončete mimo aplikaci; nevynucujte ho jiným polem. Některé roční odpočty
+aplikace nepokrývá; tyto případy zpracujte ručně nebo předejte daňovému
+specialistovi. Podklady uchovávejte podle [retenčních lhůt](93_Retencni_lhuty.md).
 
 Zúčtovat lze i **rok 2025**: aplikace pro něj má ověřenou legislativní sadu,
-takže se použijí slevy, zvýhodnění a sazby platné tehdy, ne dnešní. Několik
-hodnot roku 2025 ale zůstává nepotvrzených, a výpočet, který je potřebuje, se
-proto bezpečně zastaví — viz
-[Legislativní pravidla mezd](92_Legislativni_pravidla_mezd.md#9281-ktere-roky-jsou-pokryte).
+takže použije slevy, zvýhodnění a sazby platné tehdy. Několik hodnot roku 2025
+ale zůstává nepotvrzených a výpočet, který je potřebuje, se bezpečně zastaví.
 
-Seznam se stránkuje na serveru a jde zúžit hledáním jména nebo stavem
-(**Požádali, nezúčtováno** / **Bez zúčtování** / **Zúčtováno**). Zúžení hledá
-v celém roce, ne jen na zobrazené straně, a dá se uložit jako pohled. Sloupce
-se tu nevybírají: vlevo je výběr osoby, ne datová tabulka, a jediná tabulka na
-stránce je pevný výpočet podle § 38ch.
+Seznam vlevo se stránkuje na serveru. Zúžení hledá v celém roce, ne jen na
+zobrazené straně, a dá se uložit jako pohled. Sloupce se tu nevybírají:
+vlevo je výběr osoby a jediná tabulka na stránce je pevný výpočet podle
+§ 38ch. Stránka po otevření nabízí uplynulé období.
 
-Zúčtování je právní úkon zaměstnavatele podle § 38ch zákona o daních z příjmů,
-ne dopočet. Aplikace ho proto provede jen tehdy, když je zodpovězené všechno
-následující. Nezodpovězená otázka má stejný účinek jako záporná odpověď: dokud
-platí „nevíme", zúčtování se neprovádí.
+### 84.7.2 Kdy se zúčtování provede
 
-- **Zdaňovací období už skončilo.** Před 1. lednem následujícího roku je
-  zúčtování zablokované; roční daň se nedá vyčíslit z neúplného roku. Blokace
-  je symetrická k opačné hraně — po uplynutí lhůty pro provedení zúčtování se
-  nabídne také. Obě lhůty se posuzují po celých dnech, takže 31. březen je celý
-  ještě včas.
-- **Zaměstnanec o zúčtování požádal**, a to nejpozději 15. února po skončení
-  zdaňovacího období. Povinné je datum žádosti; odkaz na podklad je volitelný.
-- **Prohlášení poplatníka je u vás na daný rok podepsané.** Neposuzuje se stav
-  k 31. prosinci, ale **měsíc po měsíci za dobu trvání pracovního vztahu**.
-  Výslovně neověřené prohlášení nebo nerezidence kdekoli v tomto rozsahu
-  zúčtování zastaví; měsíc, ke kterému není žádný záznam, se přeskočí. U
-  starších převzatých dat bez evidence vztahu se posuzuje celý rok.
-- **Podepsané prohlášení má doložený nárok na slevu na poplatníka.** Je-li
-  prohlášení podepsané, ale za celý rok není ani jeden měsíc nároku na základní
-  slevu, zúčtování se zastaví. Dřív by se v takovém případě spočítala vyšší daň,
-  než na jakou má zaměstnanec nárok; doplňte evidenci nároku a spusťte znovu.
+Aplikace zúčtování provede, jen když je zodpovězené všechno následující.
+Nezodpovězená otázka má stejný účinek jako záporná odpověď.
+
+- **Zdaňovací období skončilo.** Před 1. lednem následujícího roku je
+  zúčtování zablokované, roční daň se nedá vyčíslit z neúplného roku. Po
+  uplynutí lhůty pro provedení zúčtování se také nenabídne. Obě lhůty se
+  posuzují po celých dnech, takže 31. březen je celý ještě včas.
+- **Zaměstnanec o zúčtování požádal**, nejpozději 15. února po skončení
+  zdaňovacího období. Povinné je datum žádosti, odkaz na podklad je
+  volitelný.
+- **Prohlášení poplatníka je na daný rok podepsané.** Neposuzuje se stav
+  k 31. prosinci, ale měsíc po měsíci za dobu trvání vztahu. Výslovně
+  neověřené prohlášení nebo nerezidence kdekoli v tomto rozsahu zúčtování
+  zastaví; měsíc bez záznamu se přeskočí. U starších převzatých dat bez
+  evidence vztahu se posuzuje celý rok.
+- **Podepsané prohlášení má doložený nárok na slevu na poplatníka.** Bez
+  jediného měsíce nároku na základní slevu by vyšla vyšší daň, než na jakou
+  má zaměstnanec nárok.
 - **Doklady od předchozích zaměstnavatelů** za tentýž rok jsou doložené,
-  nebo zaměstnanec jiného zaměstnavatele neměl. Pozdější doručení než
-  15. února zúčtování zastaví. Samotné údaje z těch potvrzení se zadávají
-  v sekci níž a musí být úplné.
-- **Zaměstnanec nepodává daňové přiznání.** Kdo přiznání podá nebo je povinen
-  ho podat, tomu zaměstnavatel roční zúčtování provést nesmí. Aplikace tuhle
-  povinnost neodvozuje — o většině rozhodných skutečností nic neví, a odpověď
-  proto zadává mzdová účetní.
+  nebo zaměstnanec jiného zaměstnavatele neměl. Doručení později než
+  15. února zúčtování zastaví.
+- **Zaměstnanec nepodává daňové přiznání.** Kdo přiznání podá nebo ho podat
+  musí, tomu zaměstnavatel zúčtování provést nesmí. Aplikace tuto povinnost
+  neodvozuje (o většině skutečností neví), odpověď zadává mzdová účetní.
 - **Zaměstnanec neuplatňuje položky, které jdou jen ročně.** Dary, úroky
-  z úvěru na bytovou potřebu, penzijní a životní pojištění, dlouhodobý investiční
-  produkt, pojištění dlouhodobé péče, sleva na manžela a sleva za zastavenou
-  exekuci se podle § 38h odst. 6 uplatňují až v ročním zúčtování. Aplikace pro ně
-  zatím nemá evidenci nároku ani doložení, takže je neumí spočítat — a raději
-  zúčtování odmítne, než aby vydala nižší přeplatek, než na jaký má zaměstnanec
-  nárok. Takové zúčtování je potřeba provést mimo aplikaci, nebo si zaměstnanec
-  podá přiznání sám.
+  z úvěru na bytovou potřebu, penzijní a životní pojištění, dlouhodobý
+  investiční produkt, pojištění dlouhodobé péče, sleva na manžela a sleva za
+  zastavenou exekuci se podle § 38h odst. 6 uplatňují až v ročním zúčtování.
+  Aplikace pro ně nemá evidenci nároku ani doložení, a raději zúčtování
+  odmítne, než aby vydala nižší přeplatek.
 
-Nesplněné podmínky se vypisují všechny najednou jako věty, ne jako kódy, a
-tlačítko **Provést roční zúčtování** zůstává vidět zašedlé i s vysvětlením.
+Nesplněné podmínky se vypisují všechny najednou jako věty a tlačítko
+**Provést roční zúčtování** zůstává vidět zašedlé s vysvětlením.
 
-Tlačítko **Provést zúčtování všem žadatelům** provede zúčtování za zvolený rok
-najednou všem, kdo o ně požádali a mají v roce schválenou mzdu. Zúčtování běží
-na serveru, takže stránku můžete zavřít a průběh se ukáže i po návratu. Výpočet
-i doklad jsou přesně tytéž jako u jednotlivé osoby. Kdo podmínky nesplňuje, se
-přeskočí a ve zprávě uvidíte jeho jméno se seznamem toho, co chybí; po doplnění
-podkladů ho zúčtujete v detailu nebo spustíte hromadné zúčtování znovu. Kdo už
-zúčtovaný je, se přeskočí také. Spustit ho smí stejně jako jednotlivé zúčtování
-jen uživatel s právem schvalovat mzdy.
+Hromadné **Provést zúčtování všem žadatelům** zpracuje za zvolený rok
+všechny, kdo požádali a mají v roce schválenou mzdu. Výpočet i doklad jsou
+tytéž jako u jednotlivé osoby. Spustit ho smí jen uživatel s právem
+schvalovat mzdy. Průběh se ukáže i po návratu na stránku.
 
-### 84.8.1 Potvrzení od jiného plátce daně
+### 84.7.3 Potvrzení od jiného plátce daně
 
-Měl-li zaměstnanec v roce ještě jiného zaměstnavatele, zapiš jeho potvrzení
-v sekci **Potvrzení od jiného plátce daně**. Údaje odpovídají tiskopisu
-*Potvrzení o zdanitelných příjmech ze závislé činnosti* (25 5460, vzor č. 33)
-a zúčtování je bez nich provést nelze — § 38ch odst. 3 říká, že plátce zúčtování
-provede „jen na základě dokladů … o zúčtované nebo vyplacené mzdě, sražených
-zálohách na daň z těchto příjmů, poskytnuté měsíční slevě na dani podle § 35ba
-a 35c a vyplacených měsíčních daňových bonusech".
+Bez potvrzení od jiného zaměstnavatele zúčtování provést nejde. § 38ch
+odst. 3 říká, že plátce zúčtování provede „jen na základě dokladů …
+o zúčtované nebo vyplacené mzdě, sražených zálohách na daň z těchto příjmů,
+poskytnuté měsíční slevě na dani podle § 35ba a 35c a vyplacených měsíčních
+daňových bonusech“.
 
-| Pole v aplikaci | Kde ho najdeš na potvrzení |
+| Pole v aplikaci | Kde ho najdete na potvrzení |
 |---|---|
 | Úhrn zúčtovaných příjmů | ř. 1 |
 | Základ daně | ř. 5 |
@@ -135,61 +175,71 @@ a 35c a vyplacených měsíčních daňových bonusech".
 | Poskytnuté měsíční slevy podle § 35c | dopočítá se z ř. 11 |
 | Vyplacené měsíční daňové bonusy | ř. 9 |
 
-Slevy tiskopis jako částku neuvádí — nese je jako **měsíce nároku** (ř. 11 a 12
-a údaj o prohlášení v záhlaví), protože záloha na ř. 8 je už po nich. Aplikace
-si je proto nedomýšlí a žádá je zadat.
-
-> [!IMPORTANT]
-> **Prázdné pole není nula.** Prázdné pole znamená „na potvrzení ten údaj není"
-> a zúčtování zastaví; nula znamená „na potvrzení je nula" a počítá se s ní.
-> Kdyby se prázdné pole četlo jako nula, porovnal by se celoroční nárok na bonus
-> proti nižšímu úhrnu už vyplacených bonusů a zaměstnanci by vyšel přeplatek,
-> na který nemá nárok. U každého potvrzení je proto vidět, které údaje na něm
-> chybí.
-
-Potvrzení, které je vedené jako **nedoložené**, se do úhrnu nezapočítá — § 38ch
-odst. 4 mluví o úhrnu mezd od všech plátců a do toho úhrnu patří doklad, ne
-nepodložený údaj. Sekci smí zadávat jen ten, kdo smí zúčtování i provést: ta
-čísla jdou přímo do úhrnu, ze kterého vychází přeplatek.
-
-Stav **Doložené** potvrzuje uživatel. Textový odkaz na podklad je nepovinná
-dohledávka a jeho nevyplnění samo o sobě zúčtování nezastaví; povinné zůstává
-označení konkrétního potvrzení a jeho rozhodné částky.
-
-Na výsledném dokladu je úhrn rozepsaný — kolik základu a záloh je od tohoto
-zaměstnavatele a kolik podle potvrzení od předchozích.
-
-Výpočet nic nepřepočítává znovu. Roční úhrny daně a záloh vznikají průběžně při
-schválení každého mzdového běhu; roční zúčtování je jen sečte, porovná s roční
-daní a rozdíl vyčíslí zvlášť na dani a zvlášť na daňovém bonusu. Historické
-měsíce zůstávají nedotčené.
-
-Základní sleva na poplatníka náleží za celé zdaňovací období v plné výši i tomu,
-kdo pracoval jediný měsíc. Slevy na invaliditu, sleva na držitele průkazu ZTP/P
-a daňové zvýhodnění na dítě se naopak krátí po dvanáctinách za měsíce, na
-jejichž počátku byly podmínky splněné. Měsíce se berou z evidence nároků, ne
-z toho, kolik se skutečně měsíčně uplatnilo — měsíční sleva je omezená výší
-zálohy, takže z ní nárok zpětně vyčíst nejde.
-
-Přeplatek se vrací mzdou, nejpozději při zúčtování mzdy za březen, a jen když
-je vyšší než 50 Kč. Přeplatek do padesátikoruny je jiný stav než žádný
-přeplatek: zúčtování proběhlo, jen se nevyplácí. **Případný nedoplatek se
-zaměstnanci nesráží.** Samotnou výplatu založ jako mzdový vstup ve složkách
-mzdy — aplikace ji nevytváří sama.
-
-Zúčtování se provádí jednou za rok. Opakované spuštění nevytvoří druhý výsledek;
-vrátí ten původní. Výsledkem je neměnný doklad **Roční zúčtování záloh**, který
-najdeš i mezi ročními dokumenty a který se váže na konkrétní schválené mzdové
-revize, ze kterých vznikl.
-
-> [!IMPORTANT]
-> **Provedené zúčtování nelze v aplikaci zrušit.** Jakmile jednou proběhne,
-> další pokus vrátí původní výsledek a jinou částku už z něj nedostanete.
-> Podklady proto zkontrolujte před spuštěním, ne po něm. Zjistíte-li chybu,
-> vypořádejte ji mimo aplikaci a rozdíl doložte.
+Slevy tiskopis jako částku neuvádí. Nese je jako **měsíce nároku** (ř. 11
+a 12 a údaj o prohlášení v záhlaví), protože záloha na ř. 8 je už po nich.
+Aplikace si je nedomýšlí a žádá je zadat.
 
 > [!WARNING]
-> Vyúčtování daně z příjmů ze závislé činnosti vůči finančnímu úřadu
-> (§ 38j odst. 4 a 5) aplikace nepodává. Roční zúčtování je vztah mezi
-> zaměstnavatelem a zaměstnancem; vyúčtování je samostatné podání a je potřeba
-> ho odevzdat mimo aplikaci.
+> Prázdné pole není nula. Prázdné pole znamená „na potvrzení ten údaj není“
+> a zúčtování zastaví; nula znamená „na potvrzení je nula“ a počítá se
+> s ní. Kdyby se prázdné pole četlo jako nula, porovnal by se celoroční
+> nárok na bonus s nižším úhrnem vyplacených bonusů a zaměstnanci by vyšel
+> přeplatek, na který nemá nárok. U každého potvrzení je vidět, které údaje
+> chybí.
+
+Potvrzení vedené jako **Nedoložené** se do úhrnu nezapočítá: § 38ch odst. 4
+mluví o úhrnu mezd od všech plátců a do něj patří doklad, ne nepodložený
+údaj. Stav **Doložené** potvrzuje uživatel. Textový odkaz na podklad je
+nepovinný; povinné je označení konkrétního potvrzení a jeho rozhodné částky.
+Sekci smí zadávat jen ten, kdo smí zúčtování i provést, protože čísla jdou
+přímo do úhrnu, ze kterého vychází přeplatek. Na výsledném dokladu je úhrn
+rozepsaný na tohoto zaměstnavatele a na předchozí podle potvrzení.
+
+### 84.7.4 Výpočet
+
+Výpočet nic nepřepočítává znovu. Roční úhrny daně a záloh vznikají průběžně
+při schválení každého mzdového běhu; roční zúčtování je sečte, porovná
+s roční daní a rozdíl vyčíslí zvlášť na dani a zvlášť na daňovém bonusu.
+Historické měsíce zůstávají nedotčené.
+
+Základní sleva na poplatníka náleží za celé zdaňovací období v plné výši
+i tomu, kdo pracoval jediný měsíc. Slevy na invaliditu, sleva na držitele
+průkazu ZTP/P a daňové zvýhodnění na dítě se krátí po dvanáctinách za
+měsíce, na jejichž počátku byly podmínky splněné. Měsíce se berou z evidence
+nároků, ne z toho, kolik se měsíčně skutečně uplatnilo: měsíční sleva je
+omezená výší zálohy, takže z ní nárok zpětně vyčíst nejde.
+
+### 84.7.5 Přeplatek, nedoplatek a doklad
+
+Přeplatek se vrací mzdou, nejpozději při zúčtování mzdy za březen, a jen
+když je vyšší než 50 Kč. Přeplatek do padesáti korun je jiný stav než žádný
+přeplatek: zúčtování proběhlo, jen se nevyplácí. Nedoplatek se zaměstnanci
+nesráží. Výplatu založte jako mzdový vstup ve složkách mzdy; aplikace ji
+nevytváří sama.
+
+Zúčtování se provádí jednou za rok. Opakované spuštění vrátí původní
+výsledek. Doklad **Roční zúčtování záloh** je neměnný, najdete ho i mezi
+ročními dokumenty a váže se na konkrétní schválené mzdové revize.
+
+Vyplacený doplatek na daňovém bonusu se firmě nevrátí sám. Pokud vyplacené
+bonusy převýšily sražené zálohy, požádejte o rozdíl finanční úřad, viz
+[Žádost o poukázání chybějící částky na daňovém bonusu](85_Podani_a_hlaseni.md#851424-zadost-o-poukazani-chybejici-castky-na-danovem-bonusu).
+
+### 84.7.6 Vyúčtování daně finančnímu úřadu
+
+Roční zúčtování je vztah mezi zaměstnavatelem a zaměstnancem. Vyúčtování
+daně z příjmů ze závislé činnosti (§ 38j odst. 4 a 5) a vyúčtování srážkové
+daně jsou samostatná podání finančnímu úřadu. Aplikace je sama neodešle:
+připraví XML pro EPO na `Mzdy → Přehled mezd`, panelu **Roční vyúčtování
+daně**, a podáte je přes EPO. Postup je v
+[§ 85.14.23](85_Podani_a_hlaseni.md#851423-vyuctovani-zalohove-a-srazkove-dane).
+
+## 84.8 Související kapitoly
+
+- [Zaměstnanci](86_Zamestnanci.md): prohlášení k dani a nároky na slevy.
+- [Legislativní pravidla mezd](92_Legislativni_pravidla_mezd.md): účinná
+  pravidla roku.
+- [Mzdové běhy](80_Mzdove_behy.md): výplata přeplatku.
+- [Dokumenty a výstupy](83_Dokumenty_a_vystupy.md): roční dokumenty.
+- [Podání a hlášení](85_Podani_a_hlaseni.md): vyúčtování daně a žádost
+  o poukázání bonusu.

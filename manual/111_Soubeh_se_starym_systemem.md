@@ -1,17 +1,84 @@
 # 111. Souběh se starým systémem
 
-**Cesta: `Účetnictví → Souběh se starým systémem`**
+> Měsíční porovnání MyÚčta s výstupy starého účetního programu, ve kterém firma ještě účtuje. Pro účetní, která při přechodu z jiného programu několik měsíců účtuje v obou a potřebuje ověřit, že čísla sedí.
 
-Firma, která přechází do MyÚčta z jiného účetního programu, obvykle ještě několik
-měsíců účtuje v obou. Kontrola souběhu každý měsíc porovná MyÚčto s výstupy starého
-programu a vypíše rozdíly po kritériích. Rozdíly účetní zařadí a měsíc uzavře.
+## 111.1 Kdy to potřebujete
 
-Kontrola do účetnictví nic nezapisuje. Ukládá jen protokol, který zůstává
-v historii cyklů. Stránka je dostupná firmám s podvojným účetnictvím. Kontrolu
-spouští, zařazuje rozdíly a uzavírá uživatel s právem zápisu do účetnictví,
-prohlížet ji může každý, kdo vidí účetnictví.
+Kapitolu otevřete, když:
 
-## 111.1 Co se porovnává
+- firma přechází do MyÚčta z jiného programu (Money S3, POHODA, PREMIER nebo jiného) a ještě několik měsíců účtuje v obou,
+- skončil měsíc a chcete ověřit, že MyÚčto sedí na starý program,
+- potřebujete rozdíly zařadit a měsíc uzavřít,
+- hledáte protokol o tom, jak souběh dopadl.
+
+### 111.1.1 Každý měsíc souběhu
+
+<!-- cols: 26 44 30 -->
+| Kdy | Co udělat | Kde v aplikaci |
+|---|---|---|
+| po uzavření měsíce ve starém programu | Vyexportovat výstupy a pustit kontrolu | `Účetnictví → Souběh se starým systémem`, [§ 111.3](#1113-krok-za-krokem-kontrola-mesice) |
+| po kontrole | Zařadit rozdíly a uzavřít cyklus | [§ 111.4](#1114-krok-za-krokem-zarazeni-rozdilu-a-uzavreni-cyklu) |
+| při předávání | Stáhnout protokol | tlačítko **Protokol CSV** |
+
+## 111.2 Než začnete
+
+1. **Podvojné účetnictví.** Stránka je dostupná firmám s podvojným účetnictvím.
+2. **Oprávnění.** Kontrolu spouští, zařazuje rozdíly a uzavírá uživatel s právem zápisu do účetnictví. Prohlížet ji může každý, kdo vidí účetnictví. Kontrola do účetnictví nic nezapisuje, ukládá jen protokol do historie cyklů.
+3. **Převedená data v MyÚčtu.** Měsíc, který kontrolujete, musí být v MyÚčtu zaúčtovaný.
+4. **Výstupy starého programu.** Připravte aspoň jeden výstup (obratovou předvahu, počty dokladů, saldokonto a další, viz [§ 111.6.1](#11161-co-se-porovnava)). Kritérium, ke kterému výstup nenahrajete, se nekontroluje a v protokolu není. Formát souborů popisuje [§ 111.6.3](#11163-format-vystupu).
+5. **Volitelně záloha agendy Money S3.** Pokud jste ji nahráli v průvodci přechodu z Money S3, můžete ji vybrat místo souborů ([Přechod z Money S3](103_Prechod_z_Money_S3.md)).
+
+## 111.3 Krok za krokem: kontrola měsíce
+
+1. Otevřete `Účetnictví → Souběh se starým systémem`.
+2. V bloku **Nová kontrola měsíce** vyberte **Měsíc** a **Starý program** (**Money S3**, **POHODA**, **PREMIER** nebo **Jiný program**).
+3. Nahrajte výstupy, které máte k dispozici. U každého pole je vidět, ke kterému kritériu patří.
+4. Byly-li výkazy vyexportované v tisících Kč, přepněte volbu **Výkazy ve** na **tisících Kč**.
+5. U Money S3 můžete místo souborů vybrat **Záloha agendy**. Záloha se čte bez zápisu do MyÚčta a doplní obratovou předvahu a počty dokladů, pokud je nenahrajete jako soubor. Sestava vyexportovaná z Money má přednost před zálohou.
+6. Klikněte na **Spustit kontrolu**.
+
+**Jak poznáte, že je hotovo:** Stránka ohlásí **Kontrola doběhla, měsíc sedí.**, **Kontrola doběhla, rozdíly je potřeba zařadit.**, případně **Kontrola doběhla, některé kritérium skončilo chybou.** Výsledek je po kritériích (stav **Sedí**, **Rozdíly**, **Neúplná** nebo **Chyba**) a kontrola přibyla do **Historie cyklů**.
+
+> [!TIP]
+> Je-li tlačítko **Spustit kontrolu** neaktivní, nahrajte aspoň jeden výstup starého programu nebo vyberte zálohu agendy.
+
+## 111.4 Krok za krokem: zařazení rozdílů a uzavření cyklu
+
+1. U každého rozdílu vyberte zařazení: **Už ve zdroji**, **Rozdíl převodu** nebo **Rozdíl výkladu**.
+2. Podle potřeby připište poznámku (**Poznámka k rozdílu**).
+3. U **Rozdíl převodu** opravte příčinu v MyÚčtu nebo v převodu a kontrolu pusťte znovu. Opakovaná kontrola téhož měsíce převezme zařazení rozdílů, které trvají, kromě rozdílů převodu.
+4. Zbývá-li kritérium s chybou, opravte vstup a pusťte kontrolu znovu.
+5. Jsou-li všechny rozdíly zařazené jako **Už ve zdroji** nebo **Rozdíl výkladu**, klikněte na **Uzavřít cyklus**.
+6. Chcete-li výsledek archivovat, klikněte na **Protokol CSV**.
+
+**Jak poznáte, že je hotovo:** Stránka hlásí **Cyklus je uzavřený.** a v historii je cyklus s označením **Uzavřený cyklus**.
+
+Význam zařazení:
+
+- **Už ve zdroji**: rozdíl je už ve starém programu a převod ho věrně převzal.
+- **Rozdíl převodu**: převod data přenesl jinak. Opravte příčinu a kontrolu pusťte znovu.
+- **Rozdíl výkladu**: MyÚčto vykazuje položku jinak a předpis připouští obojí.
+
+> [!WARNING]
+> Uzavřený cyklus nejde měnit ani smazat, dokud ho znovu neotevřete tlačítkem **Znovu otevřít cyklus** (v nabídce u cyklu).
+
+## 111.5 Když něco nejde
+
+<!-- cols: 30 34 36 -->
+| Co vidíte | Proč | Co udělat |
+|---|---|---|
+| **Nejdřív nahrajte aspoň jeden výstup starého programu nebo vyberte zálohu agendy.** | Nic není k porovnání | Nahrajte výstup nebo vyberte zálohu. |
+| **Některé kritérium skončilo chybou. Opravte vstup a pusťte kontrolu znovu.** | Soubor se nepodařilo přečíst nebo chybí povinný sloupec | Zkontrolujte formát podle [§ 111.6.3](#11163-format-vystupu) a spusťte kontrolu znovu. |
+| **Nejdřív zařaďte všechny rozdíly (zbývá N).** | Cyklus nejde uzavřít s nezařazenými rozdíly | Zařaďte zbývající rozdíly. |
+| **Rozdíly převodu (N) je potřeba opravit a kontrolu pustit znovu.** | Rozdíl převodu cyklus uzavřít nedovolí | Opravte příčinu a kontrolu pusťte znovu. |
+| Počty dokladů z Money mají rozdíl v knize | Záloha obsahuje i doklady, které převod záměrně nepřebírá (nezaúčtovaný koncept v uzavřeném roce, nulový pokladní doklad) | Zařaďte je jako **Rozdíl výkladu**. |
+| Majetek má jiné oprávky | MyÚčto počítá oprávky ze zaúčtovaných odpisů; odpisy se účtují až k 31. 12. | Porovnávejte hlavně stav k rozvahovému dni. |
+| DPH za čtvrtletního plátce nesedí | MyÚčto sestavuje přiznání podle periody firmy | Spouštějte kontrolu DPH za poslední měsíc čtvrtletí. |
+| Dalších N rozdílů je jen v počtu | Seznam rozdílů je zkrácený | Opravte příčinu a pusťte kontrolu znovu. |
+
+## 111.6 Podrobnosti a pravidla
+
+### 111.6.1 Co se porovnává
 
 Na straně MyÚčta se berou stejné sestavy, jaké vidí účetní v aplikaci, vždy
 k poslednímu dni vybraného měsíce.
@@ -31,25 +98,14 @@ k poslednímu dni vybraného měsíce.
 
 Kritérium, ke kterému nenahrajete výstup, se nekontroluje a v protokolu není.
 Kritéria K2 až K4 (vyrovnanost, úplnost mapování, doklady proti deníku) kontroluje
-převod sám při každém běhu, viz kapitola 103.5.
+převod sám při každém běhu, viz [Přechod z Money S3](103_Prechod_z_Money_S3.md).
 
 Přiznání k DPH a kontrolní hlášení MyÚčto sestaví stejně jako při podání
 a porovná s XML starého programu po atributech. Pořadí řádků kontrolního hlášení
 ani mezery v evidenčním čísle dokladu nehrají roli. Rozdíl u dokladu v kontrolním
 hlášení a v saldokontu odkazuje na doklad v MyÚčtu.
 
-## 111.2 Postup
-
-1. Vyberte **měsíc** a **starý program** (Money S3, POHODA, PREMIER nebo jiný).
-2. Nahrajte výstupy, které máte k dispozici. U každého pole je vidět, ke kterému
-   kritériu patří. Výkazy vyexportované v tisících Kč přepněte volbou
-   **Výkazy ve** na *tisících Kč*.
-3. U Money S3 můžete místo souborů vybrat **zálohu agendy** nahranou v průvodci
-   přechodu z Money S3 (kapitola 103). Záloha se čte bez zápisu do MyÚčta a doplní
-   obratovou předvahu a počty dokladů, pokud je nenahrajete jako soubor. Sestava
-   vyexportovaná z Money má přednost před zálohou.
-4. Klikněte na **Spustit kontrolu**. Výsledek se zobrazí po kritériích a kontrola
-   přibude do historie cyklů.
+### 111.6.2 Kontrola z příkazové řádky
 
 Kontrolu lze pustit i z příkazové řádky, například pro dávku firem:
 
@@ -61,24 +117,7 @@ php api/bin/parallel-run-check.php --ico=<IČO> --month=RRRR-MM --source=money_s
 
 Bez `--save` se výsledek jen vypíše, s ním se uloží do historie cyklů.
 
-## 111.3 Zařazení rozdílů a uzavření cyklu
-
-Každý rozdíl zařaďte do jedné skupiny:
-
-- **Už ve zdroji**: rozdíl je už ve starém programu a převod ho věrně převzal.
-- **Rozdíl převodu**: převod data přenesl jinak. Opravte příčinu a kontrolu
-  pusťte znovu.
-- **Rozdíl výkladu**: MyÚčto vykazuje položku jinak a předpis připouští obojí.
-
-K zařazení lze připsat poznámku. Opakovaná kontrola téhož měsíce převezme zařazení
-rozdílů, které trvají, kromě rozdílů převodu.
-
-Tlačítko **Uzavřít cyklus** je aktivní, když žádné kritérium neskončilo chybou
-a všechny rozdíly jsou zařazené jako *Už ve zdroji* nebo *Rozdíl výkladu*.
-Uzavřený cyklus nejde měnit ani smazat, dokud ho znovu neotevřete (menu „…").
-**Protokol CSV** stáhne výsledek kontroly se zařazením všech rozdílů.
-
-## 111.4 Formát výstupů
+### 111.6.3 Formát výstupů
 
 Tabulkové výstupy jsou CSV nebo text se středníkem, tabulátorem nebo čárkou,
 v UTF-8 nebo Windows-1250. Hlavička nemusí být na prvním řádku, řádky nad ní
@@ -110,17 +149,10 @@ Sloupce se hledají podle názvu bez ohledu na diakritiku a velikost písmen:
   `P.` (například `P.A.I.`), ostatní řádky jsou aktiva. Aktiva se porovnávají
   v netto hodnotě.
 
-## 111.5 Na co si dát pozor
+## 111.7 Související kapitoly
 
-- Počty dokladů ze zálohy Money zahrnují i doklady, které převod záměrně nepřebírá
-  (nezaúčtovaný koncept v uzavřeném roce, nulový pokladní doklad). Kontrola je
-  ukáže jako rozdíl knihy, zařaďte je jako *Rozdíl výkladu*.
-- Inventurní soupis majetku v MyÚčtu počítá oprávky ze zaúčtovaných odpisů.
-  V průběhu roku, kdy se odpisy účtují až k 31. 12., proto porovnávejte hlavně
-  stav k rozvahovému dni.
-- Přiznání k DPH sestavuje MyÚčto podle periody firmy. U čtvrtletního plátce
-  spouštějte kontrolu DPH za poslední měsíc čtvrtletí.
-
-Související kapitoly: [Přechod z Money S3](103_Prechod_z_Money_S3.md),
-[Přechod z POHODY](107_Prechod_z_POHODY.md), [Přechod z PREMIER](109_Prechod_z_PREMIER.md),
-[Obratová předvaha](56_Obratova_predvaha.md), [Saldokonto](60_Saldokonto.md).
+- [Přechod z Money S3](103_Prechod_z_Money_S3.md)
+- [Přechod z POHODY](107_Prechod_z_POHODY.md)
+- [Přechod z PREMIER](109_Prechod_z_PREMIER.md)
+- [Obratová předvaha](56_Obratova_predvaha.md)
+- [Saldokonto](60_Saldokonto.md)

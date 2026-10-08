@@ -545,7 +545,7 @@ výslovně zapsané, že podání proběhlo jinudy a kdy.
 | Profil A1 nejde podat | Chybí povinné údaje varianty | Klikněte na **Kontrola**; u každé vady je tlačítko, které otevře místo opravy. |
 | NEMPRI se nepřipraví | Chybí číslo rozhodnutí, rozhodné období, způsob výplaty nebo jiný údaj | Hláška jmenuje chybějící údaj; doplňte ho v editoru případu (**Upravit**) nebo na kartě osoby. |
 
-Další postupy jsou v [kontrolách mzdové agendy](999_Reseni_problemu.md#99911-kontroly-mzdove-agendy).
+Další postupy jsou v [kontrolách mzdové agendy](999_Reseni_problemu.md#99962-kontroly-mzdove-agendy).
 
 ## 85.14 Podrobnosti a pravidla
 
@@ -862,7 +862,7 @@ u všech firem se zapnutými mzdami. Denní běh stačí, protože lhůta je osm
 změna zachycená až ráno nechává sedm dnů na vyřízení. Úloha **nikdy nic
 neodesílá**: založí jen návrh povinnosti s termínem, který uvidíte ve frontě
 a v přehledu termínů. Odeslat ho musí člověk. Naplánování úlohy popisuje
-[§ 5.5 Cron skripty](05_Po_instalaci.md#55-cron-skripty), její stav najdete
+[§ 5.5 Cron skripty](05_Po_instalaci.md#55-krok-za-krokem-naplanovani-uloh-cron), její stav najdete
 v `Systém → Plánované úlohy`.
 
 #### Odeslané podání, na které nepřijde odpověď
@@ -1001,7 +1001,7 @@ relaci, kterou uživatel právě sám schválil** Mobilním klíčem eGovernment
 nebo SMS kódem. Systémový certifikát firmy ani uložené heslo odesílání
 neotevírají a vypršelá relace se sama neobnovuje. Podrobnosti a chování při
 chybě popisuje kapitola
-[Datová schránka](97_Datova_schranka.md#9742-odeslani-primo-z-aplikace-v-relaci-mobilniho-klice).
+[Datová schránka](97_Datova_schranka.md#97102-prime-odeslani-z-relace).
 
 **VREP ČSSZ.** Alternativou je podporovaný profil VREP pro ČSSZ. Přihlašovací
 a certifikační údaje zadávejte jen do určených polí, nikdy do poznámek.
@@ -1185,22 +1185,41 @@ pořadí dětí a při společném vyživování další osobou i její identifi
 vykázaných příplatků za noc, víkend a svátek.
 
 **Scénáře, které aplikace sestaví.** Měsíční hlášení aplikace sestaví pro
-běžný formulář (druh činnosti 1 až 9 s bližším určením 1, dohody A až J a T
-až ZC, druhy 15 a 16), pro formulář cinnostKS u druhu činnosti K a N až S
-s bližším určením 1 (jednatel, společník, prokurista, člen orgánu) a pro
-odložený příjem typu 1. Pracovní vztah lze evidovat a přihlásit i v ostatních
-scénářích, jejich formulář ale aplikace do hlášení nesestaví a test u vztahu
-ohlásí nález s pokynem podat hlášení ručně přes ePortál ČSSZ (nebo vztah
-odložit):
+tyto formuláře:
+
+<!-- cols: 12 60 28 -->
+| Scénář | Kdy nastane | Formulář |
+|---|---|---|
+| 1 | běžný formulář: druh činnosti 1 až 9 s bližším určením 1, dohody A až J a T až ZC, druhy 15 a 16 | běžný |
+| 3 | jen druh činnosti K a N až S s bližším určením 1 (jednatel, společník, prokurista, člen orgánu) | cinnostKS |
+| 4 | výkon trestu nebo zabezpečovací detence: druh činnosti 1 až 9 s bližším určením 2 u pracovního poměru nebo zaměstnání malého rozsahu | vezen |
+| 5 | druh činnosti 11, 13 nebo 14 u pracovního poměru | jinyPrijem |
+| 6 | druh činnosti 12 (mezinárodní pronájem pracovní síly) u pracovního poměru | mezinarodniPronajemSily |
+| 8 | odložený příjem typu 1, volí se ručně potvrzením odloženého příjmu | odlozenyPrijem |
+
+Formuláře jiného příjmu (5) a mezinárodního pronájmu pracovní síly (6)
+nenesou pojištění. I u podporovaných scénářů zůstávají dvě výjimky, které test
+ohlásí s pokynem podat hlášení za vztah ručně přes ePortál ČSSZ:
+
+- **Formulář vězně** nese z vyloučených dob jen dočasnou pracovní neschopnost
+  a peněžitou pomoc v mateřství. Ošetřování člena rodiny, otcovskou nebo jinou
+  vyloučenou dobu do něj zapsat nejde.
+- **Formulář mezinárodního pronájmu pracovní síly** nese ze slev jen základní
+  slevu na poplatníka a měsíční daňový bonus nevede. Vztah s jinou slevou,
+  zvýhodněním na děti nebo bonusem podejte ručně.
+
+Druh činnosti 11 až 14 u jiného vztahu než pracovního poměru test ohlásí
+jako nepodporovaný profil a pošle vás ke kontrole karty vztahu.
+
+Pracovní vztah lze evidovat a přihlásit i v ostatních scénářích, jejich
+formulář ale aplikace do hlášení nesestaví a test u vztahu ohlásí nález
+s pokynem podat hlášení ručně přes ePortál ČSSZ (nebo vztah odložit):
 
 <!-- cols: 12 60 28 -->
 | Scénář | Kdy nastane | Formulář |
 |---|---|---|
 | 2 | odměna pěstouna, druh činnosti M | pestoun |
 | 3 | pracovní vztah specifické skupiny (druh činnosti 1 až 9 s bližším určením 3), druh K a N až S s jiným bližším určením než 1 | cinnostKS |
-| 4 | výkon trestu nebo zabezpečovací detence (bližší určení 2) | vezen |
-| 5 | druh činnosti 11, 13 nebo 14 | jinyPrijem |
-| 6 | druh činnosti 12 | mezinarodniPronajemSily |
 | 7 | druh činnosti 10 | ozpTpp |
 
 ### 85.14.10 Odložení vztahu z řádného hlášení
@@ -1341,7 +1360,7 @@ vyměřovacích základů a úhrn slev, a o úhrn slev snižuje pojistné k úhr
 Pojistné zaměstnance na formuláři zůstává **před slevou** (7,1 % ze
 základu), stejně jako pojistné za zaměstnance v pojistné části. Nárok se
 zadává v zákonné evidenci osoby (viz
-[Zaměstnanci](86_Zamestnanci.md#8682-zakonna-evidence-osoby)).
+[Zaměstnanci](86_Zamestnanci.md#86123-zakonna-evidence-osoby)).
 
 Má-li důchodce u firmy víc souběžných vztahů, slevu nese jen formulář vztahu,
 který nese i pojistné osoby; ostatní vztahy uvádějí příznak NE. Když je
@@ -1502,7 +1521,7 @@ Firma, která do MyÚčta přešla z jiného mzdového programu, má na záložc
 **JMHZ** pod **Podrobnosti** oddíl **Podání předchozím programem**
 s podáními, která za ni podal předchozí program: měsíční hlášení JMHZ
 a registrace zaměstnanců převzaté převodem z PAMICA
-([§ 108.12](108_Prechod_z_PAMICA.md#10812-odeslana-hlaseni-jmhz-a-registrace))
+([§ 108.12](108_Prechod_z_PAMICA.md#108912-odeslana-hlaseni-jmhz-a-registrace))
 a měsíční hlášení nahraná jako XML v `Mzdy → Importy`, záložce **JMHZ**.
 Oddíl je rozdělený na **měsíční hlášení JMHZ** (seskupená po období)
 a **registrace zaměstnanců** (seskupené po měsíci odeslání). U každého
@@ -3014,5 +3033,5 @@ ELDP při neúplném podkladu odkazuje na konkrétní měsíc, vztah nebo absenc
   soubory a doručenky.
 - [EPO podání, archív a daňová rekonciliace](49_Archiv_podani_a_rekonciliace.md):
   odeslání vyúčtování daně a žádostí na EPO.
-- [Řešení problémů](999_Reseni_problemu.md#99911-kontroly-mzdove-agendy):
+- [Řešení problémů](999_Reseni_problemu.md#99962-kontroly-mzdove-agendy):
   kontroly mzdové agendy.

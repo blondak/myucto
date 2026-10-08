@@ -1,12 +1,81 @@
-# 58. Výkaz zisku a ztráty — druhové členění
+# 58. Výkaz zisku a ztráty - druhové členění
 
-**Cesta: `Účetnictví → Výkaz zisku a ztráty`**
+> Sestavení druhové výsledovky: náklady podle druhu (spotřeba, služby, mzdy, odpisy, finanční náklady) a výnosy podle zákonných řádků přílohy č. 2 části I vyhlášky č. 500/2002 Sb. Kapitola je pro účetní v podvojném účetnictví.
 
-Druhová výsledovka člení náklady podle jejich druhu — například spotřebu,
-služby, mzdy, odpisy a finanční náklady — a výnosy podle zákonných řádků
-přílohy č. 2 části I vyhlášky č. 500/2002 Sb.
+## 58.1 Kdy to potřebujete
 
-## 58.1 Zdroj a období
+Kapitolu otevřete, když:
+
+- potřebujete výsledovku za období nebo k určitému dni,
+- chcete během roku sledovat průběžný výsledek hospodaření,
+- potřebujete seznam nákladových a výnosových účtů se zůstatky a skupinami (provozní, finanční, daň),
+- se blíží konec roku a chcete odhad výsledku a daně z příjmů právnických osob,
+- musíte rozhodnout, které další výnosy se počítají do čistého obratu,
+- se výsledek v rozvaze liší od výsledku ve výsledovce.
+
+Cesta: `Účetnictví → Výkaz zisku a ztráty`. Výkaz je dostupný jen pro podvojné účetnictví.
+
+## 58.2 Než začnete
+
+1. **Zaúčtované doklady.** Výkaz čte jen zaúčtované řádky deníku. Před sestavením projděte [Obratovou předvahu](56_Obratova_predvaha.md).
+2. **Mapování účtů.** Každý nákladový a výnosový účet s obratem musí být zařazen do řádku výkazu. Nezařazený účet řeší výjimka mapování ([Rozvaha](57_Rozvaha.md#574-krok-za-krokem-zarazeni-uctu-do-jineho-radku)).
+3. **Výběr řádků čistého obratu.** Řádky, které se počítají do čistého obratu, se volí v `Firma → Nastavení`, záložka **Daně a účetnictví**, blok **Čistý obrat: výnosy obchodního modelu** (viz [§ 58.5](#585-krok-za-krokem-vyber-radku-pro-cisty-obrat)).
+
+## 58.3 Krok za krokem: sestavení výsledovky
+
+1. Otevřete `Účetnictví → Výkaz zisku a ztráty`.
+2. V poli **Období** zvolte fiskální rok.
+3. V poli **Sestaveno k** zvolte datum. Prázdná hodnota znamená dřívější z posledního dne období a dneška.
+4. V poli **Rozsah** ponechte **Automaticky (dle kategorie ÚJ)**, nebo zvolte plný či zkrácený rozsah.
+5. Podle potřeby přepněte **Kč / tis. Kč**. PDF a XLSX zůstávají v korunách.
+6. Pod výkazem zkontrolujte **Výsledek hospodaření za účetní období** a **Čistý obrat za účetní období**.
+7. Řádek rozbalte kliknutím. Uvidíte přímo namapované účty a jejich příspěvky. Kód účtu otevře opis od začátku období do data sestavení.
+8. Klikněte na **Export PDF** nebo **Export XLSX**.
+
+**Jak poznáte, že je hotovo:** Výkaz má vyplněné řádky, výsledek hospodaření odpovídá výsledku z výsledkových účtů a nad tabulkou není upozornění na nezařazený účet.
+
+## 58.4 Krok za krokem: výsledovka po účtech
+
+1. Otevřete `Účetnictví → Výkaz zisku a ztráty` a zvolte záložku **Účet 710 (po účtech)**.
+2. Projděte skupiny **Provozní činnost**, **Finanční činnost**, **Daň z příjmů** a **Převod podílu na výsledku hospodaření společníkům**. Náklady jsou ve sloupci **Náklady (MD)**, výnosy ve sloupci **Výnosy (D)**.
+3. Zkontrolujte mezisoučty **Provozní výsledek hospodaření**, **Finanční výsledek hospodaření**, **Výsledek hospodaření před zdaněním** a **po zdanění**.
+4. Klikněte na účet. Otevře se jeho opis.
+5. Je-li ve skupině **Účty nezařazené ve výkazu** nějaký účet, zařaďte ho výjimkou mapování ([Rozvaha](57_Rozvaha.md#574-krok-za-krokem-zarazeni-uctu-do-jineho-radku)).
+6. Klikněte na **Export PDF** nebo **Export XLSX**.
+
+**Jak poznáte, že je hotovo:** Zvýrazněný řádek **Výsledek hospodaření** se shoduje s výkazem a s výsledkem v rozvaze po účtech.
+
+## 58.5 Krok za krokem: výběr řádků pro čistý obrat
+
+Čistý obrat jsou od roku 2024 výnosy z prodeje výrobků, zboží a služeb (§ 1a odst. 2 zákona o účetnictví, § 35 vyhlášky č. 500/2002 Sb.). Které další výnosy patří k obchodnímu modelu firmy, je vaše rozhodnutí.
+
+1. Otevřete `Firma → Nastavení` a zvolte záložku **Daně a účetnictví**.
+2. Sjeďte do sekce **Účetní závěrka**, blok **Čistý obrat: výnosy obchodního modelu**. Mapování výkazů na tento blok odkazuje také odkazem **Čistý obrat: nastavení výnosů obchodního modelu**.
+3. U druhové výsledovky (**Výsledovka v druhovém členění**) zkontrolujte návrh **Podle zapsané činnosti CZ-NACE** a případně klikněte na **Předvyplnit návrh (N)**. Aplikace zaškrtne řádky, které k takové činnosti typicky patří, i s odůvodněním.
+4. Řádky, na kterých firma za období nemá žádný obrat, jsou skryté. Přepínač **Zobrazit i řádky bez obratu** je vrátí.
+5. Zkontrolujte výběr, případně ho upravte, a nastavení uložte.
+6. Rozhodnutí uveďte v příloze v účetní závěrce.
+
+**Jak poznáte, že je hotovo:** Pod výkazem se zobrazuje **Čistý obrat za účetní období** podle vašeho výběru.
+
+> [!TIP]
+> Návrh je podklad, ne rozhodnutí: aplikace nic nezaškrtne sama a výběr ukládáte vy. Zvolený řádek se neskryje nikdy, ani když je na něm nula.
+
+## 58.6 Když něco nejde
+
+<!-- cols: 30 34 36 -->
+| Co vidíte | Proč | Co udělat |
+|---|---|---|
+| **Výkaz nemá pro zvolené parametry žádná data.** | Ve zvoleném období a dni nejsou zaúčtované řádky | Zkontrolujte **Období** a **Sestaveno k**. |
+| Skupina **Účty nezařazené ve výkazu** a upozornění nad tabulkou | Výsledkový účet nezná mapa výkazu; výsledek hospodaření ho zahrnuje, výkaz ne | Zařaďte účet výjimkou mapování. |
+| Výsledek v rozvaze po účtech se liší od výsledovky | Chyba v počátečních stavech nebo v uzávěrce minulého roku. Při filtru dimenze to může být jen upozornění. | Prověřte [Obratovou předvahu](56_Obratova_predvaha.md) a uzávěrku minulého roku. |
+| Čistý obrat minulého období je nulový | Ve výkazu za první rok nového pojetí se čistý obrat minulého období spočtený po staru neuvádí | Nejde o chybu. |
+| Blok **Odhad do konce roku (nezaúčtováno)** chybí | Zobrazuje se jen u právnické osoby v neuzavřeném roce bez zaúčtované daně z příjmů (účet 591), bez filtru dimenze a s právem na přiznání k dani z příjmů | Nejde o chybu. |
+| Na malé nebo mikro jednotce vidíte jen nejvyšší úroveň | U druhové výsledovky se malý i mikro rozsah omezí na řádky nejvyšší úrovně | Zvolte **Plný rozsah**. |
+
+## 58.7 Podrobnosti a pravidla
+
+### 58.7.1 Zdroj a období
 
 Výkaz čte syntetické zůstatky zaúčtovaných nákladových a výnosových účtů od
 začátku zvoleného fiskálního období do data **Sestaveno k** včetně. Prázdné
@@ -17,10 +86,10 @@ Sloupec **Minulé období** vznikne stejným výpočtem za předchozí fiskáln�
 období k jeho konci a používá stejnou verzi mapy jako běžné období. Přepínač
 **Kč / tis. Kč** mění jen obrazovku; PDF/XLSX zůstává v korunách.
 
-## 58.2 Jak se účty mapují
+### 58.7.2 Jak se účty mapují
 
 Každý účet se přiřadí podle nejdelšího shodného prefixu ve verzované mapě.
-Výnosový příspěvek se počítá jako `Dal − MD`, nákladový jako `MD − Dal`.
+Výnosový příspěvek se počítá jako `Dal - MD`, nákladový jako `MD - Dal`.
 Proto běžné výnosy i náklady vstupují do svých řádků kladně; opravný pohyb na
 opačné straně je snižuje. Analytické mapy, například 559M/559Z/559P a
 561P/561C, mají přednost před obecnou syntetikou.
@@ -42,11 +111,10 @@ Základní skupiny mapování jsou:
 
 Úplný aktuální rozpad je dán verzí mapování zobrazenou v záhlaví. Kliknutí na
 řádek zobrazí přímo namapované účty a jejich příspěvky; kód vede do opisu od
-začátku období do data sestavení. Backendová kontrola vrací i nenamapované
-nenulové výsledkové účty, přestože aktuální souhrnný blok stránky zobrazuje
-jen výsledek hospodaření a čistý obrat.
+začátku období do data sestavení. Souhrnný blok pod výkazem zobrazuje jen výsledek hospodaření a čistý obrat;
+nenamapované nenulové výsledkové účty ukazuje záložka **Účet 710 (po účtech)**.
 
-## 58.3 Přesné vzorce výsledku
+### 58.7.3 Přesné vzorce výsledku
 
 Mezisoučty A., D., E., III., F. a L. jsou součtem svých podřádků a případných
 přímých příspěvků. Z nich se na haléře počítá:
@@ -78,32 +146,33 @@ VH za období     = VH po zdanění − M.
 odst. 2 zákona o účetnictví, § 35 vyhlášky č. 500/2002 Sb.). Které další výnosy
 patří k obchodnímu modelu firmy, je její úsudek: pronajímatel k nim může
 počítat tržby z prodeje majetku (III.1.), holding výnosy z podílů (IV.). Řádky se
-volí v **Nastavení uzávěrky** na stránce účetních období a rozhodnutí se uvádí
+volí v `Firma → Nastavení`, záložka **Daně a účetnictví**, blok **Čistý obrat: výnosy obchodního
+modelu**, zvlášť pro druhovou a účelovou výsledovku, a rozhodnutí se uvádí
 v příloze v účetní závěrce.
 
 Výběr řádků má dvě pomůcky. Podle zapsané činnosti **CZ-NACE** aplikace navrhne
 řádky, které k takové činnosti typicky patří, i s odůvodněním; tlačítkem se
 návrh zaškrtne najednou. Řádky, na kterých firma za období nemá žádný obrat, se
-skryjí - přepínačem *Zobrazit i řádky bez obratu* se vrátí. Zvolený řádek se
+skryjí - přepínačem **Zobrazit i řádky bez obratu** se vrátí. Zvolený řádek se
 neskryje nikdy, ani když je na něm nula. Návrh je podklad, ne rozhodnutí:
 aplikace nic nezaškrtne sama a výběr uložíte vy. Ve výkazu za první rok nového pojetí se čistý obrat
 minulého období spočtený po staru neuvádí, sloupec zůstane nulový.
 
-Interně mají obě položky označené `I.` jedinečné kódy, na výstupu se však
+Obě položky označené `I.` mají interně jedinečné kódy, na výstupu se však
 zobrazují podle vyhlášky. Výsledek za období se zároveň nezávisle spočítá ze
-všech výsledkových účtů jako `Σ(Dal − MD)`. Kontrola **profit_matches**
-porovnává oba výsledky na haléře.
+všech výsledkových účtů jako `Σ(Dal - MD)`. Oba výsledky se porovnávají na haléře.
 
-## 58.4 Rozsah a kategorie
+### 58.7.4 Rozsah a kategorie
 
 Filtr **Rozsah** nabízí automatický, plný, malý a mikro rozsah. U druhové
 výsledovky se malý i mikro rozsah omezí na řádky nejvyšší úrovně. Automatická
 volba používá kategorii účetní jednotky, ruční přepis rozsahu a povinný audit
 stejně jako [Rozvaha](57_Rozvaha.md).
 
-## 58.5 Kontroly a export
+### 58.7.5 Kontroly a export
 
-Pod výkazem se zobrazí **Výsledek hospodaření** a **Čistý obrat**. Backend
+Pod výkazem se zobrazí **Výsledek hospodaření za účetní období** a **Čistý obrat
+za účetní období**. Aplikace
 navíc kontroluje shodu výsledku s výsledkovými účty a úplnost mapování; tyto
 vazby používají také automatické testy a navazující procesy. PDF a XLSX
 používají stejné období, datum, rozsah, mapu i minulé období jako obrazovka.
@@ -112,7 +181,7 @@ používají stejné období, datum, rozsah, mapu i minulé období jako obrazov
 [účelovou výsledovku](59_Vysledovka_ucelova.md); obě varianty mají shodný
 celkový výsledek, ale jinou strukturu provozních nákladů.
 
-## 58.6 Výsledovka po účtech
+### 58.7.6 Výsledovka po účtech
 
 Záložka **Účet 710 (po účtech)** ukáže nákladové a výnosové účty se zůstatkem od začátku
 období do data sestavení, rozdělené do skupin **Provozní činnost**,
@@ -126,18 +195,18 @@ Pod skupinami následují mezisoučty **Provozní výsledek hospodaření**,
 **Finanční výsledek hospodaření**, **Výsledek hospodaření před zdaněním** a
 **po zdanění** a zvýrazněný řádek **Výsledek hospodaření** za účetní období.
 Hodnoty se shodují s řádky výkazu a s výsledkem v rozvaze po účtech
-([§ 57.8](57_Rozvaha.md)). Uzávěrkový zápis se nezapočítává, po uzavření roku
+([Rozvaha po účtech](57_Rozvaha.md#5778-rozvaha-po-uctech)). Uzávěrkový zápis se nezapočítává, po uzavření roku
 tak pohled ukazuje obsah konečného účtu 710.
 
 Výsledkový účet, který mapa výkazu nezná, je ve skupině **Účty nezařazené ve
 výkazu**. Výsledek hospodaření ho zahrnuje, výkaz ne, proto stránka nad
 tabulkou upozorní a účet je třeba zařadit výjimkou mapování
-([§ 57.7](57_Rozvaha.md)).
+([Mapování účtů](57_Rozvaha.md#5777-mapovani-uctu-pro-konkretni-firmu)).
 
 Kliknutím na účet se otevře jeho opis. Export PDF a XLSX z této záložky
 vytvoří výsledovku po účtech v jednotce zvolené přepínačem **Kč / tis. Kč**.
 
-### Odhad do konce roku (nezaúčtováno)
+#### 58.7.6.1 Odhad do konce roku (nezaúčtováno)
 
 U právnické osoby v roce, který ještě není uzavřený a nemá zaúčtovanou daň
 z příjmů (účet 591), je pod tabulkou blok **Odhad do konce roku
@@ -164,3 +233,11 @@ zbytku roku odhad neobsahuje, jde o uzávěrku k dnešnímu stavu účetnictví.
 U každého řádku je odkaz na stránku, ze které číslo pochází. Blok se
 nezobrazí u fyzické osoby, v uzavřeném roce, při filtru dimenze ani
 uživateli bez práva na přiznání k dani z příjmů.
+
+## 58.8 Související kapitoly
+
+- [Výsledovka - účelová](59_Vysledovka_ucelova.md) - stejný celkový výsledek, jiná struktura provozních nákladů
+- [Rozvaha](57_Rozvaha.md) - mapování účtů a rozvaha po účtech
+- [Obratová předvaha](56_Obratova_predvaha.md)
+- [Daň z příjmů](43_Dan_z_prijmu.md) - náhled přiznání, ze kterého vychází odhad do konce roku
+- [Uzávěrka](72_Uzaverka.md) a [Majetek](28_Majetek.md)

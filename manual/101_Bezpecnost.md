@@ -1,43 +1,210 @@
 # 101. Bezpečnost (MFA, passkeys, zámek session, IP allowlist, role, activity log)
 
+> Návod pro uživatele a správce: jak si zabezpečit přihlášení (TOTP, přístupové
+> klíče, záložní kódy), jak správce vynutí silné ověření, omezí přístup podle IP
+> adres, nastaví role a zkontroluje activity log. Na konci jsou podrobná
+> pravidla a provozní postupy.
+
 Bezpečnost MyÚčto stojí na několika navazujících vrstvách:
 
-1. **Autentizace** — heslo (bcrypt + pepper) nebo volitelně passkey bez hesla,
+1. **Autentizace** - heslo (bcrypt + pepper) nebo volitelně passkey bez hesla,
    brute-force ochrana a CAPTCHA
-2. **Silné MFA** — passkey nebo TOTP
-3. **Síťová izolace** — IP allowlist (volitelný, doporučeno v produkci)
-4. **Autorizace** — databázové role s oprávněními neviditelné / čtení / zápis
-5. **Audit** — activity log všech mutací
-6. **Zámek session** — serverové uzamčení PWA po nečinnosti
+2. **Silné MFA** - passkey nebo TOTP
+3. **Síťová izolace** - IP allowlist (volitelný, doporučeno v produkci)
+4. **Autorizace** - databázové role s oprávněními neviditelné / čtení / zápis
+5. **Audit** - activity log všech mutací
+6. **Zámek session** - serverové uzamčení PWA po nečinnosti
 
-## 101.1 Hesla
+## 101.1 Kdy to potřebujete
+
+Kapitolu otevřete, když:
+
+- si zapínáte druhý faktor (TOTP nebo přístupový klíč),
+- jste ztratili telefon nebo klíč a potřebujete se dostat do účtu,
+- chcete, aby všichni uživatelé měli povinné silné MFA,
+- chcete omezit přístup do aplikace jen z vybraných IP adres,
+- zakládáte nebo upravujete roli uživatele,
+- vyšetřujete, kdo a kdy co změnil,
+- potřebujete anonymizovanou kopii databáze pro testování.
+
+<!-- cols: 26 40 34 -->
+| Kdy | Co udělat | Kde |
+|---|---|---|
+| při prvním přihlášení | Zapnout TOTP nebo registrovat přístupový klíč | `Profil → 2FA / TOTP`, `Profil → Přístupové klíče` |
+| hned po zapnutí druhého faktoru | Vygenerovat a uložit záložní kódy | `Profil → Přístupové klíče`, **Záložní kódy** |
+| při nasazení | Vynutit MFA, nastavit IP allowlist a `trusted_proxies` | `cfg.php`, viz [§ 101.6](#1016-krok-za-krokem-vynuceni-silneho-mfa-spravce) |
+| při novém uživateli | Přidělit mu roli | `Systém → Role a oprávnění`, `Systém → Uživatelé` |
+| jednou měsíčně | Projít activity log | `Systém → Log` |
+| před předáním dat vývojáři | Vyrobit anonymizovanou kopii | viz [§ 101.11.10](#1011110-anonymizovana-kopie-pro-testovaci-instanci) |
+
+## 101.2 Než začnete
+
+- Pro TOTP potřebujete autentikátor v mobilu (Google Authenticator, Authy,
+  Microsoft Authenticator, 1Password, Bitwarden).
+- Pro přístupový klíč potřebujete prohlížeč a zařízení s podporou passkeys.
+  Aplikace musí běžet na stabilní HTTPS adrese (`app.url`).
+- Při přidání druhého faktoru vás aplikace požádá o nové ověření: aktuální
+  heslo, nebo existující přístupový klíč.
+- Správcovské kroky (§ 101.6 a § 101.7) vyžadují přístup k `cfg.php` nebo
+  k proměnným prostředí na serveru.
+- Nastavení rolí vyžaduje účet superadmin.
+
+## 101.3 Krok za krokem: zapnutí TOTP
+
+1. Otevřete `Profil → 2FA / TOTP`.
+2. Zadejte aktuální heslo a klikněte na **Nastavit TOTP**. Máte-li už přístupový
+   klíč, klikněte místo toho na **Ověřit přístupovým klíčem a nastavit TOTP**.
+3. Aplikace ukáže QR kód a textový klíč. V autentikátoru zvolte přidat účet a
+   naskenujte QR kód.
+4. Zadejte aktuální šestimístný kód z autentikátoru a klikněte na **Aktivovat
+   TOTP**.
+
+**Jak poznáte, že je hotovo:** Záložka **2FA / TOTP** ukazuje
+**TOTP je aktivní.** a při dalším přihlášení aplikace požádá o kód z autentikátoru.
+
+> [!TIP]
+> Hned potom si vygenerujte záložní kódy ([§ 101.5](#1015-krok-za-krokem-zalozni-kody)).
+> Při ztrátě autentikátoru jinak zbývá jen zásah správce na serveru.
+
+## 101.4 Krok za krokem: registrace přístupového klíče
+
+1. Otevřete `Profil → Přístupové klíče`.
+2. Do pole **Název přístupového klíče** napište název (například název
+   telefonu) a klikněte na **Přidat přístupový klíč**.
+3. Potvrďte registraci systémovým dialogem zařízení (otisk, obličej, PIN nebo
+   bezpečnostní klíč). U prvního klíče zadejte aktuální heslo, nebo TOTP kód.
+4. Doporučujeme zaregistrovat druhý klíč, nebo mít vedle klíče aktivní TOTP.
+
+**Jak poznáte, že je hotovo:** Klíč je v seznamu s datem **Vytvořeno** a po
+použití s datem **Naposledy použito**. Klíč lze **Přejmenovat** nebo **Odebrat**.
+
+## 101.5 Krok za krokem: záložní kódy
+
+1. Otevřete `Profil → Přístupové klíče` a v části **Záložní kódy** klikněte na
+   **Vygenerovat záložní kódy**. Potvrďte ověření přístupovým klíčem nebo kódem
+   z autentikátoru.
+2. Kódy si hned uložte (**Stáhnout jako soubor**, **Kopírovat**, nebo tisk) mimo
+   počítač, ze kterého se přihlašujete. Zobrazí se jen jednou.
+3. Klikněte na **Mám je uložené**.
+
+**Jak poznáte, že je hotovo:** Sekce ukazuje **Zbývá 10 z 10 kódů**. Při ztrátě
+klíče i autentikátoru zadáte kód na přihlašovací stránce místo druhého faktoru
+(odkaz „Nemám klíč ani autentikátor“). Každý kód funguje právě jednou.
+
+> [!WARNING]
+> Nová sada okamžitě zruší tu předchozí. Kód neumožní vytvořit API token ani
+> vydat další sadu kódů; nejdřív je potřeba obnovit skutečný faktor.
+
+## 101.6 Krok za krokem: vynucení silného MFA (správce)
+
+1. V `cfg.php` (nebo `cfg.local.php`) nastavte:
+
+   ```php
+   'auth' => [
+       'require_mfa' => true,
+       'allowed_mfa_methods' => ['passkey', 'totp'],
+   ],
+   ```
+
+   V Dockeru a PaaS stejné nastavíte proměnnými `MYINVOICE_AUTH_REQUIRE_MFA=true`
+   a `MYINVOICE_AUTH_MFA_METHODS=passkey,totp`.
+2. Uživatelé bez silného faktoru se při dalším přihlášení dostanou na stránku
+   pro nastavení MFA a bez ní nepokračují.
+3. Chcete-li povolit přihlášení jen přístupovým klíčem, nastavte
+   `auth.passwordless_login.enabled` (viz [§ 101.11.2.3](#1011123-prihlaseni-s-passkey-a-mfa)).
+
+**Jak poznáte, že je hotovo:** Nový uživatel po přihlášení heslem vidí
+`/setup-mfa` a do aplikace se dostane až po registraci klíče nebo zapnutí TOTP.
+
+## 101.7 Krok za krokem: omezení přístupu IP allowlistem (správce)
+
+1. Do `cfg.php` zapište povolené IP adresy a rozsahy (příklad je v
+   [§ 101.11.4](#101114-ip-allowlist-volitelne)). Vždy ponechte svou IP, VPN a
+   záložní hotspot.
+2. Běží-li aplikace za reverse proxy, uveďte proxy do `trusted_proxies`
+   ([§ 101.11.4.1](#1011141-za-reverse-proxy-trustedproxies-dulezite)) a
+   zajistěte, aby edge proxy přepisovala `X-Forwarded-For`
+   ([§ 101.11.4.2](#1011142-edge-proxy-musi-x-forwarded-for-prepisovat-ne-appendovat)).
+3. Ověřte z internetu: `curl -H 'X-Forwarded-For: 1.2.3.4' https://vas-server/api/health`.
+   Pak v `Systém → Log` musí být vaše skutečná IP, ne `1.2.3.4`.
+
+**Jak poznáte, že je hotovo:** Cizí IP dostane 403 a v logu jsou skutečné IP
+klientů.
+
+> [!WARNING]
+> IP allowlist je záměrně jen v `cfg.php`, ne v UI. Při omylu byste se
+> zablokovali a nešel by sundat přes UI.
+
+## 101.8 Krok za krokem: přidělení role uživateli (superadmin)
+
+1. Otevřete `Systém → Role a oprávnění`. Novou roli založíte tlačítkem
+   **Nová role**, existující upravíte (**Upravit**) nebo zkopírujete
+   (**Duplikovat**).
+2. Zadejte **Název role**, **Typ role** a u každého modulu úroveň
+   **Neviditelné**, **Pouze čtení** nebo **Zápis**. Klikněte na **Uložit**.
+3. Otevřete `Systém → Uživatelé` a uživateli přiřaďte roli a firmy.
+
+**Jak poznáte, že je hotovo:** Uživatel po přepnutí na firmu vidí v menu jen
+moduly, na které má právo. Role se u firmy nesčítají; chybějící oprávnění
+znamená zákaz.
+
+## 101.9 Krok za krokem: kontrola activity logu
+
+1. Otevřete `Systém → Log`.
+2. Filtrujte podle akce a entity. U záznamu uvidíte čas, uživatele, akci,
+   entitu, IP adresu a payload.
+3. Hledejte neúspěšná přihlášení (`auth.login_failed`) a neočekávané úpravy.
+
+**Jak poznáte, že je hotovo:** Podezřelé záznamy jste vysvětlili nebo
+eskalovali. Doporučujeme kontrolu aspoň jednou měsíčně.
+
+## 101.10 Když něco nejde
+
+<!-- cols: 30 34 36 -->
+| Co vidíte | Proč | Co udělat |
+|---|---|---|
+| Nemáte autentikátor ani klíč | Zařízení je ztracené | Zadejte záložní kód ([§ 101.5](#1015-krok-za-krokem-zalozni-kody)); jinak správce spustí `php api/bin/reset-mfa.php <email>` ([§ 101.11.2.4](#1011124-obnova-pristupu)) |
+| Odebrat poslední silný faktor nejde | Je vynucené MFA | Nejdřív zaregistrujte druhý klíč nebo zapněte TOTP |
+| Přístupové klíče nejsou dostupné | `app.url` není HTTPS DNS adresa, nebo je v konfiguraci vypnutá metoda `passkey` | Opravte `app.url` ([§ 101.11.2.1](#1011121-passkeys)) |
+| Přihlášení hlásí `503 passkeys_unavailable` | WebAuthn je nedostupný a účet nemá jiný druhý faktor | Opravte `app.url`, případně `reset-mfa.php` |
+| TOTP kód nejde použít podruhé | Kód platí jen jednou | Počkejte na nový kód v autentikátoru |
+| Lockout po opakovaných chybách | Brute-force ochrana ([§ 101.11.3](#101113-brute-force-ochrana)) | Počkejte, až lockout vyprší |
+| Zamčená aplikace po nečinnosti | Zámek session | Klikněte na **Odemknout přístupovým klíčem**, nebo na **Odhlásit** a přihlaste se znovu |
+| Uživatelé bez TOTP se nepřihlásí (e-mailové OTP) | Nechodí e-maily | Opravte SMTP, nebo vypněte `email_otp.enabled` |
+| V logu je pořád IP proxy | Chybí `trusted_proxies` | Viz [§ 101.7](#1017-krok-za-krokem-omezeni-pristupu-ip-allowlistem-spravce) |
+| Chyba 403 `csrf_failed` / `origin_mismatch` | Chybí Origin nebo CSRF token | Obnovte stránku a přihlaste se znovu ([§ 101.11.6](#101116-csrf-origin-check)) |
+
+## 101.11 Podrobnosti a pravidla
+
+### 101.11.1 Hesla
 
 | Vrstva | Detail |
 |---|---|
 | Algoritmus | bcrypt cost 12 |
 | Pepper | Sůl z `cfg.php → app.pepper` (32B base64), neukládá se v DB |
 | Min. délka | 12 znaků |
-| Max. délka | Bez limitu — passphrase je doporučená (20+ znaků) |
+| Max. délka | Bez limitu - passphrase je doporučená (20+ znaků) |
 | Kontrola síly | Indikátor v UI (slabé / střední / silné) |
 | Reset hesla | Odkaz na 1 hodinu, e-mailem |
 
-> 💡 **Passphrase je bezpečnější než krátké složité heslo.** „korelace medvědí
+> [!TIP]
+> **Passphrase je bezpečnější než krátké složité heslo.** „korelace medvědí
 > dýně přístav 2026" má 49 znaků a je odolnější vůči brute-force než „Hu1@n!22".
 
-## 101.2 Vícefaktorové ověření
+### 101.11.2 Vícefaktorové ověření
 
 MyÚčto podporuje dva silné faktory:
 
-- **passkey (WebAuthn)** — kryptografický přístupový klíč chráněný zařízením,
-- **TOTP** — šestimístný časový kód z autentikátoru.
+- **passkey (WebAuthn)** - kryptografický přístupový klíč chráněný zařízením,
+- **TOTP** - šestimístný časový kód z autentikátoru.
 
 E-mailové OTP je kompatibilní druhý krok pro účet bez silného faktoru, ale
 nesplňuje povinnou silnou MFA politiku. Důvěryhodné zařízení se týká pouze
 e-mailového OTP.
 
-### 101.2.1 Passkeys
+#### 101.11.2.1 Passkeys
 
-Passkey zaregistruješ v **Profil → Přístupové klíče**. Každý klíč má
+Passkey zaregistrujete v `Profil → Přístupové klíče`. Každý klíč má
 vlastní název, datum vytvoření a posledního použití. Lze jej přejmenovat nebo
 odvolat. Aplikace podporuje více klíčů; doporučené jsou dvě passkeys nebo jedna
 passkey spolu s TOTP.
@@ -60,10 +227,10 @@ přesný HTTPS origin, například `https://faktury.example.cz`. Klíč je sváz
 s hostname; po změně domény jej na nové doméně nelze použít. Pro lokální vývoj
 je podporované `http://localhost`, nikoli běžný HTTP přístup přes LAN IP.
 
-#### Provozní diagnostika canonical `app.url`
+##### Provozní diagnostika canonical `app.url`
 
 `app.url` je současně canonical origin pro běžné routování, odkazy a WebAuthn.
-Pro pravidelný monitoring vždy volej health přes **přesný origin z `app.url`**,
+Pro pravidelný monitoring vždy volejte health přes **přesný origin z `app.url`**,
 ne přes náhodnou IP nebo alternativní `Host` hlavičku. Například pro
 `app.url = https://faktury.example.cz`:
 
@@ -78,10 +245,10 @@ cestu, query nebo fragment:
 
 | `state` / `reason_code` | Routování a náprava |
 |---|---|
-| `missing` / `app_url_missing` | Klíč chybí, je přesně prázdný nebo obsahuje jen whitespace. Chybějící a přesně prázdná hodnota zachovává legacy fallback na validní request hostname; whitespace tento fallback nemá. Po setupu nastav explicitní HTTP(S) origin. |
-| `invalid` / `app_url_invalid_origin` | Neprázdná hodnota není samostatný HTTP(S) origin. Pokud z ní legacy resolver ještě získá platný hostname, uzná nejvýše request s přesně stejným hostname, nikdy libovolný host; nejde však o podporovaný canonical origin a musí se opravit. Odstraň userinfo, cestu, query či fragment nebo oprav schéma, hostname a port. |
-| `routing_only` / `app_url_webauthn_incompatible` | Běžné rozhraní funguje, včetně záměrného HTTP nebo LAN-IP nasazení, ale passkeys nejsou dostupné. Pro WebAuthn použij HTTPS DNS hostname. |
-| `hostname_conflict` / `app_url_hostname_conflict` | Hostname z `app.url` je současně uložený jako vlastní doména firmy. Běžné cesty aplikace jsou fail-closed; přesný read-only health zůstane dostupný. Obnov původní canonical adresu, vlastní doménu deaktivuj a smaž, nebo nastav jiný canonical hostname. |
+| `missing` / `app_url_missing` | Klíč chybí, je přesně prázdný nebo obsahuje jen whitespace. Chybějící a přesně prázdná hodnota zachovává legacy fallback na validní request hostname; whitespace tento fallback nemá. Po setupu nastavte explicitní HTTP(S) origin. |
+| `invalid` / `app_url_invalid_origin` | Neprázdná hodnota není samostatný HTTP(S) origin. Pokud z ní legacy resolver ještě získá platný hostname, uzná nejvýše request s přesně stejným hostname, nikdy libovolný host; nejde však o podporovaný canonical origin a musí se opravit. Odstraňte userinfo, cestu, query či fragment nebo opravte schéma, hostname a port. |
+| `routing_only` / `app_url_webauthn_incompatible` | Běžné rozhraní funguje, včetně záměrného HTTP nebo LAN-IP nasazení, ale passkeys nejsou dostupné. Pro WebAuthn použijte HTTPS DNS hostname. |
+| `hostname_conflict` / `app_url_hostname_conflict` | Hostname z `app.url` je současně uložený jako vlastní doména firmy. Běžné cesty aplikace jsou fail-closed; přesný read-only health zůstane dostupný. Obnovte původní canonical adresu, vlastní doménu deaktivujte a smažte, nebo nastavte jiný canonical hostname. |
 | `webauthn_ready` / `app_url_valid` | Origin vyhovuje routování i WebAuthn. Vedle HTTPS DNS originu je povolená jediná HTTP výjimka: `http://localhost`. |
 
 Při whitespace-only nebo jiné neprázdné hodnotě nepoužitelné pro routování
@@ -89,13 +256,13 @@ propustí tenant host gate přes jiný hostname jen přesné `GET` a `HEAD`
 `/api/v1/health` (interně `/api/health`). POST, jiný endpoint, přihlášení ani
 ostatní aplikační cesty výjimku nedostanou. Toto je pouze recovery cesta; po
 opravě se health znovu monitoruje přes nakonfigurovaný canonical hostname. Pokud
-cizí hostname odmítne už reverse proxy, spusť recovery dotaz ze serveru nebo
+cizí hostname odmítne už reverse proxy, spusťte recovery dotaz ze serveru nebo
 kontejneru přes hostname, který proxy přijímá. Health neobchází zapnutý IP
-allowlist. Během nedokončeného first-run setupu používej `GET`; setup allowlist
+allowlist. Během nedokončeného first-run setupu používejte `GET`; setup allowlist
 metodu `HEAD` nepovoluje.
 
 Stejná přesná health výjimka platí při kolizi canonical hostname s uloženou
-vlastní doménou. Na rozdíl od syntakticky neplatného `app.url` ji volej přes
+vlastní doménou. Na rozdíl od syntakticky neplatného `app.url` ji volejte přes
 hostname z `app.url`; všechny ostatní cesty na něm zůstanou odmítnuté.
 
 First-run setup doplní z otevřeného originu chybějící, prázdnou či
@@ -108,7 +275,7 @@ Runtime zapíše pro stavy s `routing_compatible: false` serverový warning
 `configuration.app_url_unusable`. Kontext obsahuje jen stabilní `state` a
 `reason_code`; původní ani odvozená hodnota konfigurace se neloguje. Umístění
 logu určuje `logging.path`. Podrobný recovery postup je v
-[§ 999 Řešení problémů](999_Reseni_problemu.md#99918-diagnostika-appurl).
+[§ 999.5.1.8](999_Reseni_problemu.md#999518-diagnostika-appurl).
 
 Vlastní domény klientských portálů se nestávají dalším WebAuthn RP ID. Browser
 se z nich přesměruje na přesný canonical origin z `app.url`, kde proběhne
@@ -136,29 +303,29 @@ je až po přidání prvního klíče. Další klíče už vyžadují aktuálně
 
 TOTP = time-based one-time password (RFC 6238).
 
-### 101.2.2 Aktivace TOTP
+#### 101.11.2.2 Aktivace TOTP
 
-**Profil → 2FA / TOTP → Aktivovat**.
+`Profil → 2FA / TOTP`, tlačítko **Nastavit TOTP**.
 
 ![Aktivace 2FA](img/16_2fa_setup.webp)
 
-1. Nejdřív znovu prokážeš, že jsi to ty: bez passkey **aktuálním heslem**,
+1. Nejdřív znovu prokážete, že jste to vy: bez passkey **aktuálním heslem**,
    s aktivní passkey **ověřením passkey** (stejně jako při registraci dalšího
-   klíče). Samotná přihlášená session na přidání druhého faktoru nestačí —
+   klíče). Samotná přihlášená session na přidání druhého faktoru nestačí -
    jinak by si ho na unesené session mohl založit útočník. Špatně zadaná
    hesla se tu počítají do stejné ochrany proti hádání jako při přihlášení,
    takže po opakovaných chybách se účet na 15 minut zamkne i pro login.
 2. Aplikace ukáže **QR kód** + textový **secret key**.
-3. V mobilu otevři **autentikátor** (Google Authenticator, Authy, Microsoft
+3. V mobilu otevřete **autentikátor** (Google Authenticator, Authy, Microsoft
    Authenticator, 1Password, Bitwarden) → Přidat účet → Sken QR kódu.
 4. Aplikace začne generovat 6-cifrené kódy každých 30 sekund.
-5. Zadej aktuální kód do MyÚčto → **Potvrdit aktivaci**.
+5. Zadejte aktuální kód do MyÚčta a klikněte na **Aktivovat TOTP**.
 
 Na vlastní doméně klientského portálu se nastavení TOTP otevře na hlavní
 adrese aplikace, kde lze bezpečně ověřit také existující passkey.
 
 Pokud průvodce nabídne nebo vyžádá první TOTP bezprostředně po přihlášení
-heslem nebo po prvním nastavení hesla z uvítacího odkazu, heslo znovu neopisuješ.
+heslem nebo po prvním nastavení hesla z uvítacího odkazu, heslo znovu neopisujete.
 Totéž platí při prvotním nastavení vlastní instalace. Pokračování je jednorázové
 a platí nejvýše pět minut. Po obnovení stránky, opuštění průvodce nebo změně
 hesla je potřeba nové ověření. Existující passkey tato možnost nenahrazuje.
@@ -168,20 +335,21 @@ výhradně k potvrzení zřízení TOTP. Nepovoluje to přihlášení ani jiné 
 operace metodou, kterou správce zakázal.
 
 Změna nebo reset hesla, včetně změny správcem, ruší rozpracovanou aktivaci
-TOTP. Začni znovu a načti nový QR kód. Již aktivní TOTP se změnou hesla neruší.
+TOTP. Začněte znovu a načtěte nový QR kód. Již aktivní TOTP se změnou hesla neruší.
 
-> 💡 Při ztrátě autentikátoru použij jinou passkey nebo **záložní kód**
-> (viz [§ 101.2.4](#10124-obnova-pristupu)). Až když nemáš nic z toho, zbývá CLI
+> [!TIP]
+> Při ztrátě autentikátoru použijte jinou passkey nebo **záložní kód**
+> (viz [§ 101.11.2.4](#1011124-obnova-pristupu)). Až když nemáte nic z toho, zbývá CLI
 > rescue `php api/bin/reset-mfa.php <email>`.
 
-### 101.2.3 Přihlášení s passkey a MFA
+#### 101.11.2.3 Přihlášení s passkey a MFA
 
 Po zadání e-mailu a hesla nabídne aplikace passkey, pokud ji účet má. Je-li
 aktivní také TOTP, lze explicitně přepnout na šestimístný kód z autentikátoru.
 
 TOTP kód lze použít jen jednou pro přihlášení nebo potvrzení citlivé operace.
-Pokud hned po přihlášení vytváříš API token nebo přidáváš další passkey,
-počkej na nový kód v autentikátoru.
+Pokud hned po přihlášení vytváříte API token nebo přidáváte další passkey,
+počkejte na nový kód v autentikátoru.
 
 ![2FA výzva](img/04_2fa.webp)
 
@@ -211,53 +379,53 @@ silně ověřenou session, bez dalšího TOTP.
 
 Passwordless režim neodstraňuje heslo ani standardní formulář. Ten zůstává
 fallbackem pro jiné zařízení a cestou k TOTP. Pokud passkey není dostupná,
-zruš systémový dialog a přihlas se e-mailem a heslem.
+zrušte systémový dialog a přihlaste se e-mailem a heslem.
 
 Účet s passkey nedostane automatický fallback na e-mailový kód. Pokud passkey
-na aktuálním zařízení není dostupná, použij jinou passkey, TOTP nebo rescue.
+na aktuálním zařízení není dostupná, použijte jinou passkey, TOTP nebo rescue.
 
-### 101.2.4 Obnova přístupu
+#### 101.11.2.4 Obnova přístupu
 
 Kde passkey fyzicky leží, rozhoduje o tom, co se stane při ztrátě zařízení:
 
-- **V zařízení** (Windows Hello, Touch ID, bezpečnostní klíč) — klíč je vázaný
+- **V zařízení** (Windows Hello, Touch ID, bezpečnostní klíč) - klíč je vázaný
   na hardware. S koncem zařízení končí i on.
 - **Ve správci hesel nebo v cloudu účtu** (Keeper, 1Password, iCloud Keychain,
-  Google Password Manager) — klíč se synchronizuje, takže přežije výměnu
-  počítače a přihlásíš se jím i jinde.
+  Google Password Manager) - klíč se synchronizuje, takže přežije výměnu
+  počítače a přihlásíte se jím i jinde.
 
 Kam se klíč uloží, vybírá prohlížeč při registraci; aplikace to neřídí a ani to
-nezjistí zpětně. Máš-li jediný klíč a ten je vázaný na zařízení, drž si jako
+nezjistí zpětně. Máte-li jediný klíč a ten je vázaný na zařízení, mějte jako
 zálohu buď druhý klíč, nebo aktivní TOTP.
 
-#### Záložní jednorázové kódy
+##### Záložní jednorázové kódy
 
 **Profil → Přístupové klíče → Záložní kódy.** Sada deseti kódů ve tvaru
 `ABCDE-FGHJK`; každý funguje **právě jednou**. Zadávají se na přihlašovací
-stránce místo passkey i TOTP (odkaz „Nemám klíč ani autentikátor") a potvrdí se
+stránce místo passkey i TOTP (odkaz „Nemám klíč ani autentikátor“) a potvrdí se
 jimi i odebrání ztraceného klíče.
 
-Server ukládá jen SHA-256 kódu, takže **sadu jde zobrazit jedinkrát** — při
-vygenerování. Ulož ji mimo počítač, ze kterého se přihlašuješ: tisk, trezor,
+Server ukládá jen SHA-256 kódu, takže **sadu jde zobrazit jedinkrát** - při
+vygenerování. Uložte ji mimo počítač, ze kterého se přihlašujete: tisk, trezor,
 správce hesel. Vygenerování nové sady okamžitě ruší tu předchozí.
 
 Co kód schválně **ne**umí, aby zůstal záchranou a nestal se trvalým faktorem:
 
-- nevydá další sadu záložních kódů (nejdřív obnov reálný faktor),
+- nevydá další sadu záložních kódů (nejdřív obnovte reálný faktor),
 - nepotvrdí vytvoření API tokenu ani práci s podpisovým certifikátem pro EPO,
-- nepočítá se do `allowed_mfa_methods`; naopak jím projdeš i v konfiguraci, která
-  by tě jinak zamkla ven (`allowed_mfa_methods = ['passkey']` + ztracený klíč).
+- nepočítá se do `allowed_mfa_methods`; naopak jím projdete i v konfiguraci, která
+  by vás jinak zamkla ven (`allowed_mfa_methods = ['passkey']` + ztracený klíč).
 
 Použití kódu se zapisuje do activity logu (`auth.recovery_code_login`,
 `auth.recovery_code_used`) i s IP a počtem zbývajících kódů.
 
-#### Rescue na serveru
+##### Rescue na serveru
 
-Nejprve použij jinou zaregistrovanou passkey, TOTP nebo záložní kód. Pokud není
+Nejprve použijte jinou zaregistrovanou passkey, TOTP nebo záložní kód. Pokud není
 dostupné nic z toho, správce může na serveru spustit:
 
 ```bash
-php api/bin/reset-mfa.php tvuj@email.cz
+php api/bin/reset-mfa.php vas@email.cz
 ```
 
 Skript vypne TOTP, odvolá všechny passkeys, zruší důvěryhodná zařízení,
@@ -265,18 +433,18 @@ Skript vypne TOTP, odvolá všechny passkeys, zruší důvěryhodná zařízení
 všechny session uživatele. Stejný skript lze spustit také přes alias
 `reset-2fa.php`.
 
-#### Docker
+##### Docker
 
-V kontejneru je aplikace v `/var/www/html` a běží pod `www-data`. Spouštěj skript
-pod tímto uživatelem — jako `root` sice projde taky, ale případné soubory, které
+V kontejneru je aplikace v `/var/www/html` a běží pod `www-data`. Spouštějte skript
+pod tímto uživatelem - jako `root` sice projde taky, ale případné soubory, které
 by po sobě zanechal, by pak měly špatného vlastníka:
 
 ```bash
 # docker compose (název služby `app` dle docker-compose.yml)
-docker compose exec -u www-data app php api/bin/reset-mfa.php tvuj@email.cz
+docker compose exec -u www-data app php api/bin/reset-mfa.php vas@email.cz
 
 # samostatný kontejner
-docker exec -u www-data -w /var/www/html <container> php api/bin/reset-mfa.php tvuj@email.cz
+docker exec -u www-data -w /var/www/html <container> php api/bin/reset-mfa.php vas@email.cz
 ```
 
 Ověření, že reset opravdu proběhl (řádek `auth.mfa_reset` nese i jméno účtu, pod
@@ -294,15 +462,16 @@ docker compose exec -u www-data app \
     }'
 ```
 
-> ⚠️ Rescue používej jen z důvěryhodného shellu serveru. Přímý SQL zásah není
+> [!WARNING]
+> Rescue používejte jen z důvěryhodného shellu serveru. Přímý SQL zásah není
 > ekvivalentní: snadno ponechá aktivní session nebo rozpracované ověřovací flow.
-> Reset je zapsaný do auditní stopy a zapečetěný v hash-chainu (§ 33a) — kdo ho
-> spustil a odkud, tedy zpětně dohledáš.
+> Reset je zapsaný do auditní stopy a zapečetěný v hash-chainu (§ 33a) - kdo ho
+> spustil a odkud, tedy zpětně dohledáte.
 
-### 101.2.5 Vynucení silného MFA
+#### 101.11.2.5 Vynucení silného MFA
 
-Pokud chceš, aby **každý** uživatel měl passkey nebo TOTP,
-nastav v `cfg.php` (nebo `cfg.local.php`):
+Pokud chcete, aby **každý** uživatel měl passkey nebo TOTP,
+nastavte v `cfg.php` (nebo `cfg.local.php`):
 
 ```php
 'auth' => [
@@ -331,7 +500,7 @@ Chování:
 - Po dokončení se setup session zneplatní a vydá se nové session ID i CSRF.
 
 Starší `auth.require_totp = true` a `MYINVOICE_AUTH_REQUIRE_TOTP=true` zůstávají
-podporované jako TOTP-only politika. Pro nové instalace používej obecné MFA
+podporované jako TOTP-only politika. Pro nové instalace používejte obecné MFA
 nastavení.
 
 `allowed_mfa_methods` rozhoduje **co povinné MFA splní**, ne na co se přihlášení
@@ -339,11 +508,11 @@ zeptá. Zúžení seznamu (typicky na `['passkey']` při přechodu na passkey-on
 proto nikdy nezruší faktor, který uživatel reálně má:
 
 - Kdo má zapnuté TOTP, zadává ho i dál. Když `totp` v seznamu není, výsledná
-  session je jen `basic` — při `require_mfa = true` skončí uživatel na
+  session je jen `basic` - při `require_mfa = true` skončí uživatel na
   `/setup-mfa` a zaregistruje povolenou metodu.
 - Kdo má passkey a WebAuthn je konfiguračně nedostupný (rozbité `app.url`),
   se přihlásí přes TOTP nebo e-mailové OTP, pokud je má. Bez jakéhokoliv jiného
-  druhého faktoru vrací přihlášení `503 passkeys_unavailable` — nikdy nepropadne
+  druhého faktoru vrací přihlášení `503 passkeys_unavailable` - nikdy nepropadne
   na samotné heslo. Řešením je opravit `app.url`, jinak `reset-mfa.php`.
 - Totéž platí pro step-up při vydání API tokenu: zaregistrované TOTP se vyžaduje
   bez ohledu na `allowed_mfa_methods`.
@@ -352,14 +521,15 @@ Neznámá hodnota v seznamu (například `email_otp`, které sem nepatří) star
 aplikace neshodí: použije se výchozí `['passkey', 'totp']` a přihlášený správce
 uvidí na health endpointu warning `mfa_methods_configuration`.
 
-> ⚠️ Povolení TOTP vyžaduje validní `app.secret_encryption_key` (32B base64).
+> [!WARNING]
+> Povolení TOTP vyžaduje validní `app.secret_encryption_key` (32B base64).
 > Health endpoint na chybnou konfiguraci upozorní; viz
 > [§ 999 Řešení problémů](999_Reseni_problemu.md).
 
-### 101.2.6 E-mailové ověření pro účet bez silného faktoru
+#### 101.11.2.6 E-mailové ověření pro účet bez silného faktoru
 
-Pro uživatele, kteří nechtějí (nebo neumí) authenticator aplikaci — typicky
-externí účetní — lze zapnout **e-mailové OTP** jako druhý faktor. Kdo nemá
+Pro uživatele, kteří nechtějí (nebo neumí) authenticator aplikaci - typicky
+externí účetní - lze zapnout **e-mailové OTP** jako druhý faktor. Kdo nemá
 aktivní passkey ani TOTP, dostane po zadání hesla 6místný kód na e-mail a musí
 ho opsat.
 
@@ -382,8 +552,8 @@ Chování:
 
 - **Priorita silného faktoru.** Má-li uživatel použitelnou passkey nebo zapnuté
   TOTP, e-mailové OTP se neuplatní. E-mailový kód se použije jen tam, kde silný
-  faktor chybí — nebo jako záchranná cesta pro účet s passkey, jejíž ověření
-  instalace dočasně neumí (viz § 39.2.5).
+  faktor chybí - nebo jako záchranná cesta pro účet s passkey, jejíž ověření
+  instalace dočasně neumí (viz § 101.11.2.1).
 - **Po heslu** se zobrazí pole pro kód z e-mailu + tlačítko *„Kód nedorazil?
   Odeslat znovu"* s odpočtem (cooldown). Kód je jednorázový a hashovaný v DB
   (sloupec `login_otps.code_hash`, nikdy plaintext).
@@ -393,12 +563,13 @@ Chování:
 - **Brute-force.** Šestimístný kód je chráněn per-user lockoutem (10 selhání /
   10 min) stejně jako TOTP.
 
-> ⚠️ Vyžaduje funkční **SMTP**. Když e-maily nechodí, uživatelé bez TOTP se
-> nepřihlásí — buď oprav SMTP, nebo nastav `enabled => false`. Nouzově lze
+> [!WARNING]
+> Vyžaduje funkční **SMTP**. Když e-maily nechodí, uživatelé bez TOTP se
+> nepřihlásí - buď opravte SMTP, nebo nastavte `enabled => false`. Nouzově lze
 > uživateli zrušit i důvěryhodná zařízení a čekající kódy:
 > `php api/bin/reset-mfa.php <email>`.
 
-### 101.2.7 Serverový zámek session
+#### 101.11.2.7 Serverový zámek session
 
 Automatický zámek browserové a PWA session je ve výchozím stavu vypnutý, aby se
 po aktualizaci nezměnilo chování existujících instalací. Správce nastavuje
@@ -434,12 +605,13 @@ Stejnou podmínku má i **osobní interval**: kladnou hodnotu server uloží jen
 s použitelnou passkey, jinak vrátí `400 validation_failed`. Volba *Použít
 nastavení správce* zůstává dostupná vždy.
 
-> ⚠️ Správcovská hodnota `session.lock_after_minutes > 0` platí pro **všechny**
-> účty, i pro ty bez passkey — a ty pak zamčenou session jen odhlásí (rozepsaný
+> [!WARNING]
+> Správcovská hodnota `session.lock_after_minutes > 0` platí pro **všechny**
+> účty, i pro ty bez passkey - a ty pak zamčenou session jen odhlásí (rozepsaný
 > formulář se ztratí). Typicky se to týká instalací, kde uživatelé jedou na
 > e-mailovém OTP. Aplikace na to upozorní health warningem
-> `session_lock_without_unlock_method`; buď uživatelům registruj passkey, nebo
-> nech `session.lock_after_minutes = 0` a osobní volbu na nich.
+> `session_lock_without_unlock_method`; buď uživatelům zaregistrujte passkey, nebo
+> nechte `session.lock_after_minutes = 0` a osobní volbu na nich.
 
 Aktivitu posouvají pouze skutečné vstupy do viditelné soukromé stránky, například
 kliknutí, dotyk nebo klávesa. Polling, běžné API requesty, focus okna ani service
@@ -449,7 +621,8 @@ overlay.
 
 Odemčení vyžaduje passkey a rotuje session ID i CSRF token, přičemž zachová
 původní absolutní expiraci. TOTP existující zamčenou session přímo neodemkne;
-volba **Přihlásit se znovu** provede bezpečný logout a celý login.
+tlačítko **Odhlásit** na zamykací obrazovce provede bezpečný logout a potom
+stačí celé přihlášení.
 
 Zámek omezuje náhodný přístup k odloženému odemčenému zařízení. Nechrání data,
 která už přečetl malware nebo XSS během aktivní session. Webová PWA negarantuje
@@ -458,7 +631,7 @@ zachovaný jen dokud prohlížeč stránku drží v paměti; po ukončení strá
 Androidem se neuložená data ztratí. Offline odemčení není možné, protože server
 musí vydat a ověřit jednorázovou challenge.
 
-### 101.2.8 Nasazení změny autentizačního modelu
+#### 101.11.2.8 Nasazení změny autentizačního modelu
 
 Aktivní session vytvořené před doplněním autentizačního kontextu se po migraci
 označí jako `legacy`; migrace z pouhé existence TOTP neodvozuje, že konkrétní
@@ -474,7 +647,7 @@ nesmí obnovit odvolanou, nahrazenou nebo zamčenou session.
 
 Z toho plyne jedna změna configu: **`session.driver` už se nepoužívá**. Starší
 `cfg.php` ho může dál obsahovat (`'auto'` / `'redis'` / `'db'`), hodnota se ale
-ignoruje — session vždy čte a zapisuje MariaDB. Klíč lze bez náhrady smazat.
+ignoruje - session vždy čte a zapisuje MariaDB. Klíč lze bez náhrady smazat.
 
 Migrace `0145` přestavuje tabulku `sessions` (dvanáct nových sloupců, backfill
 a tři indexy), takže po dobu jejího běhu je tabulka zamčená a přihlašování
@@ -483,7 +656,7 @@ instalací s jednotkami až stovkami řádků je to pod sekundu. Před upgradem 
 vyplatí spustit `php api/bin/cron-cleanup.php`, ať se nepřestavují dávno
 expirované řádky.
 
-## 101.3 Brute-force ochrana
+### 101.11.3 Brute-force ochrana
 
 | Pokusy během | Akce |
 |---|---|
@@ -493,9 +666,9 @@ expirované řádky.
 
 Implementace: **Redis** pokud běží, jinak **MariaDB MEMORY engine** fallback.
 
-## 101.4 IP allowlist (volitelné)
+### 101.11.4 IP allowlist (volitelné)
 
-V `cfg.php → ip_allowlist.allow` můžeš omezit přístup jen na vybrané IP /
+V `cfg.php → ip_allowlist.allow` můžete omezit přístup jen na vybrané IP /
 CIDR rozsahy.
 
 ```php
@@ -504,7 +677,7 @@ CIDR rozsahy.
     'mode' => 'block',           // 'block' = ne-allowlisted IP dostane 403
     'allow' => [
         '127.0.0.1',
-        '203.0.113.42',          // tvoje kancelářská WAN (IPv4)
+        '203.0.113.42',          // vaše kancelářská WAN (IPv4)
         '2001:db8:1234::/48',    // IPv6 prefix
     ],
 ],
@@ -512,51 +685,53 @@ CIDR rozsahy.
 
 Doporučení v produkci:
 
-- Tvá kancelářská IP
-- VPN endpoint (pokud používáš)
+- Vaše kancelářská IP
+- VPN endpoint (pokud ho používáte)
 - Rezervní mobilní hotspot pro nouzový přístup
 
-> 🛈 IP allowlist je v `cfg.php` (file-based config) → změna vyžaduje SSH /
-> deploy. Není v UI **schválně** — v případě omylu by ses zablokoval
-> a nemohl si ho přes UI sundat.
+> [!TIP]
+> IP allowlist je v `cfg.php` (file-based config) → změna vyžaduje SSH /
+> deploy. Není v UI **schválně** - v případě omylu byste se zablokovali
+> a nemohli ho přes UI sundat.
 
-### 101.4.1 Za reverse proxy: `trusted_proxies` (důležité)
+#### 101.11.4.1 Za reverse proxy: `trusted_proxies` (důležité)
 
-Pokud aplikace běží **za reverse proxy** (doporučené produkční nasazení — viz
-kap. 2), vidí všechny požadavky přicházet z IP proxy (např. brána Dockeru
+Pokud aplikace běží **za reverse proxy** (doporučené produkční nasazení - viz
+[Instalace Docker](03_Instalace_Docker.md)), vidí všechny požadavky přicházet z IP proxy (např. brána Dockeru
 `172.x.0.1`), ne od reálného klienta. Bez konfigurace pak:
 
-- **IP allowlist** filtruje podle IP proxy — buď zablokuje všechny, nebo (když
-  přidáš proxy do `allow`) pustí všechny → ochrana je neúčinná.
-- **Brute-force lockout** (kap. 20.3) je fakticky **globální** — všechny pokusy
+- **IP allowlist** filtruje podle IP proxy - buď zablokuje všechny, nebo (když
+  přidáte proxy do `allow`) pustí všechny → ochrana je neúčinná.
+- **Brute-force lockout** (viz § 101.11.3) je fakticky **globální** - všechny pokusy
   vypadají ze stejné IP.
 - **Audit log** loguje IP proxy místo reálného klienta (ztráta forenzní hodnoty).
 
-Proto za reverse proxy uveď proxy do `trusted_proxies` — aplikace pak vezme
+Proto za reverse proxy uveďte proxy do `trusted_proxies` - aplikace pak vezme
 skutečnou klientskou IP z hlavičky `X-Forwarded-For`:
 
 ```php
 'ip_allowlist' => [
     'trusted_proxies' => [
         '172.16.0.0/12',         // Docker bridge sítě
-        // '10.0.0.0/8',         // nebo konkrétní IP/rozsah tvé proxy
+        // '10.0.0.0/8',         // nebo konkrétní IP/rozsah vaší proxy
     ],
     'header' => 'X-Forwarded-For', // výchozí; odkud číst reálnou IP (jen za trusted proxy)
 ],
 ```
 
-> ⚠️ Do `trusted_proxies` patří **jen** IP/rozsahy proxy, kterým věříš —
+> [!WARNING]
+> Do `trusted_proxies` patří **jen** IP/rozsahy proxy, kterým věříte -
 > klient za nedůvěryhodnou proxy by jinak mohl `X-Forwarded-For` podvrhnout.
 > Aplikace hlavičku respektuje pouze tehdy, když `REMOTE_ADDR` odpovídá
 > `trusted_proxies`.
 
-### 101.4.2 Edge proxy MUSÍ `X-Forwarded-For` přepisovat, ne appendovat
+#### 101.11.4.2 Edge proxy MUSÍ `X-Forwarded-For` přepisovat, ne appendovat
 
 Tohle je **nejčastější a nejzávažnější chyba** v nasazení za proxy. `X-Forwarded-For`
-je obyčejná klientská hlavička — kdokoli ji může poslat s libovolným obsahem:
+je obyčejná klientská hlavička - kdokoli ji může poslat s libovolným obsahem:
 
 ```
-curl -H 'X-Forwarded-For: 203.0.113.42' https://tvuj-server/api/...
+curl -H 'X-Forwarded-For: 203.0.113.42' https://vas-server/api/...
 ```
 
 Aplikace chain prochází **zprava** a odloupává známé trusted hopy, takže podvržené
@@ -568,28 +743,29 @@ v chainu obsah od útočníka a ten si může zvolit, jakou IP aplikace uvidí �
 Edge proxy = ta, která jako **první** přijímá provoz z internetu. Musí být
 nastavená takto:
 
-| Proxy | Správně (přepisuje) | ❌ Špatně (appenduje) |
+| Proxy | Správně (přepisuje) | Špatně (appenduje) |
 |---|---|---|
 | nginx | `proxy_set_header X-Forwarded-For $remote_addr;` | `proxy_add_x_forwarded_for` |
 | Apache `mod_proxy` | `RequestHeader set X-Forwarded-For "%{REMOTE_ADDR}s"` (před `ProxyPass`) | výchozí chování `mod_proxy_http` |
 | HAProxy | `option forwardfor header X-Forwarded-For if-none` **+** `http-request del-header X-Forwarded-For` před ním | samotné `option forwardfor` |
 | Traefik | `forwardedHeaders.trustedIPs` (mimo seznam se hlavička zahazuje) | `forwardedHeaders.insecure = true` |
-| Cloudflare | přepisuje automaticky (nebo použij `CF-Connecting-IP`) | — |
+| Cloudflare | přepisuje automaticky (nebo použijte `CF-Connecting-IP`) | - |
 
-> ⚠️ **Řetězíš-li víc proxy**, tohle pravidlo platí jen pro tu **nejkrajnější**.
-> Vnitřní hopy smí appendovat — musí ale být všechny uvedené v `trusted_proxies`,
+> [!WARNING]
+> **Řetězíte-li víc proxy**, tohle pravidlo platí jen pro tu **nejkrajnější**.
+> Vnitřní hopy smí appendovat - musí ale být všechny uvedené v `trusted_proxies`,
 > aby je aplikace uměla odloupnout.
 
 **Ověření** (z internetu, ne z LAN):
 
 ```bash
-curl -H 'X-Forwarded-For: 1.2.3.4' https://tvuj-server/api/health
+curl -H 'X-Forwarded-For: 1.2.3.4' https://vas-server/api/health
 ```
 
-V audit logu (**Systém → Audit log**) musí být tvoje **reálná** IP, ne `1.2.3.4`.
-Pokud vidíš `1.2.3.4`, edge proxy hlavičku nepřepisuje a máš otevřený bypass.
+V audit logu (`Systém → Log`) musí být vaše **reálná** IP, ne `1.2.3.4`.
+Pokud vidíte `1.2.3.4`, edge proxy hlavičku nepřepisuje a máte otevřený bypass.
 
-#### Dodávaný Docker image
+##### Dodávaný Docker image
 
 Image tenhle problém řeší i **bez** `trusted_proxies`: nginx uvnitř kontejneru
 předává PHP skutečnou IP TCP peera v parametru `MYUCTO_CLIENT_IP`
@@ -598,18 +774,18 @@ mapují jako `HTTP_*`, takže tenhle parametr **nelze zvenčí podvrhnout** a
 aplikace ho preferuje před `X-Forwarded-For`.
 
 Když je ale před kontejnerem ještě další proxy, je „TCP peer" právě ona. Pak v
-`docker/nginx.conf` odkomentuj blok `set_real_ip_from` a vyjmenuj rozsahy té
-proxy — teprve tím se `MYUCTO_CLIENT_IP` přepočítá na reálného klienta:
+`docker/nginx.conf` odkomentujte blok `set_real_ip_from` a vyjmenujte rozsahy té
+proxy - teprve tím se `MYUCTO_CLIENT_IP` přepočítá na reálného klienta:
 
 ```nginx
-set_real_ip_from  173.245.48.0/20;   # rozsahy tvé edge proxy
+set_real_ip_from  173.245.48.0/20;   # rozsahy vaší edge proxy
 real_ip_header    X-Forwarded-For;
 real_ip_recursive on;
 ```
 
-## 101.5 RBAC (role-based access)
+### 101.11.5 RBAC (role-based access)
 
-Role se spravují v **Systém → Role**. Každý modul a významná akce mají jednu
+Role se spravují v `Systém → Role a oprávnění`. Každý modul a významná akce mají jednu
 ze tří úrovní: **neviditelné**, **pouze čtení** nebo **zápis**. Zápis zahrnuje
 čtení; chybějící nebo neznámé oprávnění znamená zákaz.
 
@@ -624,7 +800,7 @@ Každý non-superadmin potřebuje explicitní membership firmy. U jedné firmy m
 mít kompatibilní přepis role; role se nesčítají. Neaktivní role, neplatný přepis
 nebo prázdný membership jsou vždy fail-closed.
 
-### 101.5.1 Jak je to vynucené
+#### 101.11.5.1 Jak je to vynucené
 
 1. **Backend** mapuje každou neveřejnou routu na konkrétní permission klíč a
    minimální úroveň. Nezmapovaná routa je odmítnuta; stavové, tenant a vlastnické
@@ -635,7 +811,7 @@ nebo prázdný membership jsou vždy fail-closed.
 3. **UI** používá stejnou efektivní matici pro menu, přímé URL a skrytí akcí.
    Po přepnutí firmy stará práva zahodí a před vykreslením načte nová.
 
-## 101.6 CSRF + Origin check
+### 101.11.6 CSRF + Origin check
 
 Každý mutating request (POST / PUT / PATCH / DELETE) musí mít:
 
@@ -649,7 +825,7 @@ podvržený `Host`, neaktivní alias ani origin jiné firmy neprojde.
 Bez nich → 403 `csrf_failed` / `origin_mismatch`. UI to obsluhuje
 automaticky (token v Pinia store, header v axios interceptoru).
 
-## 101.7 Activity log
+### 101.11.7 Activity log
 
 Každá mutace (vytvoření / změna / vystavení / smazání) se loguje. Záznamy
 obsahují:
@@ -658,50 +834,51 @@ obsahují:
   `auth.login_failed`, `bank.statement_imported`, `currency.updated`, …)
 - Uživatel (NULL pro neautentizované akce jako neúspěšné login)
 - Entita (typ + ID)
-- IP adresa (binární `VARBINARY(16)` — IPv4 i IPv6)
+- IP adresa (binární `VARBINARY(16)` - IPv4 i IPv6)
 - User-Agent
-- Payload — JSON s relevantními detaily (např. fields=`['email', 'name']`
+- Payload - JSON s relevantními detaily (např. fields=`['email', 'name']`
   u `client.updated`)
 - Datum + čas
 
 Viz [96. Nastavení](96_Nastaveni.md) pro UI.
 
-### 101.7.1 Co log NEUKLÁDÁ
+#### 101.11.7.1 Co log NEUKLÁDÁ
 
-- **Hesla** — ani staré, ani nové
+- **Hesla** - ani staré, ani nové
 - **PII klientů** mimo to, co bylo změněno (jen fields seznam, ne hodnoty)
-- **Bankovní transakce** — log obsahuje jen ID importovaného výpisu
+- **Bankovní transakce** - log obsahuje jen ID importovaného výpisu
 
-### 101.7.2 Jak se do logu zapisuje IP adresa
+#### 101.11.7.2 Jak se do logu zapisuje IP adresa
 
 Aplikace bere IP klienta z **IP síťového spojení** (`REMOTE_ADDR`). Když běží
-**za reverse proxy** (Docker, nginx, Cloudflare…), je tím spojením proxy — bez
+**za reverse proxy** (Docker, nginx, Cloudflare…), je tím spojením proxy - bez
 konfigurace by se proto do auditu zapisovala **IP proxy**, ne reálného klienta
-(typicky uvidíš pořád stejnou IP, např. bránu Dockeru `172.x.0.1`).
+(typicky uvidíte pořád stejnou IP, např. bránu Dockeru `172.x.0.1`).
 
 Reálnou IP přečte aplikace z hlavičky `X-Forwarded-For` **pouze tehdy**, když
 `REMOTE_ADDR` odpovídá rozsahu v `cfg.ip_allowlist.trusted_proxies` (viz
-§ 101.4.1). Z hlavičky se bere **první** adresa (původní klient). Bez nastavené
+§ 101.11.4.1). Z hlavičky se bere **první** adresa (původní klient). Bez nastavené
 `trusted_proxies` se `X-Forwarded-For` ignoruje (ochrana proti podvržení).
 
-> 🛈 Stejná logika se zjišťování IP používá i pro **brute-force lockout**
-> (kap. 20.3). Za reverse proxy bez `trusted_proxies` proto lockout počítá
+> [!TIP]
+> Stejná logika se zjišťování IP používá i pro **brute-force lockout**
+> (viz § 101.11.3). Za reverse proxy bez `trusted_proxies` proto lockout počítá
 > pokusy podle IP proxy = fakticky globálně. Po nastavení `trusted_proxies`
 > začnou audit log i lockout pracovat s reálnou klientskou IP.
 
-## 101.8 DKIM podpis e-mailů
+### 101.11.8 DKIM podpis e-mailů
 
-Pro **deliverabilitu** (aby gmail / o365 / seznam tvé maily nepoznačily jako
+Pro **deliverabilitu** (aby gmail / o365 / seznam vaše maily nepoznačily jako
 spam) doporučujeme aktivovat DKIM:
 
-1. Vygeneruj RSA klíč: `openssl genrsa -out private/dkim/myucto.pem 2048`
-2. Public key → DNS TXT záznam `myucto._domainkey.tvoje-domena.cz`
+1. Vygenerujte RSA klíč: `openssl genrsa -out private/dkim/myucto.pem 2048`
+2. Public key → DNS TXT záznam `myucto._domainkey.vase-domena.cz`
 3. V `cfg.php → smtp.dkim.enabled => true`
 4. Restart služby
 
 Detaily v `README.md` v rootu repa.
 
-## 101.9 Klávesové zkratky
+### 101.11.9 Klávesové zkratky
 
 Položka **Klávesové zkratky** je pátým bodem menu pod jménem uživatele a
 zároveň pátou záložkou obrazovky **Profil**. Na mobilu je dostupná ve výběru
@@ -714,9 +891,9 @@ Formulář nedovolí duplicitní kombinace ani klávesy vyhrazené pro prohlíž
 pevné akce aplikace. Zkratky se nespouštějí při psaní do formuláře, během
 zamčené relace ani v otevřeném modálním dialogu. **Obnovit výchozí** odstraní
 uživatelský přepis a vrátí bezpečné kombinace popsané v
-[Přehledu](10_Prehled.md#1061-klavesove-zkratky).
+[Přehledu](10_Prehled.md#101011-klavesove-zkratky).
 
-## 101.10 Anonymizovaná kopie pro testovací instanci
+### 101.11.10 Anonymizovaná kopie pro testovací instanci
 
 Pro ladění, školení nebo předání dat vývojáři se hodí kopie skutečné
 databáze, ve které ale nejsou osobní ani obchodní údaje. Vyrobí ji příkaz
@@ -751,14 +928,14 @@ anonymizovaná kopie.
 Pseudonym je v rámci jednoho běhu **stejný všude**: partner má v kontaktu,
 na faktuře, v bankovní transakci i v textu úhrady tentýž nový název a IČO,
 takže párování plateb a výkazy fungují jako v originále. Částky, data, čísla
-dokladů a vazby se nemění — rozvaha, výsledovka i přiznání k DPH dávají stejná
+dokladů a vazby se nemění - rozvaha, výsledovka i přiznání k DPH dávají stejná
 čísla. Veřejné účty institucí (finanční úřad, ČSSZ, pojišťovny, platební brány)
 zůstávají, aby aplikace dál poznala platby odvodů.
 
 Klíč pseudonymizace je pro každý běh náhodný a nikam se neukládá, takže
 z kopie nejde originál dopočítat. Volba `--seed=TEXT` dá stejné pseudonymy
-i v dalším běhu, ale se známým seedem jde pseudonym zpětně dohledat —
-používej ji jen na vývojovém stroji.
+i v dalším běhu, ale se známým seedem jde pseudonym zpětně dohledat -
+používejte ji jen na vývojovém stroji.
 
 **Po vytvoření kopie:**
 
@@ -774,37 +951,45 @@ používej ji jen na vývojovém stroji.
   příkaz běžel. Testovací instance s jiným `secret_encryption_key` je
   nerozšifruje.
 - Archivní snímky podání (mzdová podání, EPO) jsou smazané, jejich otisky
-  zůstaly — archiv podání v kopii proto hlásí nečitelné snímky. Auditní stopa
+  zůstaly - archiv podání v kopii proto hlásí nečitelné snímky. Auditní stopa
   je po pseudonymizaci zapečetěná znovu a dokazuje jen integritu kopie.
 
 **Soubory a dump:**
 
 - `--files-out=ADRESÁŘ` vytvoří zrcadlo úložiště (`storage/`) se stejnou
   strukturou, ve kterém je místo každé přílohy a skenu zástupný soubor téhož
-  typu. Cesty v kopii databáze na ně sedí. Adresář pak nastav testovací
+  typu. Cesty v kopii databáze na ně sedí. Adresář pak nastavte testovací
   instanci jako `MYINVOICE_DATA_DIR/storage`.
 - `--dump=SOUBOR` po dokončení uloží SQL dump kopie (potřebuje
   `mariadb-dump`, jinou cestu zadá `--dump-bin=…`).
 
 Co se s kterým sloupcem stane, určuje seznam v
 `api/src/Service/Anonymization/AnonymizationPolicy.php`. Příkaz odmítne běžet,
-když databáze obsahuje textový sloupec, o kterém seznam nerozhoduje — nová
+když databáze obsahuje textový sloupec, o kterém seznam nerozhoduje - nová
 funkce tak nemůže osobní údaje do kopie propašovat nepozorovaně. Na konci běhu
 příkaz vypíše sloupce, ve kterých zůstala hodnota shodná s originálem
 (typicky zachované účty institucí), aby šly zkontrolovat.
 
-## 101.11 Tipy
+### 101.11.11 Tipy
 
-- **Vždycky 2FA pro admin** — pokud admin účet padne, padá vše. Žádná výmluva.
-- **Pravidelně rotuj hesla** každých 6–12 měsíců.
+- **Vždycky 2FA pro admin** - pokud admin účet padne, padá vše. Žádná výmluva.
+- **Pravidelně obměňujte hesla** každých 6-12 měsíců.
 - **IP allowlist** v produkci pro non-veřejné použití (B2B accounting).
-- **Activity log review** — alespoň 1× za měsíc projeďté podezřelé login
+- **Activity log review** - alespoň 1× za měsíc projděte podezřelé login
   selhání nebo neočekávané force-edit.
-- **Backup `cfg.php` + `private/dkim/`** mimo repo — není v gitu, ztrátou
-  přijdeš o pepper a nepřihlásíš se ke starým heslům.
+- **Backup `cfg.php` + `private/dkim/`** mimo repo - není v gitu, ztrátou
+  přijdete o pepper a nepřihlásíte se ke starým heslům.
 
-> 🛈 **Vypršení licence tvá data neohrozí.** Bezplatné funkce původního
+> [!TIP]
+> **Vypršení licence vaše data neohrozí.** Bezplatné funkce původního
 > MyInvoice zůstávají plně funkční včetně zápisu. Komerční moduly se skryjí
 > i pro čtení a API, jejich data ale zůstávají beze změny ve vlastní databázi
 > a po obnovení licence se znovu zpřístupní. Detail v
 > [105. Licence a aktivace](105_Licence_a_aktivace.md).
+
+## 101.12 Související kapitoly
+
+- [Přihlášení](08_Prihlaseni.md)
+- [Nastavení](96_Nastaveni.md)
+- [Licence a aktivace](105_Licence_a_aktivace.md)
+- [Řešení problémů](999_Reseni_problemu.md)

@@ -1,11 +1,95 @@
 # 57. Rozvaha
 
-**Cesta: `Účetnictví → Rozvaha`**
+> Sestavení rozvahy (aktiva a pasiva k rozvahovému dni) ve struktuře přílohy č. 1 vyhlášky č. 500/2002 Sb. a úprava toho, do kterého řádku se účet zařadí. Kapitola je pro účetní v podvojném účetnictví.
 
-Rozvaha sestavuje aktiva a pasiva k rozvahovému dni ve struktuře přílohy
-č. 1 vyhlášky č. 500/2002 Sb. Je dostupná jen pro podvojné účetnictví.
+## 57.1 Kdy to potřebujete
 
-## 57.1 Období, den a verze
+Kapitolu otevřete, když:
+
+- potřebujete rozvahu k určitému dni pro klienta, banku nebo finanční úřad,
+- se blíží uzávěrka a chcete ověřit, že aktiva sedí na pasiva,
+- vás upozornila kontrola, že řádek aktiv má záporné netto,
+- se účet zobrazuje v jiném řádku výkazu, než je správně (splatnost, spřízněné osoby, opravná položka),
+- chcete rozvahu srovnat s přílohou už podaného přiznání k dani z příjmů právnických osob,
+- potřebujete rychlý seznam rozvahových účtů se zůstatky bez zákonné struktury.
+
+Rozvaha je dostupná jen pro podvojné účetnictví.
+
+## 57.2 Než začnete
+
+1. **Zaúčtované doklady a doúčtované koncepty.** Rozvaha čte zaúčtované řádky deníku. Před sestavením projděte [Obratovou předvahu](56_Obratova_predvaha.md) a odstraňte červené kontroly.
+2. **Účtový rozvrh a mapa výkazů.** Každý rozvahový účet musí být zařazen do některého řádku. Nezařazený nenulový účet je v kontrole označen jako nenamapovaný.
+3. **Nastavení uzávěrky.** Volby, které ovlivňují rozvahu (souhrnné vykázání daní, převzetí minulého období z uzavřeného výkazu), jsou v **Nastavení uzávěrky a výkazů** na stránce `Uzávěrka`. Viz [§ 57.7.2](#5772-zustatky-znamenka-a-mapovani).
+4. **Oprávnění.** Úpravy mapování vyžadují oprávnění k účetnictví.
+
+## 57.3 Krok za krokem: sestavení rozvahy
+
+1. Otevřete `Účetnictví → Rozvaha`.
+2. V poli **Období** zvolte fiskální rok.
+3. V poli **Rozvahový den** zvolte datum uvnitř období. Prázdná hodnota znamená dřívější z posledního dne období a dneška.
+4. V poli **Rozsah** ponechte **Automaticky (dle kategorie ÚJ)**, nebo zvolte **Plný rozsah**, **Zkrácený - malá ÚJ** či **Zkrácený - mikro ÚJ**.
+5. Podle potřeby přepněte **Kč / tis. Kč**. Mění jen zobrazení, výpočet i export zůstávají v korunách.
+6. Zkontrolujte kontrolu **Aktiva = Pasiva** (porovnává **Aktiva netto** a **Pasiva celkem** na haléře).
+7. Podezřelý řádek rozbalte kliknutím. Uvidíte **Účty řádku**, částku a u aktiv cíl Brutto nebo korekce. Kód účtu otevře opis od začátku období do rozvahového dne.
+8. Klikněte na **Export PDF** nebo **Export XLSX**.
+
+**Jak poznáte, že je hotovo:** **Aktiva = Pasiva** je zelená, nad tabulkou není varování o záporném netto a výsledek hospodaření v rozvaze odpovídá výsledku z nákladových a výnosových účtů.
+
+> [!WARNING]
+> Zelená rovnost stran není kontrola věcného zařazení. Rozvaha je odvozena z účtového rozvrhu a mapy výkazu. Podezřelý řádek rozbalte a jeho účty ověřte v opisu.
+
+## 57.4 Krok za krokem: zařazení účtu do jiného řádku
+
+Použijte, když číslo účtu nestačí k určení řádku: splatnost (například půjčka od společníka splatná za víc než rok), spřízněné osoby, konkrétní analytika, opravná položka k pohledávce.
+
+1. Otevřete `Účetnictví → Mapování účtů do výkazů` a zvolte záložku **Rozvaha** (nebo **Výsledovka**).
+2. Najděte účet. Tabulka ukazuje zůstatek ke konci období, aktuální řádek výkazu a zdroj zařazení.
+3. Ve sloupci **Řádek výkazu** vyberte cílový řádek. Volba **(podle globální mapy)** výjimku zruší.
+4. U saldového účtu můžete ve sloupci **Strana zůstatku** výjimku omezit volbou **Jen debetní** nebo **Jen kreditní**. U řádku aktiv lze účet zařadit volbou **Jako korekce**.
+5. U opravné položky zařazené jako korekce zapište do pole **k pohledávce** účet pohledávky, například 351.100.
+6. Chcete-li výjimku omezit na roky, vyplňte **Platí v letech**.
+7. Do pole **Poznámka** zapište důvod výjimky, například splatnost.
+8. Klikněte na **Náhled dopadu**. Ukáže řádky, jejichž hodnota se změní, a upozorní, kdyby rozvaha přestala být vyrovnaná. Nic neukládá.
+9. Klikněte na **Uložit** v liště dole. **Zahodit změny** vrátí uložený stav.
+
+**Jak poznáte, že je hotovo:** Účet je v novém řádku rozvahy, kontrola **Aktiva = Pasiva** zůstává zelená a zmizelo varování o záporném netto.
+
+### 57.4.1 Návrh z podaného přiznání
+
+1. Na stránce Mapování účtů do výkazů klikněte na **Navrhnout z podaného přiznání**. Aplikace porovná přílohu účetní závěrky s přílohou podaného přiznání za rok.
+2. Přiznání, které v evidenci není, nahrajete tlačítkem **Navrhnout z XML přiznání** v nabídce dalších akcí.
+3. Vyberte návrhy, kterým věříte. Návrh označený jako nejistý není předvybraný.
+4. Klikněte na **Převzít vybrané** a změny uložte tlačítkem **Uložit**.
+
+Podrobnosti jsou v [§ 57.7.7](#5777-mapovani-uctu-pro-konkretni-firmu).
+
+## 57.5 Krok za krokem: rozvaha po účtech
+
+1. Otevřete `Účetnictví → Rozvaha` a zvolte záložku **Účet 702 (po účtech)**.
+2. Nastavte **Rozvahový den**. Rozsah výkazu se tu nepoužívá.
+3. Projděte účty tříd 0 až 4. Přepínač **Zobrazit analytiky** analytiky skryje.
+4. Klikněte na účet. Otevře se opis od začátku období do rozvahového dne.
+5. Zkontrolujte zvýrazněný řádek **Výsledek hospodaření** pod součtem rozvahových účtů.
+6. Klikněte na **Export PDF** nebo **Export XLSX**.
+
+**Jak poznáte, že je hotovo:** Výsledek hospodaření z rozvahových účtů se neliší od výsledku z výsledkových účtů. Rozdíl stránka ohlásí nad tabulkou.
+
+## 57.6 Když něco nejde
+
+<!-- cols: 30 34 36 -->
+| Co vidíte | Proč | Co udělat |
+|---|---|---|
+| **Aktiva = Pasiva** je červená | Nesoulad v zápisech nebo v mapě; nejde o zaokrouhlení | Prověřte [Obratovou předvahu](56_Obratova_predvaha.md), mapu účtů a závěrkové zápisy. |
+| **Řádky aktiv se záporným netto** | Korekce je vyšší než brutto, nejčastěji je opravná položka zařazená jinam než pohledávka | Založte výjimku mapování s vazbou **k pohledávce** ([§ 57.4](#574-krok-za-krokem-zarazeni-uctu-do-jineho-radku)). |
+| **Výkaz nemá pro zvolené parametry žádná data.** | Ve zvoleném období a dni nejsou zaúčtované řádky | Zkontrolujte **Období** a **Rozvahový den**. |
+| Nenamapovaný nenulový účet | Účet nepokrývá žádná mapa | Zařaďte ho výjimkou mapování, jinak může výkaz zůstat neúplný. |
+| Sloupec minulého období nesedí s uzavřeným výkazem | Výjimky firmy se ve sloupci minulého období řídí pravidly běžného roku | V **Nastavení uzávěrky a výkazů** zapněte **Minulé období výkazů převzít z uzavřeného výkazu minulého roku**. |
+| Kladný běžný účet a kontokorent se nevzájemně nezkompenzovaly | Saldové účty se počítají po analytikách | Nejde o chybu, viz [§ 57.7.2](#5772-zustatky-znamenka-a-mapovani). |
+| Rozvahový den je odmítnut | Leží mimo období | Zvolte datum uvnitř období. |
+
+## 57.7 Podrobnosti a pravidla
+
+### 57.7.1 Období, den a verze
 
 - **Období** určuje fiskální rok.
 - **Rozvahový den** musí ležet uvnitř období. Prázdná hodnota znamená dřívější
@@ -21,11 +105,11 @@ k jeho poslednímu dni, ale se stejnou verzí řádků a mapy jako běžný výk
 aby byly sloupce srovnatelné. Výjimky mapování firmy a souhrnné vykázání daní
 se ve sloupci minulého období řídí pravidly běžného roku; změnu zařazení pak
 vysvětlete v příloze. Kdo chce sloupec minulého období převzít tak, jak byl
-v uzavřeném výkazu minulého roku, zapne v **Nastavení uzávěrky** na stránce Účetní období
+v uzavřeném výkazu minulého roku, zapne v **Nastavení uzávěrky a výkazů** na stránce `Uzávěrka`
 volbu **Minulé období výkazů převzít z uzavřeného výkazu minulého roku**: sloupec
 se pak sestaví s výjimkami a volbami platnými v minulém roce.
 
-## 57.2 Zůstatky, znaménka a mapování
+### 57.7.2 Zůstatky, znaménka a mapování
 
 Zdrojem jsou syntetické zůstatky všech zaúčtovaných řádků do rozvahového dne.
 Analytiky se standardně sčítají pod syntetiku; obsahuje-li mapa delší analytický
@@ -33,11 +117,11 @@ prefix, má přednost nejdelší shodný prefix. Podrozvahové účty a vlastní
 závěrkový převod knih se vylučují. Výsledkové účty se pro výpočet výsledku
 hospodaření omezí na začátek fiskálního období.
 
-Pro každý účet se počítá saldo `MD − Dal`:
+Pro každý účet se počítá saldo `MD - Dal`:
 
 - aktivní účet přispívá saldem do **Brutto**,
 - korekční účet se obrátí do **Korekce** a odečte se ve vztahu
-  `Netto = Brutto − Korekce`,
+  `Netto = Brutto - Korekce`,
 - pasivní účet se znaménkově obrátí, aby kreditní zůstatek vyšel kladně,
 - případný koeficient mapy `sign` umí hodnotu řádku obrátit.
 
@@ -54,14 +138,14 @@ pohledávky a krátkodobou část dlouhodobého úvěru. Nezařazený nenulový
 rozvahový účet je vrácen v kontrole jako nenamapovaný; účetní jej musí
 správně zařadit, jinak může výkaz zůstat neúplný.
 
-### Souhrnné vykázání daní vůči finančnímu úřadu
+#### 57.7.2.1 Souhrnné vykázání daní vůči finančnímu úřadu
 
 Daňové pohledávky a závazky se ve výchozím stavu vykazují zvlášť: přeplatek
-jedné daně v aktivech (**Stát — daňové pohledávky**), nedoplatek jiné
-v pasivech (**Stát — daňové závazky a dotace**). Vyhláška v § 58 odst. 2 za
+jedné daně v aktivech (**Stát - daňové pohledávky**), nedoplatek jiné
+v pasivech (**Stát - daňové závazky a dotace**). Vyhláška v § 58 odst. 2 za
 vzájemné zúčtování nepovažuje souhrnné vykázání pohledávek a závazků vůči téže
 osobě se splatností do jednoho roku. Volba **Daně vůči finančnímu úřadu
-vykazovat v rozvaze souhrnně** v **Nastavení uzávěrky** na stránce Účetní období proto
+vykazovat v rozvaze souhrnně** v **Nastavení uzávěrky a výkazů** na stránce `Uzávěrka` proto
 započte přeplatky a nedoplatky na účtech 341 až 345 (daň z příjmů, ostatní
 přímé daně, DPH, ostatní daně); dotace (346) a pojistné (336) do započtení
 nevstupují. Aktiva i pasiva klesnou o stejnou, menší z obou částek, v detailu
@@ -69,7 +153,7 @@ nevstupují. Aktiva i pasiva klesnou o stejnou, menší z obou částek, v detai
 volbu na roky, kdy ji firma používá. Souhrnné vykázání je třeba uvést
 v příloze; příloha u účetních zásad nabídne větu se započtenými částkami.
 
-## 57.3 Strom a výpočtové řádky
+### 57.7.3 Strom a výpočtové řádky
 
 Řádek typu **detail** obsahuje přímo namapované účty. **Mezisoučet** sčítá
 dceřiné řádky a případné vlastní přímé mapování. **Vypočtený řádek** používá
@@ -81,30 +165,30 @@ rozbalí účty, částku a u aktiv cíl Brutto/Korekce; kód účtu vede do opi
 začátku období do rozvahového dne.
 
 Řádek **Výsledek hospodaření běžného období** se počítá přímo ze všech
-výsledkových účtů jako `Σ výnosy (Dal − MD) − Σ náklady (MD − Dal)`. Při
+výsledkových účtů jako `Σ výnosy (Dal - MD) - Σ náklady (MD - Dal)`. Při
 sestavení před koncem období se saldo účtu 431 mapuje do výsledku minulých let;
 k poslednímu dni období patří do řádku běžného výsledku spolu s vypočteným
 výsledkem.
 
-## 57.4 Kontroly
+### 57.7.4 Kontroly
 
 Kontrola **Aktiva = Pasiva** porovnává Aktiva netto a Pasiva celkem na haléře.
 Další vazba porovnává výsledek hospodaření v rozvaze s výsledkem vypočteným
-přímo ze všech nákladových a výnosových účtů. Backendová odpověď navíc vrací
-nenamapované nenulové účty; aktuální stránka z kontrolního bloku zobrazuje
+přímo ze všech nákladových a výnosových účtů. Nenamapované nenulové účty
+hlásí kontrola samostatně; kontrolní blok na stránce zobrazuje
 rovnost stran a obě bilanční částky.
 
 Řádek aktiv se **záporným netto** (korekce vyšší než brutto) stránka ukáže nad
 tabulkou jako varování, v běžném i minulém období. Nejčastější příčinou je
 opravná položka zařazená jinam než pohledávka, ke které patří, třeba celá 391
 v obchodních pohledávkách, zatímco pohledávka je výjimkou v dlouhodobých.
-Opravte ji výjimkou mapování s vazbou na pohledávku (kapitola 57.7). Stejné
+Opravte ji výjimkou mapování s vazbou na pohledávku ([§ 57.4](#574-krok-za-krokem-zarazeni-uctu-do-jineho-radku)). Stejné
 varování zapíše do protokolu převod dat z jiného programu.
 
 Nesoulad není zaokrouhlovací rozdíl obrazovky; před použitím výkazu je nutné
 prověřit obratovou předvahu, mapu účtů a závěrkové zápisy.
 
-## 57.5 Kategorie účetní jednotky a rozsah
+### 57.7.5 Kategorie účetní jednotky a rozsah
 
 Automatický rozsah vychází z nejnižší kategorie, u které účetní jednotka
 nepřekračuje alespoň dvě ze tří mezí:
@@ -127,29 +211,27 @@ plný rozsah.
 
 Rozsah řádků:
 
-- **plný** — bez omezení úrovně,
-- **malá** — rozvaha do druhé úrovně a navíc povinné řádky C.II.1. a C.II.2.,
-- **mikro** — jen nejvyšší úroveň,
-- **automaticky** — mikro → mikro, malá → malá, střední/velká → plný.
+- **plný** - bez omezení úrovně,
+- **malá** - rozvaha do druhé úrovně a navíc povinné řádky C.II.1. a C.II.2.,
+- **mikro** - jen nejvyšší úroveň,
+- **automaticky** - mikro → mikro, malá → malá, střední/velká → plný.
 
-## 57.6 Export
+### 57.7.6 Export
 
 PDF a XLSX používají stejný rozvahový den, rozsah, verzi mapy, srovnávací
 období a kontroly jako obrazovka. Přepínač tisíců export neovlivňuje.
 
-## 57.7 Mapování účtů pro konkrétní firmu
-
-**Cesta: `Účetnictví → Mapování účtů do výkazů`**
+### 57.7.7 Mapování účtů pro konkrétní firmu
 
 Globální mapa zařazuje účet podle čísla syntetiky. Předpis ale nechává firmě
 volby, které z čísla účtu vyčíst nejde. Pro ně slouží výjimky mapování, které
 platí jen pro vybranou firmu:
 
-- **splatnost** — půjčka od společníka na analytice 365.100 splatná za víc
+- **splatnost** - půjčka od společníka na analytice 365.100 splatná za víc
   než rok patří do dlouhodobých závazků (C.I.), ne do krátkodobých (C.II.),
-- **spřízněné osoby** — pohledávky, závazky, výnosy a náklady vůči ovládané
+- **spřízněné osoby** - pohledávky, závazky, výnosy a náklady vůči ovládané
   nebo ovládající osobě patří do vlastních řádků a podřádků výkazů,
-- **zařazení analytiky** — konkrétní analytika může patřit do jiného řádku
+- **zařazení analytiky** - konkrétní analytika může patřit do jiného řádku
   než její syntetika.
 
 Stránka má záložky **Rozvaha** a **Výsledovka**. Tabulka ukazuje účty firmy,
@@ -189,7 +271,7 @@ Výjimky používá rozvaha, obě výsledovky, jejich PDF a XLSX exporty, měsí
 report, uzávěrkový balík, kategorie účetní jednotky i příloha účetní závěrky
 v přiznání k dani z příjmů právnických osob.
 
-### 57.7.1 Návrh z podaného přiznání
+#### 57.7.7.1 Návrh z podaného přiznání
 
 Když je za rok v evidenci podané přiznání k dani z příjmů právnických osob,
 tlačítko **Navrhnout z podaného přiznání** porovná přílohu účetní závěrky
@@ -216,13 +298,14 @@ Vybrané návrhy se tlačítkem **Převzít vybrané** přenesou do připravovan
 změn; uloží se až tlačítkem **Uložit**. Pod návrhy je rozbalovací seznam všech
 rozdílných řádků přílohy.
 
-> ⚠️ **Zelená rovnost stran není kontrola věcného zařazení.** Rozvaha je
+> [!WARNING]
+> **Zelená rovnost stran není kontrola věcného zařazení.** Rozvaha je
 > odvozena z účtového rozvrhu a mapy výkazu; podezřelý řádek rozbalte a jeho
 > účty ověřte v opisu.
 
-## 57.8 Rozvaha po účtech
+### 57.7.8 Rozvaha po účtech
 
-Záložka **Po účtech** nad rozvahou ukáže místo zákonné struktury seznam
+Záložka **Účet 702 (po účtech)** nad rozvahou ukáže místo zákonné struktury seznam
 rozvahových účtů tříd 0 až 4 se zůstatkem k rozvahovému dni. Účty jsou
 seřazené po třídách, pod syntetikou jsou její analytiky (přepínač
 **Zobrazit analytiky** je skryje). Syntetika má ve sloupcích **Zůstatek MD**
@@ -231,7 +314,7 @@ vzájemného započtení, takže kladný běžný účet a kontokorent zůstanou
 své straně. Každá třída má svůj součet.
 
 Pod součtem rozvahových účtů je zvýrazněný řádek **Výsledek hospodaření**
-(zisk zeleně, ztráta červeně) jako rozdíl `Σ MD − Σ D`. Je k dispozici
+(zisk zeleně, ztráta červeně) jako rozdíl `Σ MD - Σ D`. Je k dispozici
 kdykoli během roku bez uzávěrky. Zůstatky jsou vždy před uzavřením účetních
 knih: uzávěrkový zápis se nezapočítává, takže po uzavření roku pohled k poslednímu
 dni období ukazuje přesně to, co uzávěrka převedla na konečný účet rozvažný 702.
@@ -239,7 +322,7 @@ dni období ukazuje přesně to, co uzávěrka převedla na konečný účet roz
 Kliknutím na účet se otevře jeho opis od začátku období do rozvahového dne.
 Rozvahový den a filtr dimenze platí stejně jako u výkazu, rozsah výkazu se
 tu nepoužívá. Když se výsledek z rozvahových účtů neliší od výsledku
-z výsledkových účtů ([§ 58.6](58_Vysledovka_druhova.md)), je vše v pořádku;
+z výsledkových účtů ([Výsledovka po účtech](58_Vysledovka_druhova.md#5876-vysledovka-po-uctech)), je vše v pořádku;
 rozdíl stránka ohlásí nad tabulkou a obvykle ukazuje na chybu v počátečních
 stavech nebo v uzávěrce minulého roku. Při filtru dimenze obsahují rozvahové
 účty jen řádky s touto hodnotou, takže se jejich výsledek od výsledovky
@@ -248,3 +331,10 @@ platí výsledovka.
 
 Export PDF a XLSX z této záložky vytvoří rozvahu po účtech v jednotce zvolené
 přepínačem **Kč / tis. Kč**.
+
+## 57.8 Související kapitoly
+
+- [Obratová předvaha](56_Obratova_predvaha.md) - kontrola úplnosti a podvojnosti před výkazy
+- [Výsledovka druhová](58_Vysledovka_druhova.md) a [účelová](59_Vysledovka_ucelova.md)
+- [Účtový rozvrh](66_Ucetni_osnova.md) a [Uzávěrka](72_Uzaverka.md)
+- [Daň z příjmů](43_Dan_z_prijmu.md) - příloha účetní závěrky v přiznání

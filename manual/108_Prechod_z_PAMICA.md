@@ -1,26 +1,206 @@
 # 108. Přechod z PAMICA
 
-**Cesta: `Systém → Přechod z jiných účetních systémů → PAMICA (i SQL)`**
+> Návod, jak převést personalistiku a mzdy z mzdového programu PAMICA (i
+> PAMICA SQL, i POHODA Mzdy) do firmy v MyÚčtu: od exportu ze starého programu
+> přes zkoušku nanečisto a ostrý převod až po kontrolu převzatých mezd. Pro
+> mzdové účetní a správce.
+
+**Cesta: `Systém → Přechod z jiných účetních systémů → PAMICA`**
 
 Průvodce převede personalistiku a mzdy z datového souboru mzdového programu
 PAMICA, nebo z databáze PAMICA SQL, do firmy v MyÚčtu, i do firmy, která
-účetnictví z POHODY nepřevádí.
-Stejnou cestou se převádí i mzdy z **POHODA Mzdy** — je to tentýž mzdový
-modul STORMWARE se stejným formátem dat. Účetnictví tento průvodce nepřevádí,
-to je samostatná kapitola [Přechod z POHODY](107_Prechod_z_POHODY.md).
+účetnictví z POHODY nepřevádí. Stejnou cestou se převádějí i mzdy z **POHODA
+Mzdy**, je to tentýž mzdový modul STORMWARE se stejným formátem dat. Účetnictví
+tento průvodce nepřevádí, to je samostatná kapitola
+[Přechod z POHODY](107_Prechod_z_POHODY.md).
 
-Položka je v menu Systém, které vidí administrátor. Jiný uživatel s potřebnými
-oprávněními otevře průvodce přímým odkazem `/imports/pamica`.
+## 108.1 Kdy to potřebujete
 
-Průvodce vidí a zkoušku nanečisto spouští uživatel s oprávněním
-`utilities.import` pro zápis. Ostrý převod zakládá zaměstnance a zapisuje
-mzdové vstupy, proto navíc vyžaduje zápis mzdových vstupů
-(`payroll.inputs.write`), osob (`payroll.person.write`) a nastavení mezd
-(`payroll.settings`). Chybějící oprávnění průvodce ukáže a převod nespustí.
+- Firma dosud počítala mzdy v PAMICA (nebo POHODA Mzdy) a chce pokračovat
+  v modulu Mzdy v MyÚčtu.
+- Potřebujete převzít zaměstnance, pracovní vztahy, zpracované mzdy minulých
+  měsíců, srážky, dovolenou a podání, která PAMICA odeslala.
+- Převod skončil chybou nebo rozdílem v protokolu.
+- Chcete po převodu ověřit, že přepočet v MyÚčtu sedí na to, co PAMICA podala.
 
-## 108.1 Export z PAMICA
+<!-- cols: 24 40 36 -->
+| Fáze | Co udělat | Kde |
+|---|---|---|
+| 1 | Zavřít PAMICA a vytvořit export | počítač s Windows, nástroje z průvodce |
+| 2 | Nahrát ZIP a zvolit volby | `Systém → Přechod z jiných účetních systémů → PAMICA` |
+| 3 | Zkouška nanečisto | průvodce |
+| 4 | Ostrý převod | průvodce |
+| 5 | Kontrola převzetí | `Mzdy → Importy → Kontrola převzetí` |
+| 6 | Návrh kontací, doložení exekucí, ověření účtů institucí | `Mzdy → Importy → Kontace z převzetí`, `Mzdy → Srážky a exekuce`, `Mzdy → Nastavení mezd` |
 
-### 108.1.1 Exportní nástroj
+## 108.2 Než začnete
+
+1. **Firma v MyÚčtu.** Musí existovat a mít vyplněné stejné IČO jako v PAMICA.
+2. **Oprávnění.** Průvodce vidí a zkoušku nanečisto spouští uživatel
+   s oprávněním k zápisu importů. Ostrý převod zakládá zaměstnance a zapisuje
+   mzdové vstupy, proto vyžaduje navíc zápis mzdových vstupů, osob a nastavení
+   mezd (`utilities.import`, `payroll.inputs.write`, `payroll.person.write`,
+   `payroll.settings`). Chybějící oprávnění průvodce ukáže a převod nespustí. Položka je
+   v menu Systém, které vidí administrátor; jiný uživatel otevře průvodce
+   přímým odkazem `/imports/pamica`.
+3. **Začátek vedení mezd.** Rozhodněte, od kterého měsíce bude mzdy počítat
+   MyÚčto. Jiný než navržený začátek nastavte v `Mzdy → Nastavení mezd` ještě
+   před převodem posledního roku ([§ 108.9.2](#10892-co-prevod-prenese)).
+4. **Windows počítač** s PowerShellem 5.1 pro exportní nástroj. Pro datový
+   soubor `.mdb` potřebujete ovladač Microsoft Access Database Engine.
+   PAMICA musí být během exportu z datového souboru zavřená.
+5. **Číslo ČSSZ a pojišťoven v Nastavení firmy** (variabilní symbol ČSSZ, kód
+   OSSZ, číslo plátce): převod je převezme do Mezd.
+
+> [!TIP]
+> Převody z jiných systémů jejich výrobci nepodporují. Průvodce nabízí kontakt
+> na podporu, která převod provede nebo upraví na míru. Převzatá data si ověřte
+> vždy.
+
+## 108.3 Krok za krokem: export z PAMICA
+
+Vyberte cestu podle toho, kde mzdy běží.
+
+<!-- cols: 24 40 36 -->
+| Cesta | Kdy ji použít | Nástroj |
+|---|---|---|
+| Datový soubor PAMICA | Běžná instalace s `Mzdy*.mdb` | `Export-Pamica.cmd` |
+| PAMICA SQL | Mzdy běží na SQL Serveru | `Export-PamicaSQL.cmd` |
+| POHODA Mzdy | Mzdy z POHODY | `Export-PohodaMdb.cmd` (viz [§ 107.9.1.4](107_Prechod_z_POHODY.md#107914-majetek-z-datoveho-souboru)) |
+
+**Příprava (všechny cesty):**
+
+1. V průvodci klikněte na **Zobrazit exportní nástroj**, pak na **Stáhnout vše
+   (ZIP)**. Stáhne se `pamica-export.zip`.
+2. Rozbalte celý balíček do jedné složky na počítači s Windows. Soubory
+   musí ležet ve stejné složce.
+
+**Datový soubor PAMICA:**
+
+1. Zavřete PAMICA. Spusťte `Export-Pamica.cmd` dvojklikem, nebo s parametry,
+   například `Export-Pamica.cmd -Rok 2026 -Ico 12345678`.
+2. Bez parametrů nástroj datový soubor najde sám v obvyklých umístěních
+   STORMWARE. Nenajde-li ho, zadejte ho parametrem `-Mdb`.
+3. Vedle skriptu vznikne `pamica_export_<datum>.zip`.
+
+**PAMICA SQL:**
+
+1. Zkopírujte vzor `pamica-sql.example.json` jako `pamica-sql.json` vedle
+   skriptu a vyplňte server, port a přihlášení (nebo nechte nástroj, ať se
+   zeptá).
+2. Spusťte `Export-PamicaSQL.cmd` dvojklikem a vyberte mzdovou databázi ze
+   seznamu.
+3. Vznikne `pamica_export_<datum>.zip`. Soubor `pamica-sql.json` s heslem po
+   exportu smažte. PAMICA může během exportu běžet.
+
+**POHODA Mzdy:** spusťte `Export-PohodaMdb.cmd` podle
+[§ 107.9.1.4](107_Prechod_z_POHODY.md#107914-majetek-z-datoveho-souboru) a vzniklý
+`91_mzdy.xml` (ve složce `<IČO>_<rok>`, zabalený do ZIP) nahrajte sem beze
+změny.
+
+**Jak poznáte, že je hotovo:** Máte ZIP se složkami `<IČO>_<rok>` a souborem
+`91_mzdy.xml`. Souhrn vedle ZIPu vypisuje počty řádků po tabulkách a
+nehlásí chybu. Parametry a konfigurace jsou v
+[§ 108.9.1](#10891-export-z-pamica).
+
+## 108.4 Krok za krokem: nahrání exportu a zkouška nanečisto
+
+1. Otevřete `Systém → Přechod z jiných účetních systémů` a u dlaždice **PAMICA** klikněte na **Otevřít průvodce**.
+2. V kroku **Export z PAMICA** vyberte ZIP a klikněte na **Nahrát a načíst**.
+   Stránku nechte během nahrávání otevřenou. Server export na pozadí rozbalí a
+   přečte; průvodce ukazuje, na kterém kroku je. Selže-li načtení náhledu,
+   klikněte na **Zkusit znovu** (nahraný export na serveru zůstává) nebo na
+   **Nahrát jiný export**.
+3. V kroku **Náhled a volby** zkontrolujte u agendy sloupec **Mzdy**
+   (počet zaměstnanců a měsíců) a IČO firmy.
+4. Nastavte volby:
+   - **Převzatou docházku a mzdové vstupy rovnou schválit** (výchozí zapnuto),
+   - potvrzení původu OIČ a ID PPV z protokolů ČSSZ (jen pokud tomu tak je),
+   - u začátku vedení mezd před zpracovanými měsíci volbu **Posunout začátek na
+     MM/RRRR a převést** (výchozí), nebo **Převést bez posunu začátku**
+     (vyžaduje potvrzení).
+5. Klikněte na **Pokračovat** a v kroku **Zkouška nanečisto** na **Spustit
+   zkoušku nanečisto**. Přečtěte protokol, chyby opravte a zkoušku zopakujte.
+
+**Jak poznáte, že je hotovo:** Zkouška skončí stavem **V pořádku** nebo **S
+upozorněními** a protokol ukazuje počty zaměstnanců a měsíců, které odpovídají
+exportu. Selže-li jen na **Rozdílech k přijetí**, postupujte podle
+[§ 103.10.5.1](103_Prechod_z_Money_S3.md#1031051-chyby-upozorneni-a-rozdily-k-prijeti).
+
+> [!WARNING]
+> Se zapnutým schválením spuštěný mzdový běh měsíc spočítá znovu podle vlastní
+> legislativní sady, takže výsledek se nemusí do koruny trefit na to, co už bylo
+> podané. Bez zaškrtnutí zůstanou podklady ke kontrole a schválíte je ručně v
+> `Mzdy → Mzdové složky a vstupy` a `Mzdy → Docházka a směny`.
+
+## 108.5 Krok za krokem: ostrý převod
+
+1. V kroku **Převod** zaškrtněte potvrzení, že převod založí ve firmě chybějící
+   zaměstnance a pracovní vztahy.
+2. Po zkoušce, která selhala jen na rozdílech k přijetí, zaškrtněte
+   **Převést i přes rozdíly**.
+3. Klikněte na **Spustit převod**. Převod běží na pozadí, stránku můžete zavřít.
+4. Po dokončení projděte protokol: osoby, které nešlo založit (rodné číslo bez
+   platného data narození, neznámý kód pojišťovny), jsou vypsané. Doplňte je
+   v evidenci a převod spusťte znovu; opakovaný převod nic nezdvojí.
+
+**Jak poznáte, že je hotovo:** Převod skončí stavem **V pořádku** nebo **S
+upozorněními**. V `Mzdy → Zaměstnanci` jsou založené osoby a vztahy a měsíce
+jsou převzaté jako zpracované předchozím programem.
+
+## 108.6 Krok za krokem: kontrola převzatých mezd
+
+1. Otevřete `Mzdy → Importy → Kontrola převzetí` a zvolte rok.
+2. V přehledu měsíců zkontrolujte počet odchylek a největší rozdíl. Rozkliknutý
+   měsíc ukáže odchylky po osobách (PAMICA / MyÚčto / rozdíl). Přepínačem **Jen
+   měsíce s odchylkou** schováte měsíce, ve kterých vše sedí.
+3. Odchylky vysvětlete ([§ 108.9.10](#108910-kontrola-prevzatych-mezd)). Řádek
+   *MyÚčto nepočítalo* a *chybí v původním systému* neznamená nulu.
+4. Otevřete `Mzdy → Importy → Kontace z převzetí` ([§ 108.9.11](#108911-kontace-mezd-z-puvodniho-programu))
+   a uložte vybrané účty, u kterých je stav **jednoznačné**; u **rozporu** se
+   rozhodněte sami.
+5. V `Mzdy → Srážky a exekuce` doložte převzaté exekuce, které protokol vypsal
+   (aktivní exekuci doložte a aktivujte před prvním mzdovým během).
+6. V `Mzdy → Nastavení mezd` potvrďte odvozené účty finančního úřadu a OSSZ,
+   v kartě osoby ověřte neověřené výplatní účty a zařaďte složky bez zařazení
+   v `Mzdy → Mzdové složky a vstupy` (jinak nepůjde zmrazit měsíční hlášení).
+7. Zkontrolujte případy dávek nemocenského u neschopností přes přelom
+   ([§ 108.9.7](#10897-nemocenska-pres-prelom)).
+
+**Jak poznáte, že je hotovo:** Přehled měsíců ukazuje u převzatých měsíců
+rozdíly jen tam, kde je umíte vysvětlit, nezbývají nedoložené exekuce, které
+se mají srážet, nepotvrzené účty institucí ani složky bez zařazení.
+
+## 108.7 Krok za krokem: opakovaný převod novějšího exportu
+
+1. Vytvořte nový export podle [§ 108.3](#1083-krok-za-krokem-export-z-pamica).
+2. Nahrajte ho a spusťte zkoušku i převod stejně jako poprvé.
+
+**Jak poznáte, že je hotovo:** Převod založí jen to, co ještě chybí. Měsíc,
+který už prošel, přeskočí; změněný měsíc počítaný MyÚčtem převede znovu
+(pravidla v [§ 108.9.2](#10892-co-prevod-prenese)).
+
+## 108.8 Když něco nejde
+
+<!-- cols: 30 34 36 -->
+| Co vidíte | Proč | Co udělat |
+|---|---|---|
+| **Export neobsahuje mzdy s IČO firmy v MyÚčtu** | Jiné IČO v PAMICA nebo ve firmě | Zkontrolujte IČO v nastavení firmy a v PAMICA |
+| Náhled exportu se nenačetl | Výpadek spojení, chyba serveru | **Zkusit znovu**; nahraný export zůstává na serveru |
+| Kontrola před převodem hlásí začátek vedení mezd před zpracovanými měsíci | Firma už v MyÚčtu je a začátek je dřív než poslední měsíc exportu | Zvolte **Posunout začátek...** nebo **Převést bez posunu začátku**; má-li MyÚčto už vlastní mzdový běh, posun se nenabízí a běh zrušte |
+| Osoba se nezaložila | Rodné číslo bez platného data narození, neznámý kód pojišťovny | Doplňte osobu v evidenci a převod zopakujte |
+| Srážka se nepřevedla | Chybí den doručení plátci | Doplňte srážku ručně; protokol jmenuje osobu |
+| Složka je bez zařazení | Obsah plnění z názvu neplyne | Zařaďte ji v `Mzdy → Mzdové složky a vstupy`, jinak nepůjde zmrazit měsíční hlášení |
+| Měsíc nelze převést znovu | Mzdový běh má zamčené vstupy | Neschválený běh zrušte v `Mzdy → Mzdové běhy`; schválený měsíc převod nepřepisuje |
+| Nepřítomnost bez schváleného průměru | Chybí průměr čtvrtletí | Doplňte průměr a převod zopakujte |
+| Účet finančního úřadu nebo OSSZ nezaložen | V exportu chybí závazek pod předčíslím, nebo jsou pod ním dva účty | Doplňte účet ručně v Nastavení mezd |
+| Lhůta NEMPRI u převzatého případu dávky nesedí | PAMICA NEMPRI podala, nebo naopak nepodala | Použijte **NEMPRI podal předchozí program** nebo **Předchozí program NEMPRI nepodal** |
+
+## 108.9 Podrobnosti a pravidla
+
+### 108.9.1 Export z PAMICA
+
+#### 108.9.1.1 Exportní nástroj
 
 V prvním kroku průvodce ukáže tlačítkem *Zobrazit exportní nástroj* soubory
 nástroje ve dvou skupinách:
@@ -28,7 +208,7 @@ nástroje ve dvou skupinách:
 | Soubor | K čemu slouží |
 |---|---|
 | `Export-Pamica.cmd`, `Export-Pamica.ps1` | export z datového souboru PAMICA (`Mzdy*.mdb`) |
-| `Export-PamicaSQL.cmd`, `Export-PamicaSQL.ps1` | export z databáze PAMICA SQL (§ 108.1.4) |
+| `Export-PamicaSQL.cmd`, `Export-PamicaSQL.ps1` | export z databáze PAMICA SQL (§ 108.9.1.4) |
 | `pamica-sql.example.json` | vzor konfigurace připojení k SQL Serveru |
 | `PohodaSql-Common.ps1` | společné připojení k SQL Serveru; spouští ho `Export-PamicaSQL` |
 
@@ -37,12 +217,12 @@ Stáhněte soubory zvlášť, nebo tlačítkem *Stáhnout vše (ZIP)* jako
 potřebuje vedle sebe i `Export-Pamica.ps1`, zápis exportu je společný.
 
 Na rozdíl od POHODY nemá PAMICA XML rozhraní pro komunikaci s běžícím
-programem. Nástroj proto čte přímo datový soubor `Mzdy*.mdb` — stejně jako
-doplňkový skript `Export-PohodaMdb.ps1` u přechodu z POHODY (§ 107.1.4), pro
+programem. Nástroj proto čte přímo datový soubor `Mzdy*.mdb` - stejně jako
+doplňkový skript `Export-PohodaMdb.ps1` u přechodu z POHODY ([§ 107.9.1.4](107_Prechod_z_POHODY.md#107914-majetek-z-datoveho-souboru)), pro
 `.mdb` je tak potřeba ovladač Microsoft Access Database Engine. Nástroj data
 jen čte, PAMICA během exportu musí být zavřená.
 
-### 108.1.2 Vytvoření exportu
+#### 108.9.1.2 Vytvoření exportu
 
 1. Spusťte `Export-Pamica.cmd` dvojklikem, nebo z příkazového řádku:
 
@@ -63,9 +243,9 @@ jen čte, PAMICA během exportu musí být zavřená.
 
 Export jen čte. Do datového souboru nic nezapisuje.
 
-### 108.1.3 Co je v exportu
+#### 108.9.1.3 Co je v exportu
 
-ZIP obsahuje podsložky `<IČO>_<rok>` se souborem `91_mzdy.xml` — zaměstnanci,
+ZIP obsahuje podsložky `<IČO>_<rok>` se souborem `91_mzdy.xml` - zaměstnanci,
 pracovní poměry, zpracované mzdy, srážky, podání pro ČSSZ a pojišťovny, platby
 a číselníky mezd. IČO ve jménu složky určí firmu, do které průvodce mzdy
 nabídne; podle roku ve jménu složky pak měsíce.
@@ -74,7 +254,7 @@ Tabulky jdou do exportu celé, vynechají se jen čistě systémové sloupce (kd
 záznam označil a zamkl, výběr, ruční pořadí). Obsah odeslaných hlášení
 a registrací drží PAMICA v binárních sloupcích; nástroj ho rozepíše na
 jednotlivé údaje datového slovníku JMHZ, takže převod převezme i to, co
-PAMICA za firmu podala (§ 108.12). Binární sloupec, který nejde přečíst
+PAMICA za firmu podala (§ 108.9.12). Binární sloupec, který nejde přečíst
 (obrázek, doručenka datové schránky), nástroj vynechá. Souhrn exportu vedle
 ZIPu vypíše počty řádků po tabulkách, kolik podání se přečetlo a které tabulky
 s daty export vědomě nebere (protokoly změn, odeslané e-maily, nastavení oken).
@@ -92,11 +272,11 @@ převodu hned.
 
 Přechází-li firma z POHODY zároveň s účetnictvím i se mzdami z **POHODA
 Mzdy**, použije se místo tohoto nástroje `Export-PohodaMdb.cmd` popsaný
-v [§ 107.1.4](107_Prechod_z_POHODY.md#10714-majetek-z-datoveho-souboru) — vzniklý
+v [§ 107.9.1.4](107_Prechod_z_POHODY.md#107914-majetek-z-datoveho-souboru) - vzniklý
 `91_mzdy.xml` nahrajte beze změny sem, do tohoto průvodce; sám o sobě je
 formátem shodný s exportem z PAMICA.
 
-### 108.1.4 Export z PAMICA SQL
+#### 108.9.1.4 Export z PAMICA SQL
 
 PAMICA SQL má tytéž tabulky jako datový soubor, jen v databázi na Microsoft SQL
 Serveru. `Export-PamicaSQL.cmd` z ní vytvoří **stejný ZIP** jako
@@ -108,7 +288,7 @@ a souhrnem vedle). Posílá jen dotazy `SELECT` přes šifrované spojení jen p
    kterého je vidět SQL Server. Stačí Windows PowerShell 5.1.
 2. Zkopírujte vzor `pamica-sql.example.json` jako `pamica-sql.json` vedle
    skriptu a vyplňte server, port a přihlášení. Klíče jsou stejné jako
-   u POHODA SQL ([§ 107.1.6](107_Prechod_z_POHODY.md#10716-cesta-3-export-z-pohoda-sql)).
+   u POHODA SQL ([§ 107.9.1.6](107_Prechod_z_POHODY.md#107916-cesta-3-export-z-pohoda-sql)).
    Bez souboru se nástroj na všechno zeptá, heslo skrytě.
 3. Spusťte `Export-PamicaSQL.cmd` dvojklikem. Když v konfiguraci chybí
    databáze, nástroj nabídne databáze na serveru, které mají zaměstnance,
@@ -128,7 +308,7 @@ je součástí Windows; jen při volbě `"driver": "odbc"` nainstalujte
 [Microsoft ODBC Driver for SQL Server](https://learn.microsoft.com/sql/connect/odbc/download-odbc-driver-for-sql-server).
 Soubor `pamica-sql.json` s heslem po exportu smažte.
 
-## 108.2 Co převod přenese
+### 108.9.2 Co převod přenese
 
 **Co převod udělá.** Jde stejnou cestou jako ruční import v `Mzdy → Importy`:
 
@@ -146,11 +326,11 @@ Soubor `pamica-sql.json` s heslem po exportu smažte.
 **Převzatou docházku a mzdové vstupy rovnou schválit.** V kroku *Náhled
 a volby* je zaškrtávátko, ve výchozím stavu zapnuté. Měsíce z PAMICA už
 proběhly a jsou podané, takže jako neschválené koncepty by nad nimi mzdový
-běh nešel spustit ani uzavřít — kontroly *docházka není schválena*
+běh nešel spustit ani uzavřít - kontroly *docházka není schválena*
 a *neschválené mzdové vstupy* jsou blokující a výjimkou se nedají přebít.
 Se zapnutou volbou převod docházku a mzdové vstupy rovnou schválí. Bez ní
-zůstanou podklady ke kontrole a účetní je schválí ručně v `Mzdy → Vstupy`
-a `Mzdy → Docházka`.
+zůstanou podklady ke kontrole a účetní je schválí ručně v `Mzdy → Mzdové složky a vstupy`
+a `Mzdy → Docházka a směny`.
 
 **Údaje osob a vztahů pro JMHZ.** Po mzdách převod doplní z `91_mzdy.xml`
 jen údaje, které v MyÚčtu chybí; vyplněný údaj nepřepíše:
@@ -224,7 +404,7 @@ s mzdovou účtárnou `MZDY` a výchozími předkontacemi. Variabilní symbol Č
 kód OSSZ a číslo plátce zdravotního pojištění, které firma vede v Nastavení
 firmy, převezme do Mezd a k variabilnímu symbolu založí registraci účtárny
 s účinností od začátku vedení mezd
-(viz [§ 90.8](90_Nastaveni_mezd.md#908-podrobny-pracovni-postup-a-kontroly));
+(viz [§ 90.14.1](90_Nastaveni_mezd.md#90141-mzdove-uctarny-a-registrace-u-cssz));
 co chybí, včetně účtů institucí, vypíše protokol k doplnění v Mzdy → Nastavení.
 Zapnutý modul, jeho začátek ani existující nastavení převod nemění. Počáteční
 stavy kumulací převod zapíše jen tehdy, když má firma začátek vedení mezd
@@ -256,14 +436,14 @@ a záloha daně, uplatněné slevy, bonus, srážková daň) převod zapíše za
 roku před začátkem vedení mezd v MyÚčtu, jen za souvislou řadu měsíců
 a jen osobě, která stavy ještě nemá.
 
-Co převod doplní z odeslaných hlášení JMHZ a registrací, popisuje § 108.12.
+Co převod doplní z odeslaných hlášení JMHZ a registrací, popisuje § 108.9.12.
 
 Klasifikace složek odpovídá katalogu PAMICA / POHODA Mzdy: časová a úkolová
 mzda, příplatky, odměny, proplacená dovolená, odstupné a obědy (srážka ze mzdy).
 Příplatek za přesčas, za práci v sobotu a neděli a za práci ve svátek jde na
 standardní složky, které mají v měsíčním hlášení vlastní kolonku.
 Základní mzdu počítá MyÚčto ze sjednané mzdy vztahu, náhrady z hodin
-a průměru; srážky a exekuce mají vlastní krok (§ 108.3).
+a průměru; srážky a exekuce mají vlastní krok (§ 108.9.3).
 
 **Sjednaná měsíční mzda** je měsíční sazba složky základní mzdy v PAMICA, ne
 základní mzda vyplacená za měsíc (ta je krácená o dovolenou a překážky).
@@ -279,14 +459,14 @@ den u měsíční mzdy převod vede zvlášť, ne mezi odpracovanými hodinami.
 
 **Náhrada mzdy při nemoci.** U převzaté dočasné pracovní neschopnosti, která
 zasahuje do měsíců počítaných MyÚčtem, převod spočítá náhradu mzdy stejně
-jako schválení v `Mzdy → Nepřítomnosti`: okno prvních 14 dnů, redukovaný
+jako schválení v `Mzdy → Absence a dovolená`: okno prvních 14 dnů, redukovaný
 průměr ze schváleného průměru čtvrtletí, ve kterém nemoc začala. Dobu měří
 rozvrhem pracovního kalendáře (měsíc ze souhrnu docházky směny nemá). Náhrada
 vznikne jen za dny od začátku vedení mezd, dřívější dny zaplatila PAMICA.
 První den nemoci bere převod jako neodpracovaný; když ho zaměstnanec celý
-odpracoval, opravte nepřítomnost v `Mzdy → Nepřítomnosti`. Nepřítomnost
+odpracoval, opravte nepřítomnost v `Mzdy → Absence a dovolená`. Nepřítomnost
 bez schváleného průměru protokol vypíše; po doplnění průměru převod
-zopakujte. Vrácenou dovolenou zadejte ručně v `Mzdy → Vstupy`.
+zopakujte. Vrácenou dovolenou zadejte ručně v `Mzdy → Mzdové složky a vstupy`.
 
 **Opakovaný převod** téhož exportu nic nezmění. Když se sešit měsíce, který
 počítá MyÚčto, od dřívějšího převodu změnil (nový export nebo novější verze
@@ -308,9 +488,9 @@ přesčas, doplatek, dorovnání i placená doba školení jsou mzda za práci, 
 příplatek ani odměna, takže jdou mezi tarifní mzdy. Kde obsah plnění z názvu
 složky neplyne, například u příspěvku, převod nic nehádá: složku založí bez
 zařazení a protokol ji vypíše s kódem a počtem vstupů. Zařaďte je
-v `Mzdy → Mzdové složky`, jinak nepůjde zmrazit měsíční hlášení.
+v `Mzdy → Mzdové složky a vstupy`, jinak nepůjde zmrazit měsíční hlášení.
 
-## 108.3 Srážky, exekuce a insolvence
+### 108.9.3 Srážky, exekuce a insolvence
 
 Trvalé srážky z karty zaměstnance i srážky ve zpracovaných mzdách převod
 zařadí podle číselníku srážek PAMICA, ne podle čísla složky:
@@ -347,7 +527,7 @@ Nepřevezme se rozpad nezabavitelné částky z PAMICA (MyÚčto ho počítá vl
 sadou pravidel, dvojí zdroj by se rozešel), vazba dvou srážek na jeden příkaz,
 společné oddlužení manželů a vazby na spořicí produkty.
 
-## 108.4 Účty institucí
+### 108.9.4 Účty institucí
 
 Účty zdravotních pojišťoven převod vezme z číselníku PAMICA. Číselník
 finančního úřadu a OSSZ ale PAMICA drží v nastavení programu, které se
@@ -366,7 +546,7 @@ Kód územního pracoviště finančního úřadu export nenese vůbec, pro pod�
 REGZEL ho zadejte ručně. Penzijní a životní pojištění, DIP a dlouhodobá péče
 mají v exportu jen názvy, ne účty.
 
-## 108.5 Dovolená
+### 108.9.5 Dovolená
 
 Převádí se **zůstatek** dovolené ke dni přechodu jako převod z minulého
 období, počítaný z hodinových sloupců karty dovolené; dny se použijí, jen když
@@ -375,11 +555,11 @@ nepřevádí. Jednotlivá čerpání se nepřevádějí, v zůstatku jsou už od
 Karta dovolené je v PAMICA na osobě, takže u zaměstnance se souběžnými vztahy
 se zůstatek nepřevede a protokol na to upozorní.
 
-## 108.6 Co převod nepřenese
+### 108.9.6 Co převod nepřenese
 
 - **Vyplacené dávky nemocenského (`MZdavky`).** Od roku 2009 je vyplácí ČSSZ,
   takže se jako částky nepřenášejí. Rozpracovaná neschopnost se ale převede
-  jako případ dávky (§ 108.7).
+  jako případ dávky (§ 108.9.7).
 - **Vlastní výpočet náhrady mzdy.** Částku z předchozího programu převod uvede
   u nepřítomnosti jako poznámku, ale nepoužije ji: náhradu si MyÚčto počítá
   z průměrného výdělku a rozvržených směn. Vnucená cizí částka by ten výpočet
@@ -387,14 +567,14 @@ se zůstatek nepřevede a protokol na to upozorní.
 - **Přílohy k žádosti o dávku (`NEMPRIpol`).** Rozhodné období a vyloučené dny
   z nich MyÚčto v případu dávky nevede. Převzaté měsíce nenesou vyloučené dny
   podle § 18 odst. 7 zákona č. 187/2006 Sb.; měsíc bez příjmu proto NEMPRI
-  vyžádá zadat u případu ručně (kapitola 85.15.2).
+  vyžádá zadat u případu ručně (viz [Podání a hlášení](85_Podani_a_hlaseni.md)).
 - **Zaúčtování mezd (`MZzauct`).** Účetní zápisy se nepřenášejí: mzdy se do
   účetnictví zaúčtují až v MyÚčtu, podle jeho vlastního nastavení. Převzaté
   zápisy by proti převedeným dokladům vyrobily duplicitu. Z převzatého
-  zaúčtování se bere jen podklad pro nastavení kontací (§ 108.11).
+  zaúčtování se bere jen podklad pro nastavení kontací (§ 108.9.11).
 - **Zákonné pojištění odpovědnosti zaměstnavatele.** Export ho nevede.
 
-## 108.7 Nemocenská přes přelom
+### 108.9.7 Nemocenská přes přelom
 
 Neschopnost, která začala u předchozího programu a pokračuje v prvním měsíci
 vedeném v MyÚčtu, převod zapíše jako nepřítomnost od prvního měsíce, který
@@ -409,7 +589,7 @@ až když má čtvrtletí schválený průměr; ostatní zůstanou k rozhodnutí
 je vypíše.
 
 K rozběhnuté neschopnosti, ošetřování nebo mateřské převod založí i **případ
-dávky** v `Mzdy → Podání → Dávky nemocenského` se skutečným dnem vzniku
+dávky** v `Mzdy → Podání a hlášení`, záložka **Dávky nemocenského** se skutečným dnem vzniku
 z PAMICA. Oznámení NEMPRI, jehož lhůta začala běžet před prvním měsícem
 vedeným v MyÚčtu, je v případu vedené jako podané předchozím programem a
 MyÚčto ho znovu nepřipraví. Připadá-li patnáctý den neschopnosti až na první
@@ -420,10 +600,10 @@ NEMPRI vedené jako její ve skutečnosti nepodala, vraťte ho tlačítkem
 Hlášení HZUPN k návratu do práce podává už MyÚčto a hlídač termínů ho hlídá.
 Opakovaný převod případ nezdvojí.
 
-## 108.8 Přechod uprostřed roku
+### 108.9.8 Přechod uprostřed roku
 
-Měsíce před zahájením vedení mezd v MyÚčtu se nepřepočítávají — jejich
-výsledky se uloží jako počáteční stavy ročních kumulací (§ 108.2, Začátek
+Měsíce před zahájením vedení mezd v MyÚčtu se nepřepočítávají - jejich
+výsledky se uloží jako počáteční stavy ročních kumulací (§ 108.9.2, Začátek
 vedení mezd) a jako **převzaté mzdy** po měsících.
 
 Obě vrstvy mají jiný účel. Z **počátečních stavů** vychází roční zúčtování,
@@ -431,7 +611,7 @@ potvrzení o zdanitelných příjmech ze závislé činnosti (§ 38j odst. 3 zá
 o daních z příjmů), roční mzdový list i vyúčtování záloh a srážkové daně.
 **Převzaté mzdy** čte evidenční list důchodového pojištění, převzatý běh,
 kontrolní sestava, návrh průměrného výdělku pro první čtvrtletí po přechodu
-a hlídání ročního limitu dohod o provedení práce. Převzatá část je v dokladu vždy označená —
+a hlídání ročního limitu dohod o provedení práce. Převzatá část je v dokladu vždy označená -
 není to výpočet MyÚčta. Chybí-li převzatému měsíci údaj, který doklad
 potřebuje, doklad se raději nevystaví a řekne, co doplnit.
 
@@ -445,10 +625,10 @@ pracovního vztahu a **Kontrola převzetí** ukáže, kde se vrstvy rozcházejí
 
 Celá agenda přechodu žije v `Mzdy → Importy` jako záložky **Převzaté mzdy**,
 **Kontrola převzetí** a **Kontace z převzetí**. Poslední dvě se nabízí, až
-když je co převzatého — firmě, která mzdy od začátku počítá v MyÚčtu, se
+když je co převzatého - firmě, která mzdy od začátku počítá v MyÚčtu, se
 neukážou vůbec.
 
-## 108.9 Opakovaný převod
+### 108.9.9 Opakovaný převod
 
 Převod si pamatuje, co z které agendy už vzniklo. Opakovaný převod téhož nebo
 novějšího exportu založí jen to, co ještě chybí, a nic nezdvojí. Měsíc, který
@@ -459,14 +639,14 @@ převod spusťte znovu.
 
 Měsíc, který se nepodařilo převést, je v protokolu rozdíl k přijetí: ostatní
 měsíce se převedou a ostrý převod jde po zkoušce nanečisto spustit i s ním,
-viz [§ 103.5.1](103_Prechod_z_Money_S3.md#10351-chyby-upozorneni-a-rozdily-k-prijeti).
+viz [§ 103.10.5.1](103_Prechod_z_Money_S3.md#1031051-chyby-upozorneni-a-rozdily-k-prijeti).
 
-## 108.10 Kontrola převzatých mezd
+### 108.9.10 Kontrola převzatých mezd
 
 **Cesta: `Mzdy → Importy → Kontrola převzetí`**
 
 Převzatý měsíc jde v MyÚčtu přepočítat vlastní legislativní sadou. Jenže
-PAMICA ta čísla už podala — do jednotného měsíčního hlášení zaměstnavatele,
+PAMICA ta čísla už podala - do jednotného měsíčního hlášení zaměstnavatele,
 zdravotním pojišťovnám a finančnímu úřadu. Kontrolní sestava postaví obě
 strany vedle sebe, aby bylo vidět, jestli se přepočet s podaným rozešel.
 
@@ -486,8 +666,8 @@ po osobách a veličinách; tlačítkem *Zobrazit celý rozpad* se pod ním dokr
 měsíce s odchylkou* se schovají měsíce, ve kterých všechno sedí.
 
 Pojistné zaměstnavatele na **sociální** zabezpečení se porovnává jen
-v součtu za měsíc a za rok. Osobní veličina to není — počítá se z úhrnu
-vyměřovacích základů celé firmy —, takže rozpad na jednotlivé osoby by byl
+v součtu za měsíc a za rok. Osobní veličina to není - počítá se z úhrnu
+vyměřovacích základů celé firmy -, takže rozpad na jednotlivé osoby by byl
 jen odhad.
 
 Řádek sestavy je **osoba a měsíc**, ne pracovní vztah a měsíc. PAMICA má
@@ -502,13 +682,13 @@ nepočítalo, i vztah, který PAMICA nemá, se v rozdílovém sloupci ukáže ja
 nepřispěly všechny řádky, nese značku *neúplné*. Nula v rozdílu tak vždycky
 znamená „sedí to", ne „nemám s čím porovnat".
 
-Sestava čte **aktuální** revizi mzdového běhu, ne jen schválenou — smysl je
+Sestava čte **aktuální** revizi mzdového běhu, ne jen schválenou - smysl je
 podívat se na přepočet dřív, než se schválí. Měsíc s neschválenou revizí je
 označený stavem revize.
 
 Sestavu vidí uživatel s oprávněním ke mzdovým sestavám (`payroll.reports`).
 
-## 108.11 Kontace mezd z původního programu
+### 108.9.11 Kontace mezd z původního programu
 
 **Cesta: `Mzdy → Importy → Kontace z převzetí`**
 
@@ -539,11 +719,11 @@ dávky nemocenské), se nezahazuje - je ve zvláštní tabulce pod návrhem.
 
 **Nic se neuloží samo.** Uloží se právě ty účty, které jste v nabídce
 vybrali; ostatní plnění zůstanou na dosavadní hodnotě. Zápis jde stejnou
-cestou jako obrazovka `Mzdy → Nastavení`, takže platí stejné kontroly osnovy
+cestou jako obrazovka `Mzdy → Nastavení mezd`, takže platí stejné kontroly osnovy
 i typu účtu. Obrazovku vidí uživatel s oprávněním k nastavení mezd
 (`payroll.settings`).
 
-## 108.12 Odeslaná hlášení JMHZ a registrace
+### 108.9.12 Odeslaná hlášení JMHZ a registrace
 
 Po údajích osob a vztahů projde převod podání, která PAMICA za firmu podala:
 měsíční hlášení JMHZ převáděného roku a registrace zaměstnanců (přihlášky,
@@ -577,7 +757,7 @@ protokol na něj upozorní větou *Hlášení za MM/RRRR nebylo odesláno*.
 historie podání předchozím programem: období, druh, GUID podání a formulářů,
 stav odeslání, časy odeslání a přijetí, vazba formulářů na vztahy a úplný
 obsah po údajích. Opakovaný převod záznamy aktualizuje, nezdvojí. Přehled je
-v `Mzdy → Podání → JMHZ`, oddíl *Podání předchozím programem*
+v `Mzdy → Podání a hlášení`, záložka **JMHZ**, oddíl *Podání předchozím programem*
 ([§ 85.14.14](85_Podani_a_hlaseni.md#851414-podani-predchozim-programem)); za měsíc,
 za který řádné hlášení odešlo, MyÚčto řádné hlášení znovu nepřipraví.
 
@@ -585,3 +765,11 @@ Prohlášení poplatníka, slevy na dani a sleva pracujícího důchodce se z hl
 nepřebírají: nesou je už zpracované mzdy. Údaje registrace, které evidence
 bere z karty zaměstnance (adresy, doklad totožnosti, vzdělání), a údaje, pro
 které nemá místo, zůstávají v obsahu uloženém v historii podání.
+
+## 108.10 Související kapitoly
+
+- [Přechod z POHODY](107_Prechod_z_POHODY.md)
+- [Přechod mezd v průběhu roku](113_Prechod_mezd_v_prubehu_roku.md)
+- [Mzdy: nastavení](90_Nastaveni_mezd.md)
+- [Podání a hlášení](85_Podani_a_hlaseni.md)
+- [Řešení problémů](999_Reseni_problemu.md)

@@ -1,22 +1,80 @@
 # 63. Měsíční přehled
 
-**Cesta: `Účetnictví → Měsíční přehled`**
+> Manažerský report pro klienta, který se skládá z již existujících účetních a daňových sestav: náhled, PDF, odeslání e-mailem a historie odeslání. Pro externí účetní, která měsíčně informuje klienta o stavu jeho účetnictví.
 
-Měsíční přehled skládá manažerský report pro klienta z již existujících
-účetních a daňových sestav. Nevytváří vlastní paralelní výpočty. Lze zobrazit
-náhled, stáhnout PDF, odeslat je e-mailem a dohledat historii odeslání.
+## 63.1 Kdy to potřebujete
 
-Je dostupný jen firmě v podvojném účetnictví. Čtenář s právem číst účetnictví
-může zobrazit náhled, stáhnout PDF a historii. Odeslání vyžaduje právo zápisu
-do účetnictví.
+Kapitolu otevřete, když:
 
-> ⚠️ **Jde o informační manažerský přehled.** Není to účetní závěrka, daňový doklad
-> ani důkaz, že byly provedeny měsíční kontroly. Report použije aktuální stav
-> dat v okamžiku generování.
+- skončil měsíc a máte klientovi poslat přehled výsledku, DPH a pohledávek po splatnosti,
+- si chcete PDF přehledu jen stáhnout nebo prohlédnout,
+- hledáte, komu a kdy jste přehled za určitý měsíc poslali.
 
-## 63.1 Volba měsíce a rozhodné datum
+### 63.1.1 Kdy co udělat
 
-Vyberte rok a měsíc v rozsahu podporovaném serverem (2000–2100). Systém určí:
+<!-- cols: 26 44 30 -->
+| Kdy | Co udělat | Kde v aplikaci |
+|---|---|---|
+| po vyřešení měsíční kontroly | Připravit a odeslat přehled klientovi | `Účetnictví → Měsíční přehled`, [§ 63.3](#633-krok-za-krokem-sestaveni-a-odeslani-prehledu) |
+| když klient přehled nedostal | Dohledat historii odeslání | tabulka **Historie odeslání** na téže stránce |
+| na vyžádání | Stáhnout PDF bez odeslání | tlačítko **Stáhnout PDF** |
+
+## 63.2 Než začnete
+
+1. **Podvojné účetnictví a oprávnění.** Přehled je dostupný jen firmě v podvojném účetnictví. Náhled, PDF a historii vidí čtenář s právem číst účetnictví. Odeslání vyžaduje právo zápisu do účetnictví. Uživatel jen pro čtení uvidí hlášku **Máte oprávnění pouze pro čtení - odeslání klientovi je zakázáno.**
+2. **Účetní období pro rozhodné datum.** Pro měsíc musí existovat účetní období. Bez něj report nelze sestavit.
+3. **Nastavené odesílání e-mailů.** Odeslání používá poštovní nastavení aplikace.
+4. **Hotová měsíční práce.** Dokončete [K doúčtování](54_Rucni_fronta_doctovani.md), projděte [Úplnost dokladů](61_Uplnost_dokladu.md) a [Měsíční kontrolu](62_Mesicni_kontrola.md).
+
+> [!WARNING]
+> Jde o informační manažerský přehled. Není to účetní závěrka, daňový doklad ani důkaz, že byly provedeny měsíční kontroly. Report použije aktuální stav dat v okamžiku generování.
+
+## 63.3 Krok za krokem: sestavení a odeslání přehledu
+
+1. Otevřete `Účetnictví → Měsíční přehled`.
+2. V poli **Období** zvolte rok a měsíc.
+3. Ověřte v náhledu měsíc a rozhodné datum (dřívější z posledního dne měsíce a dnešního dne).
+4. Volitelně doplňte **Komentář účetní**. Zobrazí se v PDF i v e-mailu.
+5. Klikněte na **Obnovit náhled** a zkontrolujte KPI: **Výsledek hospodaření (YTD)**, **DPH k úhradě** (nebo **Nadměrný odpočet**) s termínem podání, **Pohledávky po splatnosti** a **Závazky po splatnosti**.
+6. Ověřte výsledovku, rozvahu, saldokonto a DPH v jejich samostatných sestavách.
+7. Klikněte na **Stáhnout PDF** a projděte i sekce, které webový náhled nezobrazuje celé (plná rozvaha, kumulovaná výsledovka, nadcházející termíny).
+8. Klikněte na **Odeslat klientovi**.
+9. Do pole **Komu** zadejte jednu či více adres oddělených čárkou, středníkem nebo mezerou. Podle potřeby vyplňte **Kopie (CC)**.
+10. Klikněte na **Odeslat**.
+
+**Jak poznáte, že je hotovo:** Stránka hlásí **Přehled odeslán (N příjemců).** a v tabulce **Historie odeslání** přibyl řádek se sloupci **Období**, **Komu**, **Odeslal(a)**, **Kdy** a odkazem **Zobrazit** na archivované PDF.
+
+> [!TIP]
+> Průkazným artefaktem konkrétního odeslání je archivované PDF. Nový náhled téhož měsíce může po pozdějších opravách účetnictví obsahovat jiné hodnoty.
+
+## 63.4 Krok za krokem: dohledání odeslaného přehledu
+
+1. Otevřete `Účetnictví → Měsíční přehled` a sjeďte k tabulce **Historie odeslání**.
+2. Najděte řádek podle sloupce **Období** nebo **Komu**.
+3. Klikněte na **Zobrazit** u archivovaného dokumentu.
+
+**Jak poznáte, že je hotovo:** Otevře se PDF, které bylo klientovi odesláno. Historie je oddělená pro každou firmu a řadí záznamy od nejnovějšího.
+
+## 63.5 Když něco nejde
+
+<!-- cols: 30 34 36 -->
+| Co vidíte | Proč | Co udělat |
+|---|---|---|
+| Report nelze sestavit | Pro rozhodné datum neexistuje účetní období. Budoucí měsíc se neočekávaně nepromítne dopředu, stav se ořízne na dnešek. | Založte účetní období, nebo zvolte měsíc, ke kterému období existuje. |
+| **Zadejte alespoň jednoho příjemce.** | Pole **Komu** je prázdné nebo obsahuje neplatnou adresu | Opravte adresy. Server každou validuje. |
+| Odeslání e-mailu selhalo | Poštovní server zprávu nepřevzal | Zkontrolujte nastavení e-mailu a odešlete znovu. Historie se neuloží, chyba je v auditní stopě. |
+| Odkaz na dokument v historii chybí | E-mail se odeslal, ale archivace do Dokumentů selhala | Odeslání zůstává platné. PDF znovu stáhněte a uložte ručně. |
+| Sekce DPH v PDF chybí | U neplátce se sekce nezobrazuje jako daň k úhradě. U plátce se ji nepodařilo sestavit. | Zkontrolujte samostatné výkazy DPH, chybějící DPH v reportu není důkaz, že firma nemá daňovou povinnost. |
+| KPI po splatnosti ukazuje jen 10 položek | Report vybírá nejvýše 10 položek s nejdelším prodlením | Úplný seznam najdete v [Saldokontu](60_Saldokonto.md). |
+| Tlačítko **Odeslat klientovi** nejde použít | Máte právo jen pro čtení | Požádejte správce o právo zápisu do účetnictví. |
+
+## 63.6 Podrobnosti a pravidla
+
+### 63.6.1 Volba měsíce a rozhodné datum
+
+Přehled nevytváří vlastní paralelní výpočty. Všechny části přebírá ze stejných služeb jako samostatné účetní a daňové sestavy.
+
+Vyberte rok a měsíc v rozsahu 2000-2100. Systém určí:
 
 - první a poslední den měsíce,
 - **rozhodné datum** jako dřívější z posledního dne měsíce a dnešního dne,
@@ -30,9 +88,9 @@ Volitelný **Komentář účetní** se přidá do náhledu dat, do PDF a do text
 odesílaného e-mailu. Komentář není účetní zápis ani trvalá anotace sestavy;
 uloží se až jako součást záznamu o skutečném odeslání.
 
-## 63.2 Jak se jednotlivé části počítají
+### 63.6.2 Jak se jednotlivé části počítají
 
-### 63.2.1 Výsledovka za měsíc
+#### 63.6.2.1 Výsledovka za měsíc
 
 Zdroj je stejná služba jako samostatná Výsledovka:
 
@@ -43,21 +101,19 @@ Zdroj je stejná služba jako samostatná Výsledovka:
 
 Výsledkem je obrat samotného měsíce. V prvním měsíci fiskálního období není co
 odečíst, proto je měsíční hodnota shodná s YTD. Metadata řádků, hierarchie a
-mapování účtů se nepřepočítávají v reportu; přebírají se z
-`FinancialStatementService`.
+mapování účtů se nepřepočítávají v reportu; přebírají se ze samostatné Výsledovky.
 
-KPI **Výsledek hospodaření YTD** je kontrolní hodnota
-`income_statement_ytd.checks.profit_current`, nikoli prostý součet libovolně
-zobrazených detailních řádků na frontendu.
+KPI **Výsledek hospodaření (YTD)** je kontrolní hodnota výsledku za období, nikoli prostý součet libovolně
+zobrazených detailních řádků na stránce.
 
-### 63.2.2 Rozvaha
+#### 63.6.2.2 Rozvaha
 
 Rozvaha se sestaví ke stejnému rozhodnému datu a stejnou službou jako
 samostatná Rozvaha. PDF obsahuje aktiva, pasiva a kontrolu, zda se čistá aktiva
 rovnají pasivům. Webový náhled zobrazuje hlavně KPI a měsíční výsledovku;
 plná rozvaha je součástí staženého nebo odeslaného PDF.
 
-### 63.2.3 Pohledávky a závazky po splatnosti
+#### 63.6.2.3 Pohledávky a závazky po splatnosti
 
 Zdroj je historické saldokonto ke dni konce reportu:
 
@@ -69,7 +125,7 @@ dní po splatnosti, seřazených od nejdelšího prodlení. Částka je zbývaj�
 zůstatek v CZK. KPI v náhledu ukazuje počet položek v tomto omezeném top
 seznamu, nikoli počet všech otevřených položek firmy.
 
-### 63.2.4 DPH
+#### 63.6.2.4 DPH
 
 U neplátce se sekce nezobrazí jako daň k úhradě. U plátce server sestaví
 read-only náhled přiznání k DPH pro zvolený rok a měsíc a převezme:
@@ -83,12 +139,12 @@ sekci nepodaří sestavit, zbytek měsíčního reportu zůstane dostupný a DPH
 vynechá. Chybějící DPH v reportu proto není důkaz, že firma nemá daňovou
 povinnost; ověřte samostatné výkazy.
 
-### 63.2.5 Nadcházející termíny
+#### 63.6.2.5 Nadcházející termíny
 
 PDF přebírá nejvýše osm nadcházejících předpisů ze služby daňových záloh.
 Uvádí typ, datum, částku, stav a informaci, zda je termín po splatnosti.
 
-## 63.3 Rozdíl mezi náhledem a PDF
+### 63.6.3 Rozdíl mezi náhledem a PDF
 
 Webová stránka zobrazuje:
 
@@ -107,11 +163,11 @@ PDF navíc obsahuje:
 - komentář účetní,
 - upozornění, že jde o informační přehled.
 
-Soubor se stahuje jako `mesicni-prehled-RRRR-MM.pdf`.
+Soubor se stahuje pod názvem ve tvaru `mesicni-prehled-RRRR-MM.pdf`.
 
-## 63.4 Odeslání klientovi
+### 63.6.4 Odeslání klientovi
 
-Do polí **Komu** a **Kopie** lze zadat více adres oddělených čárkou,
+Do polí **Komu** a **Kopie (CC)** lze zadat více adres oddělených čárkou,
 středníkem nebo mezerou. Server každou adresu validuje; alespoň jeden hlavní
 příjemce je povinný.
 
@@ -132,7 +188,7 @@ prázdným ID dokumentu a server zaznamená varování.
 SMTP odpověď potvrzuje převzetí zprávy poštovním serverem, nikoli konečné
 doručení do schránky příjemce.
 
-## 63.5 Historie odeslání
+### 63.6.5 Historie odeslání
 
 Historie je oddělená pro každou firmu a řadí záznamy od nejnovějšího. Stránka
 načítá standardně posledních 30, server dovoluje nejvýše 100. U řádku je
@@ -148,17 +204,11 @@ Historie neukládá neměnný datový snapshot všech vstupních sestav samostat
 průkazným artefaktem konkrétního odeslání je archivované PDF. Nový náhled téhož
 měsíce může po pozdějších opravách účetnictví obsahovat jiné hodnoty.
 
-## 63.6 Doporučený postup před odesláním
+## 63.7 Související kapitoly
 
-1. Dokončete [K doúčtování](54_Rucni_fronta_doctovani.md).
-2. Projděte [Úplnost dokladů](61_Uplnost_dokladu.md) a
-   [Měsíční kontrolu](62_Mesicni_kontrola.md).
-3. Ověřte výsledovku, rozvahu, saldokonto a DPH v jejich samostatných
-   sestavách.
-4. V náhledu zkontrolujte měsíc a rozhodné datum a doplňte věcný komentář.
-5. Stáhněte PDF a projděte i sekce, které webový náhled nezobrazuje celé.
-6. Teprve potom zadejte ověřené adresy a report odešlete.
+- [Měsíční kontrola](62_Mesicni_kontrola.md) - brána před odesláním
+- [Výsledovka druhová](58_Vysledovka_druhova.md), [Rozvaha](57_Rozvaha.md), [Saldokonto](60_Saldokonto.md) - zdroje částí reportu
+- [Úplnost dokladů](61_Uplnost_dokladu.md) a [K doúčtování](54_Rucni_fronta_doctovani.md)
+- [Průvodce účetního](50_Pruvodce_ucetniho.md)
 
-Měsíční přehled není vhodný jako náhrada kompletního závěrkového balíčku ani
-daňového podání. Jeho účelem je srozumitelně informovat klienta o aktuálním
-stavu účetnictví.
+Měsíční přehled není vhodný jako náhrada kompletního závěrkového balíčku ani daňového podání. Jeho účelem je srozumitelně informovat klienta o aktuálním stavu účetnictví.

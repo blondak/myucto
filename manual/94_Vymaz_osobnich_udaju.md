@@ -1,87 +1,113 @@
 # 94. Výmaz osobních údajů
 
-## 94.1 Účel
+> Návod, jak nevratně vymazat nebo anonymizovat osobní údaje zaměstnanců, kterým
+> uplynula retenční lhůta. Pro mzdovou účetní a osobu odpovědnou za ochranu
+> osobních údajů.
 
-Agenda připravuje řízené odstranění nebo anonymizaci osobních údajů po skončení retenčních povinností. Jde o nevratnou a odděleně oprávněnou operaci.
+## 94.1 Kdy to potřebujete
 
-## 94.2 Předpoklady a oprávnění
+- Bývalým zaměstnancům uplynula retenční lhůta a data už nesmíte držet.
+- Pravidelně (např. jednou ročně) čistíte mzdovou evidenci.
+- Bývalý zaměstnanec žádá o výmaz a lhůta uchování už neběží.
 
-Je nutné oprávnění `payroll.erasure`, předchozí posouzení retenčních lhůt a schválení odpovědnou osobou. Před zahájením ověřte, že neexistuje zákonná, smluvní, účetní ani procesní překážka.
+## 94.2 Než začnete
 
-## 94.3 Krokový postup
+1. **Oprávnění** k výmazu osobních údajů (`payroll.erasure`).
+2. **Retenční lhůty** máte projité a víte, koho lze navrhnout (viz
+   [Retenční lhůty](93_Retencni_lhuty.md)).
+3. **Žádná překážka**: ověřte, že osobu nedrží zákonná, smluvní, účetní ani
+   procesní povinnost (kontrola, spor, exekuce). Případně zadejte zadržení
+   výmazu.
+4. **Schválení** odpovědnou osobou podle pravidel firmy. Výmaz může dokončit
+   jedna oprávněná účetní, aplikace kroky zapíše do auditní stopy.
 
-1. Otevřete **Mzdy → Výmaz osobních údajů** a vyhledejte osobu.
-2. Spusťte náhled dopadu a projděte všechny navázané kategorie dat.
-3. Vyřešte blokace, zejména neukončenou retenci, aktivní vztah, otevřené řízení či povinný dokument.
-4. Znovu zkontrolujte rozsah a bezpečně zaznamenejte právní důvod bez nadbytečných osobních údajů.
-5. Proveďte potvrzovací kroky zobrazené aplikací; poslední potvrzení považujte za nevratné.
-6. Po dokončení ověřte výsledek a uchovejte pouze dovolený auditní záznam o operaci.
+## 94.3 Krok za krokem: výmaz
 
-## 94.4 Stavy
+1. Otevřete `Mzdy → Výmaz osobních údajů`.
+2. Zadejte **Sestavit návrh k datu** a klikněte na **Sestavit návrh**.
+   Aplikace vezme jen osoby, kterým k tomu dni uplynula lhůta a nic je nedrží.
+3. Otevřete návrh a projděte u každé osoby **Rozsah**, **Podle ustanovení**,
+   **Dopad** a co **zůstane** ve zmrazeném obsahu.
+4. Zkontrolujte firmu, osoby a rozsah. Je-li vše v pořádku, klikněte na
+   **Schválit**; jinak na **Zamítnout**.
+5. U schváleného návrhu klikněte na **Provést výmaz**.
+6. V potvrzení zaškrtněte „Rozumím, že výmaz je nevratný a data nejdou
+   obnovit." a opište číslo návrhu.
+7. Potvrďte. Ve sloupci **Výsledek** zkontrolujte výsledek u každé osoby.
+8. Vymažte nebo anonymizujte i data mimo aplikaci (exportovaná PDF, bankovní
+   soubory, externí archiv) podle politiky firmy.
 
-Požadavek může být připravený, blokovaný, čekající na potvrzení, dokončený nebo chybový. Náhled nic nemaže. Dokončený výmaz nelze použít k obnovení původního obsahu.
+**Jak poznáte, že je hotovo:** Návrh má stav „Provedeno. Položky zůstávají jako
+doklad, že výmaz proběhl." a souhrn uvádí, kolik osob se provedlo a kolik se
+přeskočilo kvůli zadržení nebo změně podmínek.
 
-## 94.5 Kontroly a bezpečnost
+> [!WARNING]
+> Výmaz je nevratný. Nevytvářejte si nechráněnou kopii „pro jistotu", tím by
+> smysl výmazu zanikl.
 
-Výmaz může dokončit jedna oprávněná účetní. Před posledním krokem musí ověřit firmu, osobu i rozsah a aplikace její kroky zapíše do auditní stopy. Nevytvářejte nechráněnou kopii „pro jistotu“, protože by tím smysl výmazu zanikl. Zálohy a externí exporty řešte podle schválené politiky firmy.
+## 94.4 Když něco nejde
 
-## 94.6 Časté chyby
+<!-- cols: 30 34 36 -->
+| Co vidíte | Proč | Co udělat |
+|---|---|---|
+| Návrh se nesestaví, není koho navrhnout | K zadanému dni nikomu neuplynula lhůta, nebo všechny drží zadržení | Zkontrolujte důvody v [Retenční lhůty](93_Retencni_lhuty.md). |
+| **Provést výmaz** nejde | Návrh není schválený, nebo je zamítnutý | Návrh schvalte; zamítnutý sestavte znovu. |
+| „Opsané číslo nesouhlasí s otevřeným návrhem" | Překlep v čísle návrhu | Opište číslo přesně. |
+| Osoba se při provedení přeskočila | Mezi schválením a provedením dostala zadržení nebo se změnil rozsah | Důvod je ve sloupci **Výsledek**; po vyřešení sestavte nový návrh. |
+| Řádek návrhu je bez jména | Osoba je úplně vymazaná | Je to v pořádku, obrazovka to napíše. |
 
-- Výmaz jen kvůli žádosti bez kontroly zákonné povinnosti uchování.
-- Záměna osoby se stejným jménem.
-- Opomenutí exportovaných PDF, bankovních souborů nebo externího archivu.
-- Uložení úplných mazáných údajů do auditní poznámky.
+## 94.5 Podrobnosti a pravidla
 
-## 94.7 Návaznosti
+### 94.5.1 Tři kroky výmazu
 
-Nejdříve vždy projděte [retenční lhůty](93_Retencni_lhuty.md). Vazby mohou vést do [zaměstnanců](86_Zamestnanci.md), [dokumentů](83_Dokumenty_a_vystupy.md), [plateb](82_Platby_a_uhrady.md) a [podání](85_Podani_a_hlaseni.md).
+Obrazovka `Mzdy → Výmaz osobních údajů` je jediné místo, odkud se mzdová
+osobní data mažou. Výmaz je **nevratný**, proto je rozdělený do tří kroků, které
+lze zkontrolovat každý zvlášť.
 
+**Sestavit návrh.** Aplikace sestaví návrh **jen** z osob, kterým lhůta
+uplynula a nic je nedrží. Když není koho navrhnout, řekne to a nevytvoří nic:
+prázdný návrh by se dal schválit a v přehledu by vypadal jako provedený výmaz.
+Náhled nic nemaže.
 
+**Schválit nebo zamítnout.** Detail návrhu jmenuje každou osobu a uvádí:
 
-## 94.8 Podrobný pracovní postup a kontroly
+- **Rozsah**: *úplný výmaz* u osoby bez účetní stopy, jinak *anonymizace*;
+  účetní záznam zůstane, zmizí z něj jen osobní údaj,
+- **Podle ustanovení**: lhůta, o kterou se rozhodnutí opírá, a jak je doložená,
+- **Dopad**: kolik řádků osobních dat zmizí, po skupinách,
+- **Zbytek**: osobní údaj, který zůstane ve zmrazeném obsahu (vystavená PDF,
+  odeslaná XML). Ten se nepřepisuje a návrh to říká předem.
 
-Obrazovka **Mzdy → Výmaz osobních údajů** (oprávnění `payroll.erasure`) je
-jediné místo, odkud se mzdová osobní data mažou. Výmaz je **nevratný** —
-data zpátky nikdo nezadá —, proto je rozdělený do tří kroků, které se dají
-zkontrolovat každý zvlášť.
+Zamítnutý návrh zůstává v přehledu jako doklad, provést ho už nelze.
 
-### 94.8.1 1. Sestavit návrh
+**Provést.** Provedení je samostatný krok nad **schváleným** návrhem;
+neschválený aplikace odmítne. Potvrzovací dialog vypíše dotčené osoby
+a vyžaduje dvojí potvrzení: zaškrtnutí nevratnosti a opsání čísla návrhu.
+Každá položka se **před provedením posuzuje znovu**: co mezi schválením
+a provedením dostalo zadržení nebo změnilo rozsah, se přeskočí s důvodem
+a neprovede podle zastaralého rozhodnutí.
 
-Zadá se den, ke kterému se posuzuje, a aplikace sestaví návrh **jen** z osob,
-kterým lhůta uplynula a nic je nedrží. Když k tomu dni není koho navrhnout,
-řekne to a nevytvoří nic — prázdný návrh by se dal schválit a v přehledu by
-vypadal jako provedený výmaz.
-
-### 94.8.2 2. Schválit nebo zamítnout
-
-Detail návrhu jmenuje každou osobu a u ní uvádí:
-
-- **Rozsah** — *úplný výmaz* u osoby bez účetní stopy, jinak *anonymizace*:
-  účetní záznam zůstane, zmizí z něj jen osobní údaj.
-- **Podle ustanovení** — lhůta, o kterou se rozhodnutí opírá, i s tím, jak je
-  doložená.
-- **Dopad** — kolik řádků osobních dat zmizí, po skupinách.
-- **Zbytek** — osobní údaj, který zůstane ve zmrazeném obsahu (vystavená PDF,
-  odeslaná XML). Ten se nepřepisuje a návrh to říká předem, ne až potom.
-
-Zamítnutý návrh zůstává v přehledu jako doklad, ale provést už ho nelze.
-
-### 94.8.3 3. Provést
-
-Provedení je samostatný krok nad **schváleným** návrhem. Neschválený návrh
-aplikace odmítne. Potvrzovací dialog vypíše dotčené osoby a vyžaduje dvojí
-potvrzení — zaškrtnutí, že rozumíte nevratnosti, a opsání čísla návrhu.
-Jedním kliknutím se výmaz spustit nedá.
-
-Každá položka se **před provedením posuzuje znovu**. Co mezi schválením
-a provedením dostalo zadržení nebo se u toho změnil rozsah, se přeskočí
-s uvedeným důvodem místo aby se provedlo podle zastaralého rozhodnutí.
-Výsledek u každé osoby je vidět ve sloupci **Výsledek**.
-
-### 94.8.4 Co po výmazu zůstane
+### 94.5.2 Co po výmazu zůstane
 
 Návrh zůstává jako **doklad, že výmaz proběhl**: kdo ho schválil, kdy se
 provedl a podle které lhůty se rozhodovalo. V auditní stopě zůstává i jméno
-osoby — je to vědomé rozhodnutí, aby šlo doložit, o koho šlo. Samotná osobní
-data z evidence zmizí; u úplně vymazané osoby proto zůstane řádek návrhu bez
-jména a obrazovka to napíše.
+osoby; je to vědomé rozhodnutí, aby šlo doložit, o koho šlo. Samotná osobní data
+z evidence zmizí; u úplně vymazané osoby proto zůstane řádek návrhu bez jména.
+Dokumenty a poznámky personálního spisu se stanou nečitelnými (viz
+[Zaměstnanci](86_Zamestnanci.md#861216-personalni-spis)). Dokončený výmaz
+nejde použít k obnovení původního obsahu. Zálohy a externí exporty řešte podle
+schválené politiky firmy.
+
+### 94.5.3 Časté chyby
+
+- výmaz jen kvůli žádosti bez kontroly zákonné povinnosti uchování,
+- záměna osoby se stejným jménem,
+- opomenutí exportovaných PDF, bankovních souborů nebo externího archivu,
+- uložení úplných mazaných údajů do auditní poznámky; právní důvod zapisujte
+  bez nadbytečných osobních údajů.
+
+## 94.6 Související kapitoly
+
+- [Retenční lhůty](93_Retencni_lhuty.md): vždy nejdřív
+- [Zaměstnanci](86_Zamestnanci.md), [Dokumenty a výstupy](83_Dokumenty_a_vystupy.md),
+  [Platby a úhrady](82_Platby_a_uhrady.md), [Podání a hlášení](85_Podani_a_hlaseni.md): kam vedou vazby

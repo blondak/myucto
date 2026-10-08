@@ -1,130 +1,171 @@
 # 93. Retenční lhůty
 
-## 93.1 Účel
+> Návod, jak zjistit, jak dlouho se mzdová data uchovávají, jak lhůtu firmy
+> prodloužit, jak zadržet výmaz konkrétní osoby a koho lze navrhnout k výmazu.
+> Pro mzdové účetní a osobu odpovědnou za ochranu osobních údajů.
 
-Agenda retenčních lhůt určuje, jak dlouho se jednotlivé kategorie mzdových záznamů a dokumentů uchovávají a které položky se blíží konci stanovené doby.
+## 93.1 Kdy to potřebujete
 
-## 93.2 Předpoklady a oprávnění
+- Chcete vědět, jak dlouho musíte uchovávat mzdové listy, podání nebo
+  dokumenty bývalých zaměstnanců a podle jakého ustanovení.
+- Firmu váže smlouva nebo vnitřní předpis s delší lhůtou.
+- Probíhá daňová kontrola, spor, exekuce nebo insolvence a data osoby se nesmí
+  smazat.
+- Připravujete výmaz osobních údajů a potřebujete vědět, koho lze navrhnout.
 
-Uživatel potřebuje `payroll.retention`. Firma musí mít schválená pravidla uchování zohledňující zákonné povinnosti, právní nároky, probíhající řízení a vlastní oprávněné potřeby.
+## 93.2 Než začnete
 
-## 93.3 Krokový postup
+1. **Oprávnění** k retenčním lhůtám (`payroll.retention`).
+2. **Schválená pravidla uchování** firmy, která zohledňují zákonné povinnosti,
+   právní nároky, probíhající řízení a oprávněné potřeby firmy.
 
-1. Otevřete **Mzdy → Retenční lhůty** a projděte kategorie údajů.
-2. Ověřte délku lhůty, počátek jejího běhu a právní důvod.
-3. Zkontrolujte seznam záznamů, kterým lhůta končí, a případné blokace výmazu.
-4. Před rozhodnutím ověřte vazby na dokumenty, běhy, platby, účetnictví, podání a otevřená řízení.
-5. Samotný výmaz spouštějte jen v oddělené agendě a po schválení odpovědnou osobou.
+Odsud se nic nemaže. Uplynulá lhůta je konec povinnosti uchovávat, ne příkaz ke
+skartaci. Výmaz má vlastní obrazovku, viz
+[Výmaz osobních údajů](94_Vymaz_osobnich_udaju.md).
 
-## 93.4 Stavy
+## 93.3 Krok za krokem: kontrola lhůt
 
-Záznam může být v aktivní retenční době, blízko konce, po lhůtě nebo blokovaný právním důvodem. Uplynutí lhůty není automatickým výmazem a blokace má přednost před plánovaným odstraněním.
+1. Otevřete `Mzdy → Retenční lhůty` (nadpis stránky je **Retenční lhůty
+   mzdové agendy**).
+2. Nad tabulkou projděte dlaždice původu lhůty: **Ze zákona**, **Dodaná
+   politika**, **Bez lhůty**.
+3. V tabulce zkontrolujte u kategorie **Lhůta**, **Běží od**, **Právní
+   pramen**, **Ověřeno** a sloupec **Výmaz**. Hledat můžete podle kategorie,
+   zákona, ustanovení nebo tabulky.
+4. Ve spodním panelu **Co z lhůt plyne pro výmaz** zvolte **K datu** a projděte,
+   kolik osob lze navrhnout k výmazu a proč ostatní ne.
 
-## 93.5 Kontroly a bezpečnost
+**Jak poznáte, že je hotovo:** U každé kategorie víte, odkud lhůta pochází,
+a panel ukazuje jmenovitě osoby k výmazu i osoby držené zadržením.
 
-Retenci pravidelně revidujte a používejte kontrolu druhou osobou. Nezkracujte lhůty jen kvůli úspoře místa. Přehledy obsahují osobní údaje a musí mít omezený přístup. Export seznamu nemažte ani nesdílejte bez stejné ochrany jako původní data.
+## 93.4 Krok za krokem: odchylka firmy od katalogové lhůty
 
-## 93.6 Časté chyby
+1. Na řádku kategorie klikněte na **Odchylka firmy**.
+2. Vyplňte **Prodloužení o (roky)**. U kategorie bez lhůty v katalogu vyplňte
+   **Dodaná lhůta (roky)**.
+3. Vyplňte **Zdůvodnění** (vnitřní předpis, smluvní závazek, spor).
+4. Klikněte na **Uložit**.
 
-- Počítání lhůty od data vložení místo právně rozhodné události.
-- Ignorování probíhajícího sporu, kontroly nebo exekuce.
-- Domněnka, že stav „po lhůtě“ data automaticky odstranil.
-- Posouzení jen databázového záznamu bez dokumentů a exportů.
+**Jak poznáte, že je hotovo:** Aplikace hlásí „Odchylka uložena." a u kategorie
+je poznámka „odchylka firmy: +… let" nebo „lhůtu dodala firma: … let".
 
-## 93.7 Návaznosti
-
-Fyzický proces popisuje [výmaz osobních údajů](94_Vymaz_osobnich_udaju.md). Uchovávané výstupy vznikají v [dokumentech](83_Dokumenty_a_vystupy.md) a [podáních](85_Podani_a_hlaseni.md).
-
-
-
-## 93.8 Podrobný pracovní postup a kontroly
-
-Mzdový modul drží nejcitlivější osobní údaje v aplikaci a nesmí je držet
-navždy ani je zahodit dřív, než smí. Přehled **Mzdy → Retenční lhůty** ukazuje,
-jak dlouho se která skupina mzdových dat uchovává, od kdy lhůta běží a kde to
-stojí psané. Otevřít ho může role s oprávněním `payroll.retention`.
-
-Odsud se nic nemaže. Uplynulá lhůta je konec povinnosti uchovávat, ne příkaz
-ke skartaci. Nastavit jde dvojí: **odchylka firmy** od katalogové lhůty
-a **zadržení výmazu** konkrétní osoby. Samotný výmaz má vlastní obrazovku
-([Výmaz osobních údajů](94_Vymaz_osobnich_udaju.md)).
-
-U každé kategorie je vidět:
-
-- **Lhůta** — počet let, podle kterého se opravdu počítá, tedy včetně
-  případného prodloužení, které si firma sama dohodla.
-- **Běží od** — kalendářní roky po roce, kterého se záznam týká, roky po roce
-  vyhotovení, nebo roky od konce účetního období.
-- **Právní pramen** — konkrétní ustanovení, ne jen číslo zákona, a u lhůt,
-  jejichž číslo se v posledních letech měnilo, i novela, která dnešní znění
-  zavedla.
-- **Ověřeno** — den, ke kterému se citace porovnala s účinným zněním předpisu.
-- **Dotčené tabulky** — čeho přesně se lhůta drží.
-
-### 93.8.1 Původ lhůty
-
-Nejdůležitější sloupec není číslo, ale odkud se vzalo. Rozlišují se tři stavy
-a jejich počty stojí jako dlaždice nad tabulkou, takže rozdíl je vidět hned:
-
-- **Ze zákona** — číslo stojí v předpise a pramen říká kde.
-- **Dodaná politika** — číslo dodala aplikace, protože zákon pro tuhle skupinu
-  záznamů uschovávací lhůtu nemá. Týká se to zdravotního pojištění: v zákoně
-  č. 592/1992 Sb. žádná uschovávací lhůta není, deset let je bezpečné
-  rozhodnutí, ne právo, a přehled to říká nahlas.
-- **Bez lhůty** — doloženo, že předpis lhůtu nestanoví. Spis k exekučním
-  srážkám žádnou uschovávací lhůtu nemá: v občanském soudním řádu se
-  uschovávání týká jen prodeje nevyzvednutých movitých věcí a v exekučním řádu
-  je povinnost uložena exekutorovi, ne plátci mzdy.
-
-Kategorie bez lhůty se k výmazu **nikdy** nenavrhne, dokud lhůtu nedodá firma
-vlastní politikou. Sloupec **Výmaz** to u každé kategorie říká přímo.
-
-### 93.8.2 Co z lhůt plyne pro výmaz
-
-Spodní panel přepočítá lhůty na konkrétní osoby k zadanému dni: kolik jich lze
-navrhnout k výmazu a — hlavně — proč se ostatní nenavrhly. Rozlišuje běžící
-retenční lhůtu, zadržení výmazu (kontrola, odvolání, spor, exekuce,
-insolvence), neurčenou lhůtu, chybějící základ výpočtu a osoby, které už
-anonymizované jsou. Návrh, který někoho mlčky vynechá, se nedá zkontrolovat.
-
-Panel osoby **jmenuje**, nejen počítá: kdo je na řadě k výmazu a koho drží
-zadržení. Nevratný úkon se podle samotného čísla odklepnout nedá.
-
-Lhůty účetních a daňových záznamů firmy jako celku (§ 31 a § 32 zákona
-o účetnictví) mají vlastní přehled na **Účetnictví → Retenční lhůty**.
-
-### 93.8.3 Odchylka firmy od katalogové lhůty
-
-Tlačítko **Odchylka firmy** na řádku kategorie otevře jeden formulář s jedním
-tlačítkem Uložit. Zadává se v něm:
-
-- **Prodloužení o (roky)** — přičte se ke lhůtě z katalogu. Použije se, když
-  firmu váže smlouva nebo vnitřní předpis s delší lhůtou.
-- **Dodaná lhůta (roky)** — nabídne se **jen** u kategorií, které lhůtu
-  v katalogu nemají (dnes spis k exekučním srážkám). Dokud ji nikdo nedodá,
-  osoba se k výmazu nikdy nenavrhne.
-- **Zdůvodnění** — povinné. Odchylka od zákonné lhůty musí být doložitelná
-  a ukládá se s ní.
-
-**Lhůtu nelze zkrátit.** Není to omezení formuláře, ale pravidlo aplikace:
-zkrácení pod hodnotu z katalogu — ať už zákonnou, nebo dodanou politikou —
-se odmítne s vysvětlením, které řekne, odkud lhůta pochází. Odchylku jde
-kdykoli zrušit tlačítkem **Zrušit odchylku**; lhůta se tím vrátí na hodnotu
+Odchylku zrušíte tlačítkem **Zrušit odchylku**; lhůta se vrátí na hodnotu
 z katalogu.
 
-### 93.8.4 Zadržení výmazu (legal hold)
+## 93.5 Krok za krokem: zadržení výmazu osoby
 
-Zadržení drží data osoby i po uplynutí lhůty — kvůli daňové kontrole,
-odvolání, soudnímu sporu, exekuci nebo insolvenci (§ 32 zákona o účetnictví
-a mzdové důvody). Zadává se tlačítkem **Zadržet výmaz** a vyžaduje osobu,
-důvod, č. j. nebo popis řízení a datum. Bez popisu se neuloží: jinak by
-nešlo doložit, proč se výmaz zadržel.
+1. Klikněte na **Zadržet výmaz**.
+2. Vyberte osobu, důvod (kontrola, odvolání, spor, exekuce, insolvence),
+   vyplňte č. j. nebo popis řízení a datum.
+3. Uložte.
+4. Až důvod pomine, klikněte u zadržení na **Uvolnit** a potvrďte.
 
-Dokud zadržení trvá, osoba se k výmazu nenavrhne a už schválený návrh ji
-přeskočí. **Uvolnění** je vědomý úkon a potvrzuje se — výmaz osoby tím zase
-půjde navrhnout a provést. Uvolněný záznam nezmizí, jen dostane datum
-uvolnění; zaškrtnutím **Zobrazit i uvolněná** se zobrazí i historie.
+**Jak poznáte, že je hotovo:** Zadržení je v seznamu **Zadržení výmazu**
+a osoba je v panelu mezi **Osoby držené zadržením**. Uvolněné zadržení uvidíte
+zaškrtnutím **Zobrazit i uvolněná**.
 
-Zadržení zadané na účetní straně (**Účetnictví → Retenční lhůty**) platí na
-celou firmu, a tedy i na mzdy. Opačně to neplatí: zadržení jedné osoby
-nemá co blokovat mazání faktur.
+## 93.6 Když něco nejde
+
+<!-- cols: 30 34 36 -->
+| Co vidíte | Proč | Co udělat |
+|---|---|---|
+| Odchylka se neuloží, lhůtu nejde zkrátit | Zkrácení pod katalogovou lhůtu aplikace nepřijme | Lhůtu lze jen prodloužit nebo dodat. |
+| Zadržení se neuloží | Chybí osoba nebo č. j. či popis řízení | Doplňte je; bez popisu nejde doložit, proč se výmaz zadržel. |
+| Kategorie má ve sloupci **Výmaz** „nikdy se nenavrhne" | Kategorie nemá lhůtu (**Bez lhůty**) | Dodejte lhůtu odchylkou firmy, pokud ji máte podloženou. |
+| Osoba se nenavrhuje k výmazu | Běží lhůta, trvá zadržení, chybí základ výpočtu, nebo je už anonymizovaná | Důvod je u osoby v panelu **Co z lhůt plyne pro výmaz**. |
+| „Filtru neodpovídá žádná kategorie" | Kategorie schoval filtr | Klikněte na **Zrušit filtr**. |
+
+## 93.7 Podrobnosti a pravidla
+
+### 93.7.1 Co přehled ukazuje
+
+Mzdový modul drží nejcitlivější osobní údaje v aplikaci a nesmí je držet navždy
+ani je zahodit dřív, než smí. U každé kategorie je vidět:
+
+- **Lhůta**: počet let, podle kterého se počítá, včetně případného prodloužení
+  firmou,
+- **Běží od**: kalendářní roky po roce, kterého se záznam týká, roky po roce
+  vyhotovení, nebo roky od konce účetního období,
+- **Právní pramen**: konkrétní ustanovení, ne jen číslo zákona, a u lhůt,
+  jejichž číslo se v posledních letech měnilo, i novela, která dnešní znění
+  zavedla,
+- **Ověřeno**: den, ke kterému se citace porovnala s účinným zněním,
+- **Dotčené tabulky**: čeho přesně se lhůta drží.
+
+### 93.7.2 Původ lhůty
+
+Nejdůležitější sloupec není číslo, ale odkud se vzalo:
+
+- **Ze zákona**: číslo stojí v předpise a pramen říká kde.
+- **Dodaná politika**: číslo dodala aplikace, protože zákon pro tuto skupinu
+  záznamů lhůtu nemá. Týká se to zdravotního pojištění: v zákoně č. 592/1992 Sb.
+  žádná uschovávací lhůta není, deset let je bezpečné rozhodnutí, ne právo,
+  a přehled to říká nahlas.
+- **Bez lhůty**: doloženo, že předpis lhůtu nestanoví. Spis k exekučním srážkám
+  lhůtu nemá: v občanském soudním řádu se uschovávání týká jen prodeje
+  nevyzvednutých movitých věcí a v exekučním řádu je povinnost uložena
+  exekutorovi, ne plátci mzdy.
+
+Kategorie bez lhůty se k výmazu **nikdy** nenavrhne, dokud lhůtu nedodá firma
+vlastní politikou.
+
+### 93.7.3 Co z lhůt plyne pro výmaz
+
+Spodní panel přepočítá lhůty na konkrétní osoby k zadanému dni: kolik jich lze
+navrhnout k výmazu a hlavně proč se ostatní nenavrhly. Rozlišuje běžící lhůtu,
+zadržení výmazu, neurčenou lhůtu, chybějící základ výpočtu a osoby, které už
+anonymizované jsou. Návrh, který někoho mlčky vynechá, se nedá zkontrolovat, proto
+panel osoby **jmenuje**: kdo je na řadě k výmazu a koho drží zadržení. Nevratný
+úkon se podle samotného čísla odklepnout nedá.
+
+Lhůty účetních a daňových záznamů firmy jako celku (§ 31 a § 32 zákona
+o účetnictví) mají vlastní přehled `Nástroje → Retenční lhůty` (odkaz **Účetní
+retenční lhůty**, viz [Účetní nástroje](73_Ucetni_nastroje.md)).
+
+### 93.7.4 Odchylka firmy
+
+Odchylka má jeden formulář s jedním uložením:
+
+- **Prodloužení o (roky)** se přičte ke katalogové lhůtě; použije se, když
+  firmu váže smlouva nebo vnitřní předpis s delší lhůtou,
+- **Dodaná lhůta (roky)** se nabídne **jen** u kategorií bez lhůty v katalogu
+  (dnes spis k exekučním srážkám); dokud ji nikdo nedodá, osoba se k výmazu
+  nenavrhne,
+- **Zdůvodnění** je povinné, odchylka od zákonné lhůty musí být doložitelná.
+
+**Lhůtu nelze zkrátit.** Není to omezení formuláře, ale pravidlo aplikace:
+zkrácení pod hodnotu z katalogu, zákonnou i dodanou politikou, se odmítne
+s vysvětlením, odkud lhůta pochází.
+
+### 93.7.5 Zadržení výmazu (legal hold)
+
+Zadržení drží data osoby i po uplynutí lhůty kvůli daňové kontrole, odvolání,
+soudnímu sporu, exekuci nebo insolvenci (§ 32 zákona o účetnictví a mzdové
+důvody). Váže se na osobu, ne na období. Dokud trvá, osoba se k výmazu
+nenavrhne a už schválený návrh ji přeskočí. **Uvolnění** je vědomý úkon
+s potvrzením; výmaz pak zase půjde navrhnout a provést. Uvolněný záznam
+nezmizí, jen dostane datum uvolnění.
+
+Zadržení zadané na účetní straně (`Nástroje → Retenční lhůty`) platí na celou
+firmu, tedy i na mzdy. Opačně to neplatí: zadržení jedné osoby nemá co blokovat
+mazání faktur.
+
+### 93.7.6 Bezpečnost a časté chyby
+
+Retenci pravidelně revidujte, ideálně s kontrolou druhou osobou. Nezkracujte
+lhůty kvůli úspoře místa. Přehledy obsahují osobní údaje a musí mít omezený
+přístup; export seznamu chraňte stejně jako původní data. Uplynutí lhůty není
+automatickým výmazem a zadržení má přednost před plánovaným odstraněním.
+
+Časté chyby:
+
+- počítání lhůty od data vložení místo od právně rozhodné události,
+- přehlédnutí probíhajícího sporu, kontroly nebo exekuce,
+- domněnka, že stav po lhůtě data sám odstranil,
+- posouzení jen databázového záznamu bez dokumentů a exportů.
+
+## 93.8 Související kapitoly
+
+- [Výmaz osobních údajů](94_Vymaz_osobnich_udaju.md)
+- [Účetní nástroje](73_Ucetni_nastroje.md): účetní retenční lhůty
+- [Dokumenty a výstupy](83_Dokumenty_a_vystupy.md) a [Podání a hlášení](85_Podani_a_hlaseni.md): uchovávané výstupy

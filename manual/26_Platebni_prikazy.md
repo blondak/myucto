@@ -1,265 +1,316 @@
 # 26. Platební příkazy
 
-Modul **Platební příkazy** (menu **Nákup → Platební příkazy**) slouží k hromadné
-úhradě **nezaplacených přijatých faktur**. Vybrané faktury vyexportuje do formátu,
-který nahraješ do internetového bankovnictví — **ABO (KPC)** pro tuzemské CZK platby,
-**SEPA XML (pain.001)** pro EUR platby do zahraničí, nebo **CSV** / **PDF** jako
-přehled. Příkaz si systém zapamatuje a umíš ho kdykoli stáhnout znovu.
+> Návod, jak zaplatit více přijatých faktur najednou: vybrané faktury
+> vyexportujete do souboru pro internetové bankovnictví nebo je pošlete rovnou
+> do banky. Platí i pro vratky peněz odběratelům. Pro každého, kdo v bance
+> zadává hromadné platby.
 
-Navazuje na [Přijaté faktury](23_Prijate_faktury.md) (odtud berou data a platební
-údaje) a doplňuje [Export přijatých](24_Export_prijatych.md), který řeší předání
-dokladů účetní.
+## 26.1 Kdy to potřebujete
 
-> [!NOTE]
-> **Předání k úhradě není „zaplaceno".** Zařazení faktury do příkazu jen označí,
-> že jsi platbu odeslal(a) do banky — skutečnou úhradu potvrdí až spárování
-> bankovního výpisu (viz [Banka](29_Banka.md)). Stav faktury proto zůstává
-> `Přijatá` / `Zaúčtovaná`, jen dostane příznak **„Předáno k úhradě"**.
+- Blíží se splatnost několika přijatých faktur a nechcete je v bance zadávat po jedné.
+- Platíte zahraničním dodavatelům v EUR a potřebujete soubor SEPA.
+- Potřebujete tištěný nebo tabulkový přehled plateb (PDF, CSV) pro schválení.
+- Chcete jen evidovat, že jste fakturu poslali k úhradě, protože platíte jinak.
+- Máte vystavenou fakturu nebo dobropis, u kterého dlužíte peníze odběrateli (vrácené obaly, přeplatek).
 
-## 26.1 Účet plátce
+| Kdy | Co udělat | Kde v aplikaci |
+|---|---|---|
+| před splatností faktur | Vybrat nezaplacené faktury a vytvořit příkaz | `Nákup → Platební příkazy`, postup v [§ 26.3](#263-krok-za-krokem-zaplatit-prijate-faktury-hromadnym-prikazem) |
+| u nového dodavatele | Ověřit účet proti registru plátců DPH před první platbou | stejná stránka, tlačítko **Ověřit**, postup v [§ 26.4](#264-krok-za-krokem-doplnit-a-overit-ucet-prijemce) |
+| po odeslání do banky | Zkontrolovat a autorizovat dávku v bankovnictví | bankovnictví, viz [§ 26.5](#265-krok-za-krokem-odeslat-prikaz-primo-do-banky) |
+| po platbě | Potvrdit úhradu importem výpisu | `Banka`, viz [Banka](29_Banka.md) |
 
-Nahoře vyber **účet plátce** — bankovní účet, ze kterého se bude platit. Nabídka
-vychází z [bankovních účtů dodavatele](30_Bankovni_ucty.md) (číselník měn): pro každou
-měnu můžeš mít vlastní účet. Předvyplní se **výchozí CZK účet**; přepnutím na účet
-v jiné měně (např. EUR) se nabídnou faktury v dané měně.
+> [!WARNING]
+> Zařazení faktury do příkazu **neznamená zaplaceno**. Jen označí, že jste platbu
+> předali bance. Skutečnou úhradu potvrdí až spárování bankovního výpisu
+> (viz [Banka](29_Banka.md)). Faktura proto zůstává ve stavu `Přijatá` nebo
+> `Zaúčtovaná` a jen dostane příznak **Předáno k úhradě**.
 
-Příkaz je vždy **jednoměnový** — měna příkazu = měna zvoleného účtu plátce. Faktury
-v jiné měně nelze do téhož příkazu zařadit (jsou nevybíratelné).
+## 26.2 Než začnete
 
-Dále zvolíš:
+- U faktur, které chcete platit, musíte mít **platební účet dodavatele**. Pokud
+  chybí, doplníte ho podle [§ 26.4](#264-krok-za-krokem-doplnit-a-overit-ucet-prijemce).
+- Potřebujete **bankovní účet plátce** v číselníku ([Bankovní účty](30_Bankovni_ucty.md)).
+  Pro každou měnu můžete mít vlastní účet.
+- Pro SEPA platbu musí mít účet plátce **IBAN** a měnu EUR.
+- Pro přímé odeslání do banky musí být účet aktivně propojený s bankou a mít
+  potřebná oprávnění (viz [§ 26.5](#265-krok-za-krokem-odeslat-prikaz-primo-do-banky)).
+- Uživatel jen pro čtení si může soubory stáhnout, ale příkazy vytvářet a účty upravovat nemůže.
 
-- **Datum splatnosti** — kdy se má platba provést. ABO příkaz nesmí mít datum
-  v minulosti, proto se starší datum automaticky posune na dnešek (systém na to upozorní).
-- **Konstantní symbol** *(nepovinné)* — společný KS pro celý příkaz.
-- **Poznámka** *(nepovinné)* — interní popis dávky (uloží se do historie).
+## 26.3 Krok za krokem: zaplatit přijaté faktury hromadným příkazem
 
-## 26.2 Seznam faktur k úhradě
+1. Otevřete `Nákup → Platební příkazy`.
+2. Nahoře zvolte **Účet plátce**. Předvyplní se výchozí účet v CZK. Přepnutím na účet
+   v jiné měně (například EUR) se nabídnou faktury v této měně.
+3. Vyplňte **Datum splatnosti**. Volitelně doplňte společný **Konstantní symbol**
+   a **Poznámku** (interní popis dávky, uloží se do historie).
+4. V tabulkách **Faktury v CZK** a **Ostatní měny** zaškrtněte faktury k úhradě.
+   Zaškrtnout lze jen faktury, které mají platební účet a měnu shodnou s účtem plátce.
+5. Zvolte akci:
+   - **Jen označit** - faktury se označí jako předané k úhradě, soubor se nevytvoří.
+   - **Export CSV** - přehled plateb ke stažení.
+   - **Export PDF** - tištěný přehled příkazu.
+   - **Export ABO (KPC)** - soubor pro banku, jen pro CZK.
+   - **Export SEPA (pain.001)** - soubor pro banku, jen pro EUR.
+6. Soubor se stáhne. Nahrajte ho v internetovém bankovnictví do importu hromadných
+   příkazů (ABO) nebo SEPA příkazů a platbu tam autorizujte.
 
-Nezaplacené přijaté faktury (stav `Přijatá` nebo `Zaúčtovaná` se zbývající částkou
-k úhradě) se zobrazí ve **dvou tabulkách**, aby bylo jasné, co čím zaplatíš:
-
-- **Faktury v CZK** — platba přes **ABO (KPC)** (i CSV/PDF),
-- **Ostatní měny** — platba přes **CSV / PDF**, u účtu plátce v **EUR** navíc přes
-  **SEPA XML** (viz [§ 26.7a](#268-267a-format-sepa-pain001) — ABO je tuzemský CZK
-  platební styk, SEPA slouží pro EUR platby v rámci Evropy).
-
-Vybíratelné (zaškrtávací) jsou jen faktury, které **mají platební účet** a jsou ve
-měně zvoleného účtu plátce. U každého řádku vidíš:
-
-- **Dodavatele** a číslo jeho dokladu,
-- **datum splatnosti** + případný badge **„Předáno k úhradě"** (pokud už byla zařazena),
-- **účet příjemce** s názvem banky, **jak byl účet získán** (ISDOC / AI / QR / ručně)
-  a stav **ověření** (viz [§ 26.4](#264-overeni-uctu-prijemce)),
-- **variabilní symbol** a **částku** k úhradě.
-
-Přepínač **„Skrýt už zařazené k úhradě"** schová faktury, které jsi do nějakého
-příkazu už dříve zařadil(a).
-
-## 26.3 Doplnění a úprava účtu příjemce
-
-Pokud u faktury **chybí platební účet**, zobrazí se tlačítko **„Doplnit účet"**;
-u faktur s účtem ikona **tužky** (Upravit). Otevře se inline formulář, kde zadáš:
-
-- **číslo účtu** + **kód banky** (tuzemský formát `[předčíslí-]číslo`), nebo
-- **IBAN** + **BIC** (zahraniční / SEPA),
-- **variabilní symbol**.
-
-Účet se nejčastěji doplní automaticky už při importu faktury — z **ISDOC** přílohy,
-**AI extrakce** ([AI extrakce](25_AI_extrakce.md)) nebo z **QR kódu** na PDF. Zdroj
-je vidět u řádku jako malý štítek.
-
-## 26.4 Ověření účtu příjemce
-
-U tuzemských plátců DPH umí systém ověřit účet proti **registru plátců DPH (CRPDPH)**.
-Klikni na **„Ověřit"** u účtu — porovná zadaný účet se **zveřejněnými účty** dodavatele
-a upozorní na **nespolehlivého plátce**. Výsledek:
-
-- **zveřejněný účet** — účet je mezi zveřejněnými účty plátce (✓ bezpečné),
-- **nezveřejněný** — plátce nalezen, ale tento účet mezi zveřejněnými není (zvaž ověření),
-- **nespolehlivý plátce** — dodavatel je vedený jako nespolehlivý (riziko ručení za DPH),
-- *(bez ověření)* — dodavatel není tuzemský plátce DPH nebo je registr nedostupný.
-
-Při neúspěchu shody systém v hlášce vypíše seznam **zveřejněných účtů**, ať je můžeš
-porovnat ručně.
+**Jak poznáte, že je hotovo:** u faktur se objeví štítek **Zařazeno k úhradě** (v seznamu
+přijatých faktur **Předáno k úhradě**) a příkaz je v části **Historie příkazů** dole
+na stránce. Platba je skutečně uhrazená až po spárování výpisu.
 
 > [!TIP]
-> Ověřování účtu proti zveřejněným účtům plátce DPH je prevencí ručení za nezaplacenou
-> DPH dodavatele (§ 109 zákona o DPH). U nových dodavatelů ho doporučujeme provést
-> před první platbou.
+> Rychlejší cesta: v seznamu `Nákup → Přijaté faktury` zaškrtněte faktury a klikněte
+> na **Do příkazu k úhradě**. Předvybrané doklady se otevřou přímo na stránce Platební příkazy.
 
-## 26.5 QR kód, náhled PDF a detail
+Volba **Označit při exportu faktury rovnou jako zaplacené** navíc překlopí faktury
+do stavu **Zaplaceno**. Použijte ji jen tehdy, když nepoužíváte automatické
+párování výpisů, jinak hrozí dvojí evidence.
 
-U každé faktury s účtem jsou v sloupci **Akce** rychlé nástroje:
+## 26.4 Krok za krokem: doplnit a ověřit účet příjemce
 
-- **QR kód** — rozbalí QR platbu (CZK SPAYD / SEPA) z uloženého účtu, částky a VS;
-  načteš ji mobilní bankou bez exportu příkazu.
-- **PDF** — inline náhled originálního dokladu (pokud je přiložené PDF), stejně jako
-  v detailu faktury.
-- **Detail** — otevře [detail přijaté faktury](23_Prijate_faktury.md) v novém okně.
+1. U faktury bez účtu klikněte na **Doplnit účet**, u faktury s účtem na ikonu tužky (**Upravit účet**).
+2. Zadejte **číslo účtu** a **kód banky** (tuzemský formát `[předčíslí-]číslo`),
+   nebo **IBAN** a **BIC** (zahraniční platby a SEPA). Doplňte **variabilní symbol**.
+3. Uložte. Zobrazí se hláška **Platební účet uložen.**
+4. U tuzemského plátce DPH klikněte u účtu na **Ověřit**. Aplikace porovná účet
+   se zveřejněnými účty dodavatele v registru plátců DPH.
 
-## 26.6 Vytvoření příkazu a export
+**Jak poznáte, že je hotovo:** u účtu je štítek s výsledkem ověření: **zveřejněný účet**
+(bezpečné), **nezveřejněný** (zvažte ověření u dodavatele) nebo **nespolehlivý plátce**
+(riziko ručení za DPH).
 
-Vyber faktury a zvol akci:
+> [!TIP]
+> Ověřování účtu je prevencí ručení za nezaplacenou DPH dodavatele (§ 109 zákona o DPH).
+> U nových dodavatelů ho doporučujeme provést před první platbou.
 
-- **Jen označit** — faktury se označí jako **předané k úhradě** (příznak), **bez**
-  generování souboru. Hodí se, když platíš jinak (např. ručně) a chceš jen evidovat.
-- **Export CSV** — přehled plateb s oddělovačem `;` (UTF-8), pro ruční zadání nebo archiv.
-- **Export PDF** — tištěný přehled příkazu na šířku (příjemci, účty, symboly, částky, ověření).
-- **Export ABO (KPC)** — datový soubor pro nahrání do banky (jen CZK, viz [§ 26.7](#267-format-abo-kpc)).
-- **Export SEPA (pain.001)** — XML soubor pro EUR platby do zahraničí (jen účet plátce
-  v EUR, viz [§ 26.7a](#268-267a-format-sepa-pain001)).
+## 26.5 Krok za krokem: odeslat příkaz přímo do banky
 
-Při exportu se z vybraných faktur vytvoří **dávka** (snapshot údajů v daném okamžiku),
-faktury dostanou příznak **„Předáno k úhradě"** a soubor se rovnou stáhne.
+Funguje u aktivně propojeného účtu Fio ČR (2010), ČSOB (0300), Raiffeisenbank (5500),
+Banky CREDITAS (2250), MONETA Money Bank (0600) nebo KB+ (0100, jen varianta Plus
+se souhlasem pro hromadné platby), a to pro tuzemský příkaz v CZK. Napojení Fio SR
+(8330) slouží jen k načítání pohybů, ne k přímému odesílání EUR příkazů.
 
-Volba **„Označit při exportu faktury rovnou jako zaplacené"** navíc překlopí faktury
-do stavu **Zaplaceno** (použij jen pokud nepoužíváš automatické párování výpisů —
-jinak hrozí dvojí evidence).
+1. Na stránce `Nákup → Platební příkazy` vyberte faktury a zvolte **Připravit příkaz pro banku**.
+   Příkaz se uloží a faktury se neoznačí jako zaplacené.
+2. V sekci pod přehledem faktur vyberte uložený příkaz.
+3. Klikněte na **Odeslat do banky** a potvrďte.
+4. V internetovém bankovnictví dávku zkontrolujte a autorizujte.
+   - CREDITAS: `Transakce → Zadané → Hromadné`.
+   - MONETA: sekce **Zprávy a oznámení** (dávka k podpisu).
 
-## 26.7 Formát ABO (KPC)
+**Jak poznáte, že je hotovo:** banka dávku přijala a čeká na vaši autorizaci. Odeslání
+samo úhradu nepotvrzuje a zahájený import dávky ještě nepotvrzuje přijetí jednotlivých plateb.
+
+Nastavení propojení a úplný postup jsou v kapitole
+[Bankovní účty](30_Bankovni_ucty.md#30116-odeslani-prikazu-do-banky-pravidla).
+
+## 26.6 Krok za krokem: vrátit peníze odběrateli
+
+Postup funguje, když máte zapnuté vyplácení přeplatků: v `Firma → Nastavení` na záložce
+**Fakturace** volbu **Povolit vyúčtování s částkou k vyplacení**.
+Bez zapnuté volby se vratky v příkazech neukazují, ani u běžných dobropisů.
+
+1. Otevřete detail faktury nebo dobropisu, u kterého dlužíte peníze zákazníkovi.
+2. Klikněte na hlavní akci **Vrátit peníze**.
+3. Vyberte **Účet odběratele** z nabídky, nebo zvolte **Jiný účet (zadat ručně)**
+   a zadejte číslo účtu a kód banky. Volbou **Uložit účet do karty klienta** si ho zapamatujete.
+4. Zvolte účet, ze kterého platíte, a **Datum splatnosti**. Variabilní symbol je
+   předvyplněný číslem dokladu a nejde změnit.
+5. Klikněte na **Stáhnout ABO**, **CSV** nebo **PDF**. Je-li účet napojený na bankovní API,
+   můžete příkaz rovnou **Odeslat do banky**.
+
+Volba **Přidat do hromadného příkazu** příkaz nevytváří. Jen uloží ručně zadaný účet
+ke klientovi a doklad pak najdete v tabulce **Vratky odběratelům** na stránce Platební příkazy.
+
+**Jak poznáte, že je hotovo:** vytvořený příkaz je v **Historii příkazů**. Doklad zůstává
+otevřený, dokud se nespáruje odchozí platba z výpisu, nebo ho v nabídce **…** v detailu
+neoznačíte volbou **Označit jako vyplaceno**.
+
+## 26.7 Když něco nejde
+
+<!-- cols: 34 33 33 -->
+| Co vidíte | Proč | Co udělat |
+|---|---|---|
+| Faktura nejde zaškrtnout | Chybí platební účet, nebo má jinou měnu než účet plátce | U řádku klikněte na **Doplnit účet**, nebo přepněte **Účet plátce** na správnou měnu |
+| Hláška, že ABO (KPC) lze vytvořit jen pro příkaz v CZK | Účet plátce není v CZK | Zvolte účet v CZK, nebo použijte CSV či PDF |
+| Hláška o vybraných fakturách bez tuzemského účtu | Faktura má jen IBAN nebo cizí měnu | Doplňte tuzemský účet, nebo použijte CSV či PDF |
+| Hláška, že SEPA XML lze vytvořit jen pro příkaz v EUR | Účet plátce není v EUR | Zvolte účet plátce v EUR |
+| Hláška, že vybraný účet plátce nemá IBAN | SEPA vyžaduje IBAN | Doplňte IBAN k účtu plátce v [Bankovních účtech](30_Bankovni_ucty.md) |
+| Hláška o vybraných fakturách bez platného IBAN | Příjemce nemá IBAN | Doplňte IBAN u faktury (**Doplnit účet**), nebo použijte CSV či PDF |
+| Hláška, že datum splatnosti bylo posunuto na dnešek | ABO příkaz nesmí mít datum v minulosti | Žádná akce, případně zvolte pozdější datum |
+| Hláška, že X faktur bylo přeskočeno | U faktur chybí účet, je jiná měna, nebo není co platit | Přečtěte důvod v hlášce a fakturu opravte |
+| Příkaz nejde smazat | Má evidovaný pokus o odeslání přes bankovní konektor | U předaného příkazu použijte archivaci (viz [§ 26.8.9](#2689-omezeni-a-tipy)) |
+| Odeslání příkazu je blokované | Opakované odeslání stejného příkazu aplikace nepovolí | Stav ověřte v bance |
+| Vratka nejde vybrat | U odběratele chybí účet | Účet doplňte v detailu dokladu |
+| Vratky v příkazech nevidíte | Není zapnuté vyplácení přeplatků | V `Firma → Nastavení`, záložka **Fakturace**, zapněte **Povolit vyúčtování s částkou k vyplacení** |
+
+## 26.8 Podrobnosti a pravidla
+
+### 26.8.1 Účet plátce
+
+Nabídka účtů vychází z [bankovních účtů dodavatele](30_Bankovni_ucty.md). Příkaz je
+vždy **jednoměnový**: měna příkazu je měna zvoleného účtu plátce. Faktury v jiné měně
+nelze do téhož příkazu zařadit (nejdou zaškrtnout).
+
+Datum splatnosti: ABO příkaz nesmí mít datum v minulosti, proto se starší datum
+automaticky posune na dnešek a aplikace na to upozorní.
+
+### 26.8.2 Seznam faktur k úhradě
+
+Nezaplacené přijaté faktury (stav `Přijatá` nebo `Zaúčtovaná` se zbývající částkou
+k úhradě) jsou ve dvou tabulkách:
+
+- **Faktury v CZK** - platba přes **ABO (KPC)** (i CSV a PDF),
+- **Ostatní měny** - platba přes **CSV / PDF**, u účtu plátce v EUR navíc přes
+  **SEPA XML** (viz [§ 26.8.6](#2686-format-sepa-pain001)). ABO je tuzemský CZK platební styk, SEPA slouží pro EUR platby v rámci Evropy.
+
+U každého řádku vidíte:
+
+- dodavatele a číslo jeho dokladu,
+- datum splatnosti a případný štítek **Zařazeno k úhradě**, pokud už byla faktura zařazena,
+- účet příjemce s názvem banky, **jak byl účet získán** (ISDOC, AI, QR nebo ručně)
+  a stav ověření (viz [§ 26.8.3](#2683-overeni-uctu-prijemce)),
+- variabilní symbol a částku k úhradě.
+
+Přepínač **Skrýt už zařazené k úhradě** schová faktury, které jste do nějakého příkazu už zařadili.
+
+Účet se nejčastěji doplní automaticky už při importu faktury, a to z přílohy ISDOC,
+z [AI extrakce](25_AI_extrakce.md) nebo z QR kódu na PDF. Zdroj je vidět u řádku jako malý štítek.
+
+### 26.8.3 Ověření účtu příjemce
+
+U tuzemských plátců DPH umí systém ověřit účet proti **registru plátců DPH (CRPDPH)**.
+Porovná zadaný účet se zveřejněnými účty dodavatele a upozorní na nespolehlivého plátce.
+Výsledek:
+
+- **zveřejněný účet** - účet je mezi zveřejněnými účty plátce,
+- **nezveřejněný** - plátce nalezen, ale tento účet mezi zveřejněnými není (zvažte ověření),
+- **nespolehlivý plátce** - dodavatel je veden jako nespolehlivý (riziko ručení za DPH),
+- bez ověření - dodavatel není tuzemský plátce DPH, nebo je registr nedostupný.
+
+Při neúspěchu shody aplikace v hlášce vypíše seznam zveřejněných účtů, ať je můžete porovnat ručně.
+
+### 26.8.4 QR kód, náhled PDF a detail
+
+U každé faktury s účtem jsou ve sloupci **Akce** rychlé nástroje:
+
+- **QR kód** - rozbalí QR platbu (CZK SPAYD nebo SEPA) z uloženého účtu, částky a VS.
+  Načtete ji mobilní bankou bez exportu příkazu.
+- **PDF** - náhled originálního dokladu (pokud je přiložené PDF), stejně jako v detailu faktury.
+- **Detail** - otevře [detail přijaté faktury](23_Prijate_faktury.md) v novém okně.
+
+### 26.8.5 Formát ABO (KPC)
 
 **ABO** (přípona `.kpc`) je standardní formát příkazu k úhradě pro české banky
 (Česká spořitelna a kompatibilní). MyÚčto generuje **hromadný příkaz**: jeden účet
 plátce v hlavičce, položky pro jednotlivé příjemce, jedno datum splatnosti.
 
-- Funguje **jen pro CZK** a příjemce s **tuzemským účtem** (číslo + kód banky);
-  faktury jen s IBANem nebo v cizí měně do ABO nepatří — použij CSV/PDF.
-- Částky jsou v **haléřích**, konstantní symbol se kóduje spolu se směrovým kódem banky
-  příjemce (specifikum formátu — řeší to systém za tebe).
+- Funguje **jen pro CZK** a příjemce s **tuzemským účtem** (číslo a kód banky).
+  Faktury jen s IBANem nebo v cizí měně do ABO nepatří, použijte CSV nebo PDF.
+- Částky jsou v **haléřích**. Konstantní symbol se kóduje spolu se směrovým kódem banky
+  příjemce (specifikum formátu, řeší to aplikace za vás).
 - Soubor je v ASCII (diakritika ve zprávě se převede), zakódovaný pro přímý import.
-- Pro účet plátce u Raiffeisenbank (5500) systém automaticky použije hlavičku podle požadavků RB, a to při stažení souboru i předání přes API.
+- Pro účet plátce u Raiffeisenbank (5500) aplikace automaticky použije hlavičku podle
+  požadavků RB, a to při stažení souboru i při předání přes API.
 
-Vygenerovaný `.kpc` soubor jednoduše nahraješ v internetovém bankovnictví do importu
-hromadných příkazů.
-
-## 26.8 26.7a Formát SEPA (pain.001)
+### 26.8.6 Formát SEPA (pain.001)
 
 **SEPA Credit Transfer** (ISO 20022, formát `pain.001.001.03`) je standardní XML
-formát pro platby v **EUR** — přijímají ho banky napříč Evropou, včetně českých
-(ČS, KB, ČSOB, Raiffeisenbank a další). Použij ho pro dodavatele v zahraničí
-(zálohy, faktury v EUR), kde ABO (tuzemský CZK styk) nefunguje.
+formát pro platby v **EUR**. Přijímají ho banky napříč Evropou, včetně českých
+(ČS, KB, ČSOB, Raiffeisenbank a další). Použijte ho pro dodavatele v zahraničí
+(zálohy, faktury v EUR), kde ABO nefunguje.
 
-- Vyber **účet plátce v EUR** (viz [§ 26.1](#261-ucet-platce)) — tlačítko **Export
-  SEPA** se zpřístupní jen pro EUR příkaz.
-- Plátce i **každý příjemce v dávce musí mít vyplněný IBAN** (doplníš ho stejně jako
-  tuzemský účet, viz [§ 26.3](#263-doplneni-a-uprava-uctu-prijemce)). BIC je nepovinný
-  (v rámci SEPA/EHP se od roku 2016 nevyžaduje) — pokud ho znáš, doplň ho pro jistotu.
+- Vyberte **účet plátce v EUR**. Tlačítko **Export SEPA (pain.001)** se zpřístupní jen pro EUR příkaz.
+- Plátce i **každý příjemce v dávce musí mít vyplněný IBAN** (doplníte ho stejně jako
+  tuzemský účet, viz [§ 26.4](#264-krok-za-krokem-doplnit-a-overit-ucet-prijemce)). BIC je nepovinný
+  (v rámci SEPA a EHP se od roku 2016 nevyžaduje), pokud ho znáte, doplňte ho pro jistotu.
   Faktury bez IBAN se do SEPA dávky nezařadí.
-- Vygenerované XML obsahuje hlavičku dávky, plátce (IBAN/BIC), a pro každou platbu
-  příjemce (IBAN/BIC), částku, variabilní symbol (jako referenci) a datum splatnosti.
-- Soubor jednoduše nahraješ v internetovém bankovnictví do importu SEPA/zahraničních
-  příkazů.
+- XML obsahuje hlavičku dávky, plátce (IBAN, BIC) a pro každou platbu příjemce (IBAN, BIC),
+  částku, variabilní symbol (jako referenci) a datum splatnosti.
 
-> [!IMPORTANT]
+> [!WARNING]
 > Vytvoření XML **neodešle peníze** a nepotvrdí úhradu faktury. Banka po importu
-> znovu ověří oprávnění, účet, datum a disponibilní zůstatek a platby musíš v
-> bankovnictví autorizovat. Skutečnou úhradu následně potvrď importem bankovního
-> výpisu; uložený snapshot dávky je doklad toho, co bylo předáno bance, nikoli
+> znovu ověří oprávnění, účet, datum a disponibilní zůstatek a platby musíte
+> v bankovnictví autorizovat. Skutečnou úhradu potvrďte importem bankovního
+> výpisu. Uložený snapshot dávky je doklad toho, co bylo předáno bance, nikoli
 > důkaz, že banka platbu provedla.
 
-## 26.9 Stav „Předáno k úhradě" a filtrování
+### 26.8.7 Stav „Předáno k úhradě“ a filtrování
 
-Předání k úhradě je **samostatná dimenze**, ne stav faktury — faktura zůstává
-`Přijatá`/`Zaúčtovaná` a navíc nese příznak **„Předáno k úhradě"**. V seznamu
-[Přijatých faktur](23_Prijate_faktury.md) proto najdeš filtr **„Předání k úhradě"**
-(předané / nepředané) a u řádků štítek, takže snadno odlišíš, co už čeká na zaplacení.
+Předání k úhradě je **samostatná dimenze**, ne stav faktury. Faktura zůstává
+`Přijatá` nebo `Zaúčtovaná` a navíc nese příznak **Předáno k úhradě**. V seznamu
+[Přijatých faktur](23_Prijate_faktury.md) proto najdete filtr **Předání k úhradě**
+(**Předané k úhradě** / **Nepředané k úhradě**) a u řádků štítek, takže snadno
+odlišíte, co už čeká na zaplacení.
 
 Skutečné **Zaplaceno** nastaví až spárování bankovního výpisu ([Banka](29_Banka.md)),
-ruční označení úhrady, nebo volba „označit jako zaplacené" při exportu.
+ruční označení úhrady, nebo volba **Označit při exportu faktury rovnou jako zaplacené**.
 
-## 26.10 Historie příkazů
+### 26.8.8 Historie příkazů
 
-Dole na stránce je **Historie příkazů** — každá vytvořená dávka s datem, účtem plátce,
-počtem položek, součtem a příznakem „zaplaceno". U každé dávky můžeš příkaz **stáhnout
-znovu** (CSV / PDF / ABO / SEPA) — díky uloženému snapshotu je opětovné stažení
+Dole na stránce je **Historie příkazů**: každá vytvořená dávka s datem, účtem plátce,
+počtem položek, součtem a příznakem **Zaplaceno**. Příkaz můžete **stáhnout
+znovu** (CSV, PDF, ABO, SEPA). Díky uloženému snapshotu je opětovné stažení
 totožné s původním, nezávisle na pozdějších změnách faktur.
 
-## 26.11 Omezení a tipy
+### 26.8.9 Omezení a tipy
 
 V historii lze uložený příkaz odstranit tlačítkem **Smazat** po potvrzení.
 Příkaz s evidovaným pokusem o odeslání přes bankovní konektor smazat nelze,
 ani při odmítnutém nebo nejasném výsledku. Smazání nemění stav faktur ani
-jejich označení k úhradě a nezruší platbu, kterou jsi do banky nahrál ručně.
+jejich označení k úhradě a nezruší platbu, kterou jste do banky nahráli ručně.
 
-Pro aktivně propojený účet Fio ČR (2010), ČSOB (0300), Raiffeisenbank (5500),
-Banky CREDITAS (2250), MONETA Money Bank (0600) nebo KB+ (0100, jen varianta Plus se souhlasem pro hromadné platby) lze tuzemský příkaz v CZK také
-**odeslat přímo do banky**, pokud napojení má potřebná oprávnění.
-Napojení Fio SR (8330) zatím slouží k načítání pohybů, nikoli k přímému odesílání EUR příkazů.
 Akce **Připravit příkaz pro banku** příkaz uloží bez označení faktur jako
-zaplacených. V sekci pod přehledem faktur pak vyber uložený příkaz a potvrď
-**Odeslat do banky**. Přijatý příkaz je potřeba autorizovat v internetovém
-bankovnictví; odeslání samo nepotvrzuje úhradu. Zahájený import dávky ještě
-nepotvrzuje přijetí jednotlivých plateb. U nejasného výsledku ověř stav
-v bance, opakované odeslání stejného příkazu je blokované. Nastavení a úplný
-postup jsou v kapitole [Bankovní účty](30_Bankovni_ucty.md#3014-odeslani-prikazu-do-banky).
+zaplacených. Přijatý příkaz je potřeba autorizovat v internetovém bankovnictví.
+U nejasného výsledku ověřte stav v bance, opakované odeslání stejného příkazu je blokované.
 
-V internetovém bankovnictví CREDITAS najdeš předanou dávku v **Transakce → Zadané → Hromadné**. Zde zkontroluj její stav a příkazy k autorizaci.
-
-V Internet Bance MONETA najdeš předanou dávku k podpisu v sekci **Zprávy a oznámení**.
-
-Pokud jsi celou dávku v bance zrušil, zvol v historii příkazu **Smazat**.
+Pokud jste celou dávku v bance zrušili, zvolte v historii příkazu **Smazat**.
 U předaného příkazu aplikace nabídne místo trvalého smazání archivaci
 s výslovným potvrzením, že žádná platba z dávky nebude provedena.
 Příkaz zmizí z přehledu, ale jeho položky, historie odeslání a ochrana
-proti opakovanému odeslání zůstanou zachované. Jde o tvé potvrzení,
+proti opakovanému odeslání zůstanou zachované. Jde o vaše potvrzení,
 nikoli o ověření bankovním API. Stav faktur a označení k úhradě se nemění.
 
-- **ABO jen CZK** + tuzemský účet příjemce. **SEPA jen EUR** + IBAN plátce i příjemce.
-  Ostatní cizí měny se platí přes CSV/PDF, nebo zahraničním příkazem ve své bance.
-- **Jeden příkaz = jedna měna** (dle účtu plátce).
+- **ABO jen CZK** a tuzemský účet příjemce. **SEPA jen EUR** a IBAN plátce i příjemce.
+  Ostatní cizí měny se platí přes CSV nebo PDF, nebo zahraničním příkazem ve vaší bance.
+- **Jeden příkaz = jedna měna** (podle účtu plátce).
 - MyÚčto v příkazu neprovádí směnu měn: faktura, účet plátce a zvolený export
-  musí mít odpovídající měnu. Směnu nebo platbu v jiné měně zadej přímo v bance.
+  musí mít odpovídající měnu. Směnu nebo platbu v jiné měně zadejte přímo v bance.
 - Datum splatnosti v minulosti se posune na dnešek (požadavek ABO).
-- Účty si nech **ověřit proti CRPDPH** zejména u nových dodavatelů.
-- Pro readonly uživatele je tvorba příkazů a editace účtů zakázána (jen čtení a stažení).
+- Účty si nechte **ověřit proti CRPDPH**, zejména u nových dodavatelů.
+- Pro uživatele jen se čtením je tvorba příkazů a editace účtů zakázána (jen čtení a stažení).
 
-## 26.12 Vratky odběratelům
+### 26.8.10 Vratky odběratelům
 
-Když má firma v nastavení fakturace zapnuté **vyplácení přeplatků**, umí platební
-příkazy vracet peníze i odběratelům. Vratkou je vystavená **faktura** nebo **dobropis**,
-u kterých po odečtení (vrácené obaly, přeplatek záloh) dlužíš zákazníkovi peníze.
-Bez zapnuté volby se vratky v příkazech neukazují, ani u běžných dobropisů.
-
-Na stránce Platební příkazy se vratky zobrazí v samostatné tabulce **„Vratky
-odběratelům"** pod fakturami k úhradě. Vybrat je jdou do stejné dávky jako přijaté
-faktury, pokud platíš z účtu v CZK:
+Vratkou je vystavená **faktura** nebo **dobropis**, u kterých po odečtení (vrácené
+obaly, přeplatek záloh) dlužíte zákazníkovi peníze. Vratky se zobrazí v samostatné
+tabulce **Vratky odběratelům** pod fakturami k úhradě. Vybrat je jde do stejné dávky
+jako přijaté faktury, pokud platíte z účtu v CZK:
 
 - **příjemcem** je odběratel dokladu, účet se bere z karty klienta. Přednost má účet
-  zadaný ručně, pak účet z registru plátců DPH a nakonec účet naučený z bankovních výpisů,
+  zadaný ručně, pak účet z registru plátců DPH a nakonec účet naučený z bankovních výpisů
+  (štítky **zadáno ručně**, **registr DPH**, **z výpisu**),
 - **částka** je částka k vrácení na dokladu,
 - **variabilní symbol** je číslo dokladu a nejde změnit. Podle něj se odchozí platba
   po importu výpisu s dokladem spáruje sama,
 - vratky se posílají jen v **CZK** a jen převodem. Doklad s formou úhrady hotově do
   příkazu nepatří, vyplácí se přes pokladnu.
 
-Vratka bez známého účtu odběratele vybrat nejde, účet doplníš v detailu dokladu.
-
-### Vrátit peníze z detailu dokladu
-
-V detailu faktury nebo dobropisu k vyplacení je hlavní akce **Vrátit peníze**.
-Otevře okno, kde:
-
-- vybereš **účet odběratele** z nabídnutých účtů, nebo zadáš **jiný účet** ručně.
-  Ručně zadaný účet se kontroluje (modulo 11) a volbou **Uložit účet do karty klienta**
-  se zapamatuje pro příště,
-- zvolíš **účet, ze kterého platíš**, a **datum splatnosti**,
-- variabilní symbol je předvyplněný číslem dokladu.
-
-Tlačítka **Stáhnout ABO**, **CSV** a **PDF** vytvoří platební příkaz s touto jedinou
-vratkou a stáhnou ho. Je-li účet napojený na bankovní API, jde příkaz rovnou
-**Odeslat do banky**. Volba **Přidat do hromadného příkazu** příkaz nevytváří, jen
-uloží ručně zadaný účet ke klientovi a doklad pak najdeš mezi vratkami na stránce
-Platební příkazy. Vytvořený příkaz se objeví v historii příkazů.
-
-### Kdy je vratka vyplacená
+Vratka bez známého účtu odběratele vybrat nejde, účet doplníte v detailu dokladu.
+Ručně zadaný účet se kontroluje (modulo 11).
 
 Zařazení do příkazu doklad jen označí jako předaný k vyplacení, doklad zůstává
 otevřený. Vyplacený je až po **spárování odchozí platby** z bankovního výpisu, nebo
-když ho v detailu dokladu v nabídce **…** označíš volbou **Označit jako vyplaceno**.
-Volba „Označit při exportu faktury rovnou jako zaplacené" se na vratky nevztahuje.
-Smazáním příkazu se u vratky zruší i označení „předáno k vyplacení", pokud doklad
+když ho v detailu dokladu v nabídce **…** označíte volbou **Označit jako vyplaceno**.
+Volba **Označit při exportu faktury rovnou jako zaplacené** se na vratky nevztahuje.
+Smazáním příkazu se u vratky zruší i označení „předáno k vyplacení“, pokud doklad
 není v jiném příkazu.
 
-> [!TIP]
-> Rychlý postup: v [Přijatých fakturách](23_Prijate_faktury.md) zaškrtni faktury
-> a klikni **„Do příkazu k úhradě"** — předvybrané doklady se otevřou přímo zde.
+## 26.9 Související kapitoly
+
+- [Přijaté faktury](23_Prijate_faktury.md) - odtud se berou data a platební údaje.
+- [Export přijatých](24_Export_prijatych.md) - předání dokladů účetní.
+- [AI extrakce](25_AI_extrakce.md) - automatické rozpoznání platebního účtu z PDF.
+- [Bankovní účty](30_Bankovni_ucty.md) - účty plátce a přímé odeslání příkazu do banky.
+- [Banka](29_Banka.md) - spárování výpisu, které potvrdí úhradu.

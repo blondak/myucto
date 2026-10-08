@@ -1,133 +1,232 @@
 # 22. Upomínky po splatnosti
 
-Když klient nezaplatil včas, můžeš mu poslat **upomínku** — speciální e-mail
-s textem typu „Vaše faktura č. XXX byla splatná YY dní zpět, prosíme o úhradu".
+> Návod, jak upomenout klienta, který nezaplatil včas: ručně, hromadně nebo
+> automaticky, jak upravit text upomínky a jak vystavit penalizační fakturu na
+> úrok z prodlení. Pro každého, kdo hlídá pohledávky.
 
-Upomínky lze posílat **3 způsoby**:
+## 22.1 Kdy to potřebujete
 
-1. **Manuálně** z detailu jedné faktury (tlačítko)
-2. **Hromadně** z [Seznamu faktur](14_Faktury.md) (bulk action)
-3. **Automaticky** z cronu (`cron-send-reminders.php`)
+- Faktura je po splatnosti a chcete klientovi poslat upomínku (e-mail typu
+  „Vaše faktura č. XXX byla splatná YY dní zpět, prosíme o úhradu“).
+- Máte po splatnosti víc faktur a chcete upomenout všechny najednou.
+- Chcete, aby upomínky odcházely samy každý pracovní den.
+- Chcete upravit text upomínky nebo ji vyzkoušet, než ji uvidí klient.
+- Upomínky nepomohly a chcete vyúčtovat zákonný úrok z prodlení.
+- Potřebujete zjistit, zda se upomínka opravdu odeslala.
 
-## 22.1 Předpoklady
+Upomínky lze posílat **třemi způsoby**:
+
+1. **Ručně** z detailu jedné faktury.
+2. **Hromadně** ze [Seznamu faktur](14_Faktury.md).
+3. **Automaticky** z plánované úlohy (cronu).
+
+## 22.2 Než začnete
 
 Aby šla upomínka odeslat, faktura musí:
 
-- Být typu `Faktura` (ne proforma, dobropis ani storno)
-- Být ve stavu `issued`, `sent` nebo `reminded`
-- Být **po splatnosti** (`due_date < dnes`)
-- Mít k dispozici klientův e-mail (hlavní + případné fakturační)
-- Mít zapnutý přepínač **Posílat automatické upomínky** (viz § 22.7) — týká se
-  jen automatického cronu; ruční i hromadné odeslání funguje vždy.
+- být typu **Faktura** (ne proforma, dobropis ani storno),
+- být ve stavu vystavená, odeslaná nebo upomenutá,
+- být **po splatnosti** (splatnost starší než dnešek),
+- mít k dispozici e-mail klienta (hlavní e-mail, kontakty nebo fakturační
+  e-maily zakázky),
+- mít zapnutý přepínač **Posílat automatické upomínky** - jen pro
+  automatické odesílání, ruční i hromadné odeslání funguje vždy (viz
+  [§ 22.10.6](#22106-tri-urovne-vypnuti-a-prah-dni)).
 
-## 22.2 Manuální upomínka
+## 22.3 Krok za krokem: upomínka jedné faktuře
 
-Otevři [Detail faktury](16_Faktura_PDF.md) → tlačítko **Odeslat upomínku**.
+1. Otevřete [detail faktury](16_Faktura_PDF.md) po splatnosti.
+2. Klikněte na **Odeslat upomínku**.
 
-![Tlačítko upomínka](img/12_upominka_btn.webp)
+   ![Tlačítko upomínka](img/12_upominka_btn.webp)
 
-Po kliknutí:
+3. V potvrzovacím dialogu zkontrolujte příjemce (vidíte u nich i zdroj).
+   Můžete doplnit další adresy (oddělené čárkou) nebo přes **+ CC / BCC**
+   přidat kopii, třeba stavbyvedoucímu nebo nákupčímu, který platbu schvaluje.
+   Uložené kontakty klienta ani faktura se tím nemění.
+4. Potvrďte odeslání.
 
-- E-mail jde na: kontakty klienta s účelem **Upomínky** *(viz
-  [§ 18.2.2](18_Klienti.md))*; bez nich kontakty **Doklady**; bez kontaktů
-  na `klient.hlavni_email + zakazka.fakturacni_emaily[]`. Příjemce
-  vidíš v potvrzovacím dialogu vč. zdroje a můžeš je upravit stejně jako
-  při odeslání faktury: doplnit další adresy (čárkou oddělené) nebo přes
-  **+ CC / BCC** přidat kopii, třeba stavbyvedoucímu nebo nákupčímu, který
-  platbu schvaluje. Uložené kontakty klienta ani faktura se tím nemění.
-- Šablona: `invoice_reminder` (CZ / EN podle jazyka klienta)
-- Status faktury → `reminded`
-- `last_reminder_at` = teď
-- `reminder_count` += 1
+**Jak poznáte, že je hotovo:** faktura má stav **Upomínka**, zvýšil se počet
+odeslaných upomínek a v aktivitě faktury je záznam o upomínce s počtem dní po
+splatnosti.
 
-Activity log: `invoice.reminded` s počtem dní po splatnosti.
+Příjemci: kontakty klienta s účelem **Upomínky** (viz
+[§ 18.4](18_Klienti.md#184-krok-za-krokem-e-mailove-kontakty-podle-ucelu)),
+bez nich kontakty **Doklady**, bez kontaktů hlavní e-mail klienta plus
+fakturační e-maily zakázky.
 
-### 22.2.1 Test upomínky
+### 22.3.1 Test upomínky
 
-Vedle **Odeslat upomínku** je tlačítko **Test upomínky** — pošle stejný e-mail jen na
-**tvůj** e-mail (admina, kterého jsi přihlášen). Užitečné pro:
+Na detailu faktury po splatnosti otevřete nabídku **Další akce** a v části
+**Pokročilé** klikněte na **Test upomínky**. Aplikace pošle stejný e-mail jen na
+váš e-mail (přihlášeného administrátora). Hodí se pro:
 
-- Vyzkoušení šablony před odesláním klientovi
-- Ověření, že SMTP funguje
-- Náhled, jak vypadá HTML verze e-mailu v tvém klientu
+- vyzkoušení šablony před odesláním klientovi,
+- ověření, že SMTP funguje,
+- náhled HTML verze e-mailu ve vašem poštovním klientovi.
 
-## 22.3 Hromadná upomínka
+**Jak poznáte, že je hotovo:** upomínka dorazí do vaší schránky. Stav faktury ani
+počet upomínek se testem nemění.
 
-Z **Faktury → filtr „Po splatnosti"** zaškrtni více faktur → bulk action
-**Odeslat upomínky (N)**.
+> [!TIP]
+> Test upomínky vždy udělejte před prvním ostrým během cronu. Nešťastné je
+> posílat klientovi rozbitý HTML e-mail.
+
+## 22.4 Krok za krokem: hromadná upomínka
+
+1. Otevřete `Prodej → Vydané faktury` a nastavte filtr **Po splatnosti**.
+2. Zaškrtněte faktury, které chcete upomenout.
+3. V liště klikněte na **Odeslat upomínky (N)** a potvrďte.
 
 ![Hromadná upomínka](img/12_upominka_bulk.webp)
 
-Server:
+**Jak poznáte, že je hotovo:** zobrazí se hláška o výsledku (počet odeslaných
+a případné chyby u jednotlivých faktur) a odeslané faktury mají stav
+**Upomínka**.
 
-1. Pro každou fakturu zkontroluje, že splňuje předpoklady (§ 22.1)
-2. Pošle e-mail
-3. Update statusu
+Aplikace u každé faktury zkontroluje předpoklady z [§ 22.2](#222-nez-zacnete),
+odešle e-mail a změní stav. Hromadná akce **neuplatňuje ochrannou lhůtu**
+(cooldown): pošle upomínku každé vybrané fakturě, která splňuje předpoklady,
+i když už jednou upomenuta byla.
 
-Hromadná akce **neuplatňuje ochrannou lhůtu** (cooldown) mezi upomínkami -
-pošle upomínku každé vybrané fakturě, která splňuje předpoklady, i když už
-jednou upomenuta byla. Ochranná lhůta platí jen u automatického odesílání
-(§ 22.4), kde je výchozí **7 dní**.
+## 22.5 Krok za krokem: automatické upomínky
 
-Po dokončení se zobrazí hláška o výsledku (počet odeslaných a případné chyby
-u jednotlivých faktur).
+1. Zapněte automatické upomínky na všech třech úrovních (dodavatel, klient,
+   faktura, viz [§ 22.10.6](#22106-tri-urovne-vypnuti-a-prah-dni)). Cron pošle
+   upomínku, jen když ji dovolí všechny tři.
+2. V `Firma → Nastavení`, záložce **Fakturace**, zapněte **Posílat automatické
+   upomínky**.
+3. V poli **Po kolika dnech po splatnosti poslat první upomínku** zvolte
+   **3 dny**, **Týden (7 dní)**, **Měsíc (30 dní)**, nebo **Vlastní…** počet
+   dní (1 až 365).
+4. Správce serveru nastaví plánovanou úlohu (viz
+   [§ 22.10.1](#22101-cron-parametry)). Doporučení: 1x denně v pracovní dny.
+5. Před ostrým nasazením úlohu vyzkoušejte s `--dry-run`
+   (viz [§ 22.10.3](#22103-dry-run-pred-nasazenim)).
 
-## 22.4 Cron — automatické upomínky
+**Jak poznáte, že je hotovo:** upomínky odcházejí samy, v
+`Systém → E-maily a certifikáty` na záložce **Odeslané e-maily** vidíte
+odeslání připsaná „Systému“ a faktury mají stav **Upomínka**.
 
-Pro pravidelné upomínání nastav cron:
+Upomínku u jedné faktury vypnete v [editoru faktury](15_Faktura_editor.md)
+přepínačem **Posílat automatické upomínky** (box **Datumy**, pod polem
+Splatnost). Cron tuto fakturu pak přeskočí, ruční i hromadné odeslání funguje.
 
-```bash
-cmd/cron-send-reminders.sh    # 1× denně, doporučeně 09:00 Po–Pá
-```
+## 22.6 Krok za krokem: úprava šablony upomínky
 
-Skript `php api/bin/cron-send-reminders.php` má parametry:
+1. Otevřete `Systém → E-maily a certifikáty` a záložku **E-mail šablony**.
+2. Vyberte šablonu **Upomínka faktury**.
 
-| Parametr | Default | Význam |
+   ![Editor šablony upomínky](img/12_sablona.webp)
+
+3. Upravte **Předmět**, **HTML tělo** a **Plain text tělo** (záloha pro
+   klienty bez HTML). Použít můžete placeholdery z
+   [§ 22.10.4](#22104-placeholdery-v-sablone).
+4. Uložte a vyzkoušejte přes **Test upomínky** (viz
+   [§ 22.3.1](#2231-test-upominky)).
+
+**Jak poznáte, že je hotovo:** testovací e-mail vypadá, jak chcete.
+
+## 22.7 Krok za krokem: penalizační faktura (úrok z prodlení)
+
+Když upomínky nepomohly, můžete dlužníkovi vystavit penalizační fakturu na
+zákonný úrok z prodlení dle nařízení vlády č. 351/2013 Sb.
+
+1. Otevřete [detail faktury](16_Faktura_PDF.md) po splatnosti (typu Faktura).
+2. Klikněte na **Penalizační faktura**.
+3. V okně zkontrolujte náhled výpočtu: jistinu (zbývající dlužnou částku),
+   počet dní prodlení, rozpad dnů přes hranici kalendářního roku (období, dny,
+   roční sazba, úrok) a celkový úrok.
+4. Potvrďte. Vznikne **koncept** penalizační faktury na jeden řádek s
+   vypočteným úrokem.
+5. Fakturu běžně vystavte a odešlete.
+
+**Jak poznáte, že je hotovo:** hláška „Penalizační faktura vytvořena (koncept)“
+a v seznamu faktur koncept typu Penalizační faktura.
+
+Jak se úrok počítá, viz [§ 22.10.7](#22107-jak-se-urok-pocita). Ke stejné
+faktuře lze penalizaci vystavit opakovaně, vždy za dosud nevyúčtované dny
+(viz [§ 22.10.8](#22108-navazujici-penalizace)).
+
+## 22.8 Krok za krokem: kontrola, co se opravdu odeslalo
+
+1. Otevřete `Systém → E-maily a certifikáty` a záložku **Odeslané e-maily**.
+2. Filtrem stavu (**Vše / Odesláno / Neodesláno**) nebo zkratkou
+   **Neodesláno: N** najdete neúspěšná odeslání.
+3. U červeného řádku přečtěte text chyby a odeslání zopakujte (například
+   z detailu faktury).
+
+**Jak poznáte, že je hotovo:** u upomínky je stav **Odesláno**.
+
+Přehled obsahuje **všechny** e-maily aplikace: odeslání faktur, upomínky,
+schvalovací upomínky, poděkování za úhradu, připomínky konceptů, odkazy na
+nastavení hesla (pozvánka nového uživatele i znovuposlání), obnovu zapomenutého
+hesla a testovací odeslání. Automatická (cron) odeslání jsou připsána „Systému“.
+Zapisují se i neúspěšná odeslání (nedostupný SMTP, odmítnutý příjemce, chyba při
+generování PDF) červeným řádkem se stavem **Neodesláno** a textem chyby.
+
+> [!WARNING]
+> „Odesláno“ znamená, že e-mail **převzal SMTP server**. Nezaručuje doručení do
+> schránky, odmítnutí mailserverem příjemce ani spam filtr aplikace netrackuje.
+
+## 22.9 Když něco nejde
+
+<!-- cols: 34 30 36 -->
+| Co vidíte | Proč | Co udělat |
 |---|---|---|
-| `--days=N` | (per dodavatel) | Faktura musí být po splatnosti alespoň N dní. Bez parametru se čte **práh nastavený u dodavatele** (§ 22.7, default 3); `--days` ho pro daný běh přebije. |
-| `--cooldown=N` | `7` | Min. počet dní mezi dvěma upomínkami stejné faktury |
-| `--dry-run` | — | Jen vypíše, co by udělal, **bez odeslání** |
+| Tlačítko **Odeslat upomínku** chybí | Faktura není po splatnosti, není typu Faktura nebo je ve stavu, který se neupomíná (proforma, dobropis, storno) | Zkontrolujte typ, stav a splatnost |
+| Cron fakturu přeskočil | Automatické upomínky jsou vypnuté u dodavatele, klienta nebo faktury, nebo je faktura méně dní po splatnosti než práh, nebo poslední upomínka byla před méně než cooldown dny | Zkontrolujte [§ 22.10.6](#22106-tri-urovne-vypnuti-a-prah-dni) a použijte `--dry-run` |
+| Upomínka se nevyskytuje v přehledu chyb, přesto neodešla | Cron ji přeskočil kvůli předpokladům (například klient nemá e-mail), to není selhání odeslání | Doplňte e-mail klienta, viz [§ 18.4](18_Klienti.md#184-krok-za-krokem-e-mailove-kontakty-podle-ucelu) |
+| Červený řádek **Neodesláno** | Nedostupný SMTP, odmítnutý příjemce nebo chyba PDF | Přečtěte text chyby v **Odeslané e-maily** a odešlete znovu |
+| Penalizaci aplikace odmítla | Celé aktuální období prodlení je už pokryté dřívější penalizací | Není co nově vyúčtovat, viz [§ 22.10.8](#22108-navazujici-penalizace) |
+| Hromadná akce poslala upomínku i nedávno upomenuté faktuře | Hromadná akce nemá cooldown | Vybírejte faktury pečlivě |
 
-### 22.4.1 Doporučené nastavení
+## 22.10 Podrobnosti a pravidla
+
+### 22.10.1 Cron parametry
+
+Skript `cmd/cron-send-reminders.sh` (spouští `php api/bin/cron-send-reminders.php`)
+doporučujeme pouštět 1x denně, například v 9:00 od pondělí do pátku.
+
+| Parametr | Výchozí | Význam |
+|---|---|---|
+| `--days=N` | (podle dodavatele) | Faktura musí být po splatnosti alespoň N dní. Bez parametru se čte **práh nastavený u dodavatele** (výchozí 3), `--days` ho pro daný běh přebije. |
+| `--cooldown=N` | `7` | Minimální počet dní mezi dvěma upomínkami stejné faktury |
+| `--dry-run` | - | Jen vypíše, co by udělal, **bez odeslání** |
+
+Ochranná lhůta (cooldown) platí jen u automatického odesílání, ruční a hromadné
+odeslání ji neuplatňuje.
+
+### 22.10.2 Doporučené nastavení
 
 ```cron
-# Po-Pá v 9:00 — upomínat faktury 5+ dní po splatnosti, max 1× za 14 dní
+# Po-Pá v 9:00 - upomínat faktury 5+ dní po splatnosti, max 1x za 14 dní
 0 9 * * 1-5  /var/www/myucto.cz/cmd/cron-send-reminders.sh --days=5 --cooldown=14
 ```
 
-> 💡 `--days=5` je rozumný „grace period" — klient mohl mít dovolenou,
-> bankovní poplatek, nebo sis ty zapomněl naimportovat výpis.
+`--days=5` je rozumná odkladná lhůta: klient mohl mít dovolenou, bankovní
+poplatek, nebo jste zapomněli naimportovat výpis. Kratší cooldown než 7 dní
+by byl agresivní. Cron nepouštějte o víkendu: klient e-maily nečte, vyřeší je
+až v pondělí a ve statistikách to vypadá divně.
 
-### 22.4.2 Dry-run pro test
-
-Před produkčním nasazením:
+### 22.10.3 Dry-run před nasazením
 
 ```bash
 php api/bin/cron-send-reminders.php --days=5 --dry-run
 ```
 
-Vypíše:
+Vypíše například:
 
 ```
-[dry-run] Faktura #2604012 (ACME s.r.o., 12 dní po splatnosti) — by se odeslala na 3 adresy
-[dry-run] Faktura #2604015 (Studio Fialka, 7 dní po splatnosti) — by se odeslala na 1 adresu
-[dry-run] Faktura #2604008 — přeskočena (poslední upomínka před 4 dny < cooldown 7)
+[dry-run] Faktura #2604012 (ACME s.r.o., 12 dní po splatnosti) - by se odeslala na 3 adresy
+[dry-run] Faktura #2604015 (Studio Fialka, 7 dní po splatnosti) - by se odeslala na 1 adresu
+[dry-run] Faktura #2604008 - přeskočena (poslední upomínka před 4 dny < cooldown 7)
 [dry-run] CELKEM: 2 by se odeslaly, 1 přeskočena.
 ```
 
-## 22.5 Šablona upomínky
+### 22.10.4 Placeholdery v šabloně
 
-Šablona je v **Systém → E-mail šablony → invoice_reminder**.
-
-![Editor šablony upomínky](img/12_sablona.webp)
-
-Můžeš editovat:
-
-- **Předmět** — `{{ varsymbol }}` placeholder pro VS faktury
-- **HTML tělo** — Twig template
-- **Plain text tělo** — fallback pro klienty bez HTML
-
-### 22.5.1 Dostupné placeholders
+Předmět lze složit s placeholderem `{{ varsymbol }}`, tělo je šablona Twig.
 
 | Placeholder | Význam |
 |---|---|
@@ -141,144 +240,97 @@ Můžeš editovat:
 | `{{ payment_link }}` | (volitelné) odkaz na platební bránu |
 | `{{ reminder_count }}` | Počet již odeslaných upomínek (1 = první, 2 = druhá, …) |
 
-### 22.5.2 Multi-jazyčnost
+Eskalaci tónu uděláte pomocí `{{ reminder_count }}` a logiky Twig, například
+`{% if reminder_count >= 3 %}poslední výzva{% endif %}`.
 
-Pro každou šablonu jsou **4 varianty**:
+Pro každou šablonu existují **4 varianty**: `cs.html`, `cs.txt`, `en.html`
+a `en.txt`. Vybere se podle jazyka klienta.
 
-- `cs.html` (CZ HTML)
-- `cs.txt` (CZ plain)
-- `en.html` (EN HTML)
-- `en.txt` (EN plain)
+### 22.10.5 Co odeslání upomínky změní
 
-Vybere se podle `klient.language`.
+Odeslání upomínky nastaví stav faktury na **Upomínka**, zapíše čas poslední
+upomínky a zvýší počet upomínek o jedna. Šablona je **Upomínka faktury** (`invoice_reminder`)
+(CZ / EN podle jazyka klienta).
 
-## 22.6 Tipy
+### 22.10.6 Tři úrovně vypnutí a práh dní
 
-- **Cooldown** výchozích 7 dní u automatiky lze přes `--cooldown=N` zvýšit (např. na 14) - kratší lhůta by byla agresivní.
-- **Eskalace tónu** — pomocí `{{ reminder_count }}` můžeš v šabloně použít
-  Twig logiku: `{% if reminder_count >= 3 %}poslední výzva{% endif %}`.
-- **Cron nepouštěj v sobotu/neděli** — klient nečte e-maily, vyřeší to až
-  v pondělí, ale na statistikách to vypadá divně. Cron expression `1-5`
-  (Po–Pá) je standard.
-- **Po druhé upomínce zvaž osobní telefonát** — automatika neřeší vztahy.
-  E-mailová upomínka je jen formalita.
-- **Test upomínky** = vždy před produkčním cronem. Nešťastné je posílat
-  klientovi rozbitý HTML.
-
-## 22.7 Vypnutí upomínek u konkrétní faktury a práh dní
-
-Automatické upomínky lze řídit na třech úrovních; cron pošle upomínku, jen když
-**všechny tři** dovolí (zapnuto u dodavatele **i** u klienta **i** u faktury):
+Cron pošle upomínku, jen když dovolí **všechny tři** úrovně:
 
 | Úroveň | Kde | Význam |
 |---|---|---|
-| Dodavatel | Nastavení → dodavatel | Globální přepínač pro celého dodavatele; u nově založené firmy je vypnutý |
-| Klient | Detail klienta | Vypnutí pro všechny faktury daného klienta |
-| **Faktura** | Editor faktury | Vypnutí pro jedinou konkrétní fakturu |
+| Dodavatel | `Firma → Nastavení`, záložka **Fakturace** | Globální přepínač pro celého dodavatele, u nově založené firmy je vypnutý |
+| Klient | Úprava klienta, volba **Posílat automatické upomínky** | Vypnutí pro všechny faktury daného klienta |
+| **Faktura** | Editor faktury | Vypnutí pro jedinou fakturu |
 
-### 22.7.1 Přepínač na faktuře
+Přepínač na faktuře je v pravém boxu **Datumy** pod polem Splatnost, výchozí
+stav je zapnuto. U dobropisů se nezobrazuje (dobropisy se neupomínají). Ruční
+i hromadné odeslání funguje vždy.
 
-V [editoru faktury](15_Faktura_editor.md) je v pravém boxu **Datumy**, hned pod
-polem *Splatnost*, přepínač **Posílat automatické upomínky** (výchozí: zapnuto).
-Když ho vypneš, cron tuto fakturu přeskočí, i kdyby měl dodavatel i klient
-upomínky zapnuté. **Ruční i hromadné** odeslání upomínky funguje vždy. U dobropisů
-se přepínač nezobrazuje (dobropisy se neupomínají).
+Práh „po kolika dnech po splatnosti poslat první upomínku“ je hodnota na
+dodavateli, kterou cron čte automaticky. Parametr `--days=N` ji pro daný běh
+přebije, hodí se pro mimořádný nebo ruční běh.
 
-### 22.7.2 Práh „po kolika dnech po splatnosti"
-
-V **Nastavení → dodavatel** nastavíš, **po kolika dnech po splatnosti** se má
-poslat první automatická upomínka. Na výběr jsou předvolby **3 dny / týden /
-měsíc** nebo **vlastní** počet dní (1–365). Hodnota je per dodavatel; cron ji čte
-automaticky. Parametr `--days=N` (§ 22.4) ji pro daný běh přebije — hodí se pro
-mimořádný / ruční běh.
-
-## 22.8 Penalizace — úrok z prodlení
-
-Když upomínky nepomohly, můžeš dlužníkovi vystavit **penalizační fakturu** na
-zákonný **úrok z prodlení** dle nařízení vlády č. 351/2013 Sb.
-
-### 22.8.1 Jak se úrok počítá
+### 22.10.7 Jak se úrok počítá
 
 Roční sazba úroku = **2týdenní repo sazba ČNB** platná k **prvnímu dni
 kalendářního pololetí, ve kterém prodlení VZNIKLO**, zvýšená o **8 procentních
-bodů**. Denní úrok:
+bodů**:
 
 ```
 úrok = jistina × (repo sazba k počátku prodlení + 8) / 100 × počet dní prodlení / (365 nebo 366)
 ```
 
 Prodlení běží ode dne následujícího po splatnosti do rozhodného dne (dnešek).
-Sazba se **fixuje k okamžiku vzniku prodlení a dál se nemění** — i když
-prodlení trvá přes další pololetí (třeba s jinou sazbou ČNB), počítá se pořád
-stejnou, počáteční sazbou (§ 2 NV č. 351/2013 Sb.). Přesahuje-li prodlení přes
-hranici **kalendářního roku**, systém dny rozdělí na tuto hranici, protože se
-mění jmenovatel (365, resp. 366 v přestupném roce) — sazba zůstává v obou
-částech stejná.
+Sazba se **fixuje k okamžiku vzniku prodlení a dál se nemění**. I když
+prodlení trvá přes další pololetí s jinou sazbou ČNB, počítá se pořád
+počáteční sazbou (§ 2 NV č. 351/2013 Sb.). Přesahuje-li prodlení přes hranici
+**kalendářního roku**, aplikace dny na této hranici rozdělí, protože se mění
+jmenovatel (365, resp. 366 v přestupném roce). Sazba zůstává v obou částech
+stejná.
 
-Repo sazby ČNB jsou v číselníku **Nástroje → Účetní nastavení → Repo sazba ČNB** (viz níže) —
-admin je může doplňovat a opravovat.
-
-### 22.8.2 Vytvoření penalizační faktury
-
-Na [detailu faktury](16_Faktura_PDF.md) po splatnosti (typu `Faktura`) je
-tlačítko **Penalizační faktura**. Po kliknutí se zobrazí **náhled výpočtu**:
-
-- Jistina (zbývající dlužná částka)
-- Počet dní prodlení
-- Rozpad dnů přes hranici kalendářního roku (období, dny, roční sazba, úrok) —
-  sazba je ve všech řádcích stejná, mění se jen jmenovatel 365/366
-- Celkový úrok z prodlení
-
-Po potvrzení vznikne **koncept** penalizační faktury (typ `Penalizační
-faktura`) na jeden řádek = vypočtený úrok. Fakturu pak běžně vystavíš a odešleš.
-
-### 22.8.3 Navazující penalizace (žádné dvojí vyúčtování)
+### 22.10.8 Navazující penalizace
 
 Když ke stejné faktuře už dřív vznikla penalizace, další penalizace **počítá
-úrok jen za dny, které ještě nebyly vyúčtované** — systém si u každé
+úrok jen za dny, které ještě nebyly vyúčtované**. Aplikace si u každé
 penalizační faktury pamatuje, do kterého dne prodlení pokrývá, a navazující
 výpočet začíná až den poté. V náhledu se to projeví hláškou „Navazuje na
-dřívější penalizaci — počítá se jen období od …".
+dřívější penalizaci - počítá se jen období od …“.
 
-Pokud je celé aktuální období prodlení už penalizací pokryté (typicky když
-zadáš stejné nebo starší rozhodné datum jako u předchozí penalizace), systém
-vytvoření nové faktury **odmítne** — není co nově vyúčtovat.
+Je-li celé aktuální období prodlení už pokryté (typicky zadáte stejné nebo
+starší rozhodné datum jako u předchozí penalizace), aplikace vytvoření nové
+faktury **odmítne**, protože není co nově vyúčtovat.
 
-> 💡 Stornovaná penalizační faktura se do „už pokrytého období" nepočítá —
-> po jejím stornování začne navazující výpočet znovu od původního počátku
-> prodlení.
+> [!TIP]
+> Stornovaná penalizační faktura se do „už pokrytého období“ nepočítá. Po jejím
+> stornování začne navazující výpočet znovu od původního počátku prodlení.
 
-### 22.8.4 Účtování a DPH
+### 22.10.9 Účtování a DPH
 
-- Úrok z prodlení je **mimo předmět DPH** (§ 2 ZDPH — není plnění), penalizační
+- Úrok z prodlení je **mimo předmět DPH** (§ 2 ZDPH, není plnění), penalizační
   faktura se proto **nezahrnuje** do Knihy DPH, přiznání DPHDP3 ani do
   kontrolního hlášení.
-- V podvojném účetnictví se účtuje **311 / 644** (Smluvní pokuty a úroky
-  z prodlení) — bez řádku DPH (343). Předkontaci lze upravit v [kontačních
-  pravidlech](96_Nastaveni.md) (`invoice.penalty.issued`).
+- V podvojném účetnictví se účtuje **311 / 644** (Smluvní pokuty a úroky z
+  prodlení) bez řádku DPH (343). Předkontaci lze upravit v
+  [kontačních pravidlech](96_Nastaveni.md) (`invoice.penalty.issued`).
 
-### 22.8.5 Číselník repo sazby ČNB
+### 22.10.10 Číselník repo sazby ČNB
 
-V **Nástroje → Účetní nastavení → Repo sazba ČNB** je tabulka historických repo sazeb. Každý
-řádek má **Platnost od** (typicky 1. den pololetí) a **sazbu v % p.a.**. Systém
-při výpočtu vezme poslední sazbu s datem platnosti ≤ rozhodný den. Číselník je
-společný pro celou instalaci. Řádky může doplňovat, opravovat a mazat pouze
-superadministrátor.
+V `Nástroje → Účetní nastavení → Repo sazba ČNB` je tabulka historických repo
+sazeb. Každý řádek má **Platnost od** (typicky 1. den pololetí) a **sazbu
+v % p.a.** Aplikace při výpočtu vezme poslední sazbu s datem platnosti
+nejpozději k rozhodnému dni. Číselník je společný pro celou instalaci. Řádky
+může doplňovat, opravovat a mazat pouze superadministrátor.
 
-## 22.9 Kontrola, co se opravdu odeslalo (a co ne)
+### 22.10.11 Tipy
 
-V **Systém → Odeslané e-maily** je přehled **všech** e-mailů, které aplikace
-rozeslala — odeslání faktur, upomínky, schvalovací upomínky, poděkování za
-úhradu, připomínky konceptů, odkazy na nastavení hesla (pozvánka nového
-uživatele i znovuposlání), obnovu zapomenutého hesla a testovací odeslání.
-Automatické (cron) odeslání jsou připsána „Systému".
+- Po druhé upomínce zvažte osobní telefonát. Automatika neřeší vztahy,
+  e-mailová upomínka je jen formalita.
+- Cooldown výchozích 7 dní lze přes `--cooldown=N` zvýšit, například na 14.
 
-Přehled ukazuje **i neúspěšná odeslání**: když odeslání selže (nedostupný SMTP,
-odmítnutý příjemce, chyba při generování PDF), zapíše se červený řádek se stavem
-**Neodesláno** a textem chyby. Filtr **stavu** (Vše / Odesláno / Neodesláno) a
-zkratka **Neodesláno: N** umožní rychle najít, co je potřeba poslat znovu.
+## 22.11 Související kapitoly
 
-> ⚠️ „Odesláno" znamená, že e-mail **převzal SMTP server** — nezaručuje doručení
-> do schránky (odmítnutí mailserverem příjemce / spam filtr aplikace netrackuje).
-> Pokud cron upomínku **přeskočí** kvůli předpokladům z § 22.1 (např. klient nemá
-> e-mail), nejde o „selhání odeslání" a v přehledu se jako chyba neobjeví.
+- [14. Faktury](14_Faktury.md)
+- [16. Faktura - PDF, QR platba, odeslání e-mailem](16_Faktura_PDF.md)
+- [18. Klienti](18_Klienti.md)
+- [19. Zakázky](19_Zakazky.md)
+- [96. Nastavení](96_Nastaveni.md)

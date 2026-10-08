@@ -1,36 +1,219 @@
 # 107. Přechod z POHODY
 
-**Cesta: `Systém → Přechod z jiných účetních systémů → POHODA (i SQL)`**
+> Návod, jak převést vybrané účetní roky z POHODY (i POHODY SQL) do firmy
+> v MyÚčtu: od exportu ze starého programu přes zkoušku nanečisto a ostrý
+> převod až po kontrolu převzatých dat. Pro účetní a správce, kteří přecházejí
+> z POHODY.
 
-Průvodce převede vybrané účetní roky z programu POHODA do firmy v MyÚčtu. Vstupem je ZIP
-s XML, který připravíte jednou ze tří cest: exportem přes XML rozhraní POHODY,
-místním převodem kopie datového souboru MDB na Windows, nebo exportem přímo
-z databáze POHODA SQL. Nástroje stáhnete přímo z průvodce. Zdrojová data jen
-čtou, v POHODĚ nic nemění.
+**Cesta: `Systém → Přechod z jiných účetních systémů → POHODA`**
 
-Průvodce všechny varianty ZIP automaticky rozpozná. Následuje stejný náhled,
-zkouška nanečisto a převod. Samotný MDB ani původní zálohu POHODY na server
-nenahrávejte.
-
-Průvodce převádí jen **účetnictví**. Mzdy z datového souboru POHODA Mzdy nebo
-z programu PAMICA převádí samostatný průvodce, viz kapitola
+Průvodce převede vybrané účetní roky z programu POHODA do firmy v MyÚčtu.
+Vstupem je ZIP s XML, který připravíte jednou ze tří cest (export přes XML
+rozhraní POHODY, místní převod kopie datového souboru MDB, nebo export přímo
+z databáze POHODA SQL). Nástroje stáhnete přímo z průvodce. Zdrojová data jen
+čtou, v POHODĚ nic nemění. Průvodce převádí jen **účetnictví**. Mzdy
+z POHODY Mzdy nebo PAMICA převádí samostatný průvodce, viz
 [Přechod z PAMICA](108_Prechod_z_PAMICA.md).
 
-Položka je v menu Systém, které vidí administrátor. Jiný uživatel s potřebnými
-oprávněními otevře průvodce přímým odkazem `/imports/pohoda`.
+## 107.1 Kdy to potřebujete
 
-Průvodce vidí a zkoušku nanečisto spouští uživatel s oprávněním
-`utilities.import` pro zápis. Ostrý převod zapisuje účetní deník a mění
-nastavení firmy, proto navíc vyžaduje zápis do účetního deníku
-(`accounting.journal.write`) a do nastavení firmy (`settings.company.write`).
-Chybějící oprávnění průvodce ukáže a převod nespustí.
+- Firma dosud účtovala v POHODĚ (nebo POHODĚ SQL) a chce pokračovat
+  v MyÚčtu s deníkem, doklady, bankou, pokladnou a majetkem.
+- Převádíte další rok z již nahraného exportu.
+- Převod skončil chybou nebo rozdílem v protokolu.
+- Chcete po převodu ověřit, že MyÚčto sedí na POHODU.
 
-Průvodce je dostupný i firmě, která zatím vede daňovou evidenci: převod ji sám
-přepne do podvojného účetnictví od začátku převáděného roku.
+<!-- cols: 24 40 36 -->
+| Fáze | Co udělat | Kde |
+|---|---|---|
+| 1 | Vybrat cestu a vytvořit export | počítač s Windows, nástroje z průvodce |
+| 2 | Nahrát ZIP a zvolit roky | `Systém → Přechod z jiných účetních systémů → POHODA`, krok **Export z POHODY** |
+| 3 | Zkouška nanečisto | krok **Zkouška nanečisto** |
+| 4 | Ostrý převod | krok **Převod** |
+| 5 | Kontrola převzetí | protokol, `Účetnictví`, obratová předvaha |
+| 6 | Navázání číselné řady, skeny dokladů, mzdy | `Nastavení`, `Dokumenty`, průvodce PAMICA |
 
-## 107.1 Export z POHODY
+## 107.2 Než začnete
 
-### 107.1.1 Exportní nástroj
+1. **Firma v MyÚčtu.** Musí existovat a mít vyplněné stejné IČO jako v POHODĚ.
+   Převádí se do firmy, ve které právě pracujete; novou firmu nejdřív založte
+   (kapitola [Multi supplier](95_Multi_supplier.md)). Firma, která zatím vede
+   daňovou evidenci, se převodem přepne na podvojné účetnictví od začátku
+   převáděného roku.
+2. **Oprávnění.** Průvodce vidí a zkoušku nanečisto spouští uživatel
+   s oprávněním k zápisu importů. Ostrý převod zapisuje účetní deník a mění
+   nastavení firmy, proto vyžaduje navíc zápis do účetního deníku a do
+   nastavení firmy (`utilities.import`, `accounting.journal.write`,
+   `settings.company.write`). Chybějící oprávnění průvodce ukáže a převod nespustí.
+   Položka je v menu Systém, které vidí administrátor; jiný uživatel otevře
+   průvodce přímým odkazem `/imports/pohoda`.
+3. **Počítač s Windows** pro exportní nástroje. Běží v PowerShellu 5.1, který
+   je součástí Windows 10 a 11.
+4. **Podle zvolené cesty:** nainstalovaná POHODA (cesta 1), kopie datového
+   souboru MDB a ovladač Microsoft Access Database Engine (cesta 2), síťový
+   přístup k SQL Serveru s POHODOU (cesta 3).
+5. **Klid ve firmě** pro zkoušku nanečisto.
+
+> [!WARNING]
+> Samotný MDB ani původní zálohu POHODY na server nenahrávejte. Nahrává se
+> jen ZIP s XML vytvořený exportním nástrojem, nerozbalený.
+
+## 107.3 Krok za krokem: export z POHODY
+
+Vyberte jednu ze tří cest. Všechny vytvoří ZIP s XML pro tento průvodce.
+
+<!-- cols: 20 40 40 -->
+| Cesta | Kdy ji použít | Co potřebujete |
+|---|---|---|
+| 1. Export XML přes POHODU | Běžná cesta; u velké agendy trvá export desítky minut | nainstalovaná POHODA, uživatel s právem na XML import/export |
+| 2. Převod kopie MDB | Máte datový soubor a export přes POHODU trvá dlouho | kopie `.mdb`, ovladač Access |
+| 3. Export z POHODA SQL | Účetnictví běží na SQL Serveru | síťový přístup k SQL Serveru, čtecí login |
+
+**Příprava (všechny cesty):**
+
+1. V průvodci klikněte na **Zobrazit exportní nástroj**, pak na **Stáhnout vše
+   (ZIP)**. Stáhne se `pohoda-export.zip`.
+2. Rozbalte celý balíček do jedné složky na počítači s Windows. Všechny soubory
+   musí ležet ve stejné složce.
+
+**Cesta 1: export XML přes POHODU**
+
+1. Spusťte `Export-Pohoda.cmd` dvojklikem, nebo s parametry, například
+   `Export-Pohoda.cmd -Uzivatel Admin -Rok 2026 -Ico 12345678`.
+2. Zadejte heslo uživatele POHODY (uživatel musí mít právo na XML
+   import/export, nejjednodušší je Admin).
+3. Počkejte na dokončení. Vede-li POHODA víc firem, zadejte IČO parametrem
+   `-Ico`. Bez parametru `-Rok` se vyexportují všechny roky.
+4. Vedle skriptu vznikne `pohoda_export_<datum>.zip`.
+
+**Cesta 2: převod kopie MDB**
+
+1. Zavřete POHODU u všech uživatelů a vytvořte kopii datového souboru `.mdb`
+   správné firmy a roku. Máte-li zálohu v ZIP, nejdřív z ní datový soubor
+   obnovte.
+2. Spusťte `Export-PohodaMdbAccounting.cmd` dvojklikem a vyberte kopii MDB.
+   Chybí-li ovladač Access, nainstalujte Microsoft 365 Access Runtime (32bitovou
+   nebo 64bitovou variantu podle Office).
+3. Převodník vypíše cestu k výsledku. Zdrojový MDB zůstává na vašem počítači.
+
+**Cesta 3: export z POHODA SQL**
+
+1. Zkopírujte vzor `pohoda-sql.example.json` jako `pohoda-sql.json` vedle
+   skriptu a vyplňte připojení (nebo nechte nástroj, ať se zeptá).
+2. Spusťte `Export-PohodaSQL.cmd` dvojklikem, vyberte agendu ze seznamu a
+   potvrďte IČO a rok.
+3. Vedle skriptu vznikne složka a ZIP `<IČO>_<rok>.zip`. Soubor
+   `pohoda-sql.json` s heslem po exportu smažte.
+
+Parametry a konfigurace jsou v
+[§ 107.9.1](#10791-export-z-pohody).
+
+**Jak poznáte, že je hotovo:** Máte ZIP (`pohoda_export_<datum>.zip`, výsledek
+převodníku MDB, nebo `<IČO>_<rok>.zip`). Souhrn nástroje neuvádí chybu.
+
+## 107.4 Krok za krokem: nahrání exportu a zkouška nanečisto
+
+1. Otevřete `Systém → Přechod z jiných účetních systémů` a u dlaždice **POHODA** klikněte na **Otevřít průvodce**.
+2. V kroku **Export z POHODY** klikněte na **Soubor exportu (.zip)**, vyberte
+   ZIP a klikněte na **Nahrát a načíst**. Stránku nechte během nahrávání
+   otevřenou. Soubor může mít až 2 GB, průvodce ho posílá po částech.
+3. V kroku **Náhled a volby** v tabulce **Agendy v exportu** zkontrolujte
+   **IČO**, **Firma**, **Rok** a počty. Převést jde jen agendu s IČO firmy
+   v MyÚčtu. Roky k převodu zaškrtněte v prvním sloupci; předvybrané jsou
+   všechny roky agend s IČO firmy.
+4. Má-li agenda doklady po konci roku, průvodce nabídne každý pozdější rok jako
+   samostatný řádek pod agendou. Pozdější rok jde převést jen spolu s rokem
+   agendy; nevybraný převod přeskočí ([§ 107.9.4](#10794-postup)).
+5. Zkontrolujte **Kontrolu před převodem** pro každý vybraný rok. Převod se
+   zastaví, když export patří firmě s jiným IČO, chybí nebo nejde přečíst deník,
+   osnova nebo členění DPH, účetní období v MyÚčtu už obsahuje zápisy, které
+   nevznikly převodem, nebo je období uzavřené.
+6. Klikněte na **Pokračovat** a v kroku **Zkouška nanečisto** na **Spustit
+   zkoušku nanečisto**. Proběhne celý převod včetně rekonciliace, na konci se ale
+   všechno vrátí.
+7. Přečtěte protokol za každý rok. Chyby opravte a zkoušku zopakujte.
+
+**Jak poznáte, že je hotovo:** Každý rok skončí stavem **V pořádku** nebo **S
+upozorněními**. Selže-li zkouška jen na **Rozdílech k přijetí**, postupujte podle
+[§ 103.10.5.1](103_Prechod_z_Money_S3.md#1031051-chyby-upozorneni-a-rozdily-k-prijeti).
+
+> [!WARNING]
+> Zkouška převádí každý rok samostatně a hned ho vrací zpět. Pozdější rok proto
+> ve zkoušce nevidí data předchozího roku a jeho výsledek se od ostrého
+> převodu může lišit.
+
+## 107.5 Krok za krokem: ostrý převod
+
+1. V kroku **Převod** zaškrtněte potvrzení, že rozumíte dopadu převodu.
+   Potvrzení vyjmenuje převáděné roky.
+2. Po zkoušce, která selhala jen na rozdílech k přijetí, zaškrtněte navíc
+   **Převést i přes rozdíly**.
+3. Klikněte na **Spustit převod**. Převod běží na pozadí, stránku můžete
+   zavřít. Roky se převádějí vzestupně jeden po druhém. Převod zastavíte
+   tlačítkem **Zastavit převod**.
+4. Po dokončení klikněte na **Otevřít účetní deník** nebo **Obratová
+   předvaha**.
+
+**Jak poznáte, že je hotovo:** Všechny vybrané roky skončí stavem **V pořádku**
+nebo **S upozorněními**. Skončí-li rok chybou nebo převod zrušíte, další roky se
+nespustí. Převod jedné firmy běží vždy jen jeden.
+
+## 107.6 Krok za krokem: kontrola převzetí
+
+1. Otevřete protokol každého roku v přehledu **Protokoly převodů** pod
+   průvodcem. Zkontrolujte rekonciliaci: obratová předvaha MyÚčta proti
+   předvaze z deníku POHODY na haléř, obraty MD = D, vyrovnané počáteční stavy,
+   rozvaha, doklady proti deníku (321, 311, 211, 221).
+2. Doklady označené jako **doklad bez zápisu** zaúčtujte v
+   `Účetnictví → Doúčtovat doklady`.
+3. Koncepty k ruční kontrole (doklad s daní bez členění DPH, neznámé členění,
+   samovyměření bez interního dokladu, OSS bez státu MOSS) opravte a potvrďte.
+4. Zkontrolujte pohyby, které POHODA nezaúčtovala
+   ([§ 107.9.5.1](#107951-pohyby-ktere-pohoda-nezauctovala)): návrhy
+   párování u výpisu a platby kartou k zaúčtování.
+5. Zkontrolujte převzaté karty majetku (koncepty s důvodem v protokolu) a
+   drobný majetek bez dokladu.
+6. Otevřete obratovou předvahu a porovnejte syntetické účty s POHODOU.
+7. Převáděný rok zůstává neuzavřený. Uzávěrku a převod zůstatků do dalšího roku
+   provedete v `Nástroje → Uzávěrka`.
+8. Doplňte, co se nepřevádí ([§ 107.9.3](#10793-co-prevod-neprenese)).
+
+**Jak poznáte, že je hotovo:** Kontroly rekonciliace projdou, nezbývají doklady
+v konceptu ani nepřijaté rozdíly a obraty v MyÚčtu odpovídají POHODĚ.
+
+## 107.7 Krok za krokem: navázání číselné řady
+
+1. Otevřete `Firma → Nastavení`, záložku **Fakturace**, sekci **Číslování faktur** a najděte šablonu řady.
+2. Do pole **Příští číslo** zadejte číslo, kterým má řada pokračovat.
+3. Klikněte na **Nastavit počítadlo**. Ukládá se samostatně, mimo tlačítko
+   **Uložit**.
+
+**Jak poznáte, že je hotovo:** Náhled ukazuje očekávané příští číslo.
+Pravidla (perioda resetu, zděděná šablona) jsou v
+[§ 107.9.4.1](#107941-navazani-na-existujici-ciselnou-radu).
+
+## 107.8 Když něco nejde
+
+<!-- cols: 30 34 36 -->
+| Co vidíte | Proč | Co udělat |
+|---|---|---|
+| Nahrávání se přerušilo | Výpadek spojení | Vyberte soubor a nahrajte ho znovu |
+| Náhled exportu se nenačetl | Zpracování trvá déle, nebo selhalo | Klikněte na **Zkusit znovu** nebo **Načíst stav znovu**; nahraný export zůstává na serveru |
+| Export patří jiné firmě | IČO v exportu se liší | Zvolte správnou firmu, nebo exportujte správnou agendu |
+| Export neobsahuje agendu s IČO firmy | Chybí agenda nebo IČO ve firmě | Doplňte IČO v nastavení firmy, nebo exportujte znovu |
+| Doklady OSS skončily jako koncepty | Starší export nese údaje OSS bez státu MOSS | Vytvořte export znovu aktuálním nástrojem |
+| Doklad OSS se nepřevedl | Firma nemá zapnutý OSS nebo chybí sazba státu spotřeby | Doplňte nastavení ([§ 107.9.2](#10792-co-prevod-prenese)) a převod zopakujte |
+| Zkouška selhala jen na rozdílech k přijetí | Doklad se nepřevedl, nebo výsledek nesedí na POHODU | Zaškrtněte **Převést i přes rozdíly**, nebo opravte a zopakujte |
+| Doklad je koncept | Nejistá daňová povaha | Opravte klasifikaci DPH a potvrďte |
+| Faktura uhrazená v nevybraném roce zůstala neuhrazená | Pozdější rok jste nevybrali | Převeďte pozdější rok opakovaným převodem ([§ 107.9.7](#10797-opakovany-prevod)) |
+| Přeskočený doklad s neznámým typem | Neznámý typ faktury, banky, pokladny nebo zdroj úhrady | Doklad doplňte ručně, číslo a důvod uvádí protokol |
+| Karta majetku je koncept | Neznámý typ majetku nebo odpisu, jiná vstupní cena, chybí plán nebo účet | Zkontrolujte kartu podle důvodu v protokolu |
+
+## 107.9 Podrobnosti a pravidla
+
+### 107.9.1 Export z POHODY
+
+#### 107.9.1.1 Exportní nástroj
 
 V prvním kroku průvodce ukáže tlačítkem *Zobrazit exportní nástroj* soubory
 nástroje:
@@ -55,7 +238,7 @@ Pro druhou cestu potřebujete kopii MDB a ovladač Microsoft Access Database
 Engine (ACE). Pro třetí cestu stačí síťový přístup k SQL Serveru s POHODOU,
 ovladač je součástí Windows.
 
-### 107.1.2 Cesta 1: export XML přes POHODU
+#### 107.9.1.2 Cesta 1: export XML přes POHODU
 
 1. Spusťte `Export-Pohoda.cmd` dvojklikem, nebo z příkazového řádku s parametry:
 
@@ -79,15 +262,15 @@ ovladač je součástí Windows.
 
 Export jen čte. Do POHODY nic nezapisuje a nic v ní nemění.
 
-### 107.1.3 Co je v exportu
+#### 107.9.1.3 Co je v exportu
 
 - POHODA vede každý účetní rok samostatně a export obsahuje jednu agendu za
   každou kombinaci IČO a roku. Převádějí se roky, které zaškrtnete v náhledu
   (jeden i víc najednou). Nevybrané roky zůstávají v POHODĚ.
 - Majetek a mzdy XML export POHODY neobsahuje. Nástroj je čte přímo
   z datového souboru a přidá do exportu jako `90_majetek.xml`
-  a `91_mzdy.xml`, viz 107.1.4. Tento průvodce ale zpracuje jen
-  `90_majetek.xml` — mzdy z téhož souboru převede
+  a `91_mzdy.xml`, viz [§ 107.9.1.4](#107914-majetek-z-datoveho-souboru). Tento průvodce ale zpracuje jen
+  `90_majetek.xml` - mzdy z téhož souboru převede
   [Přechod z PAMICA](108_Prechod_z_PAMICA.md).
 - ZIP může obsahovat podsložky. Průvodce v nich najde XML soubory všech agend
   a k převodu nabídne jen ty, které podle IČO patří firmě v MyÚčtu. Agendy
@@ -101,7 +284,7 @@ Export jen čte. Do POHODY nic nezapisuje a nic v ní nemění.
   v procentech; při výpadku spojení část zopakuje a naváže tam, kde server
   data má. Stránku nechte během nahrávání otevřenou.
 
-### 107.1.4 Majetek z datového souboru
+#### 107.9.1.4 Majetek z datového souboru
 
 XML rozhraní POHODY nevrací dlouhodobý majetek, drobný majetek ani mzdy. Čte
 je skript `Export-PohodaMdb.ps1` přímo z datového souboru POHODY (`.mdb`),
@@ -110,7 +293,7 @@ u POHODA SQL z databáze agendy. Data jen čte, nic v nich nemění.
 | Soubor | Obsah |
 |---|---|
 | `90_majetek.xml` | karty dlouhodobého majetku, daňové odpisy po letech, účetní odpisy po měsících, drobný majetek a jeho zdrojové doklady |
-| `91_mzdy.xml` | zaměstnanci, pracovní poměry, zpracované mzdy a číselníky mezd — tento průvodce ho nevyužije, viz [Přechod z PAMICA](108_Prechod_z_PAMICA.md) |
+| `91_mzdy.xml` | zaměstnanci, pracovní poměry, zpracované mzdy a číselníky mezd - tento průvodce ho nevyužije, viz [Přechod z PAMICA](108_Prechod_z_PAMICA.md) |
 
 **Při běžném exportu nemusíte dělat nic.** `Export-Pohoda.cmd` skript spustí
 sám po každé agendě a soubory přidá do její složky v ZIP. Datový soubor najde
@@ -134,7 +317,7 @@ Export-PohodaMdb.cmd -Mdb "C:\...\StwPh_12345678_2026.mdb" -Vystup .\pohoda_expo
 Složku `<IČO>_<rok>` pak zabalte do ZIP (samotnou, nebo spolu s XML exportem
 agendy) a nahrajte do průvodce. Soubor vznikne, jen když v datovém souboru
 něco je: majetek, jen když jsou karty, mzdy, jen když jsou zaměstnanci nebo
-mzdy — tento průvodce ale z nahraného `91_mzdy.xml` převede jen majetek,
+mzdy - tento průvodce ale z nahraného `91_mzdy.xml` převede jen majetek,
 mzdy zpracuje [Přechod z PAMICA](108_Prechod_z_PAMICA.md). Systémové údaje
 (kdo a kdy záznam změnil) skript nevytahuje.
 
@@ -142,11 +325,11 @@ Pro `.mdb` je potřeba ovladač Microsoft Access Database Engine, který se
 instaluje s POHODOU. Když ho 64bitový PowerShell nenajde, skript se sám spustí
 v 32bitovém.
 
-### 107.1.5 Cesta 2: účetnictví z MDB přes místní převodník
+#### 107.9.1.5 Cesta 2: účetnictví z MDB přes místní převodník
 
 Tato cesta čte datový soubor přímo a vynechává postupné exportní požadavky
 na XML rozhraní POHODY. Hodí se, když máte datový soubor MDB a export přes
-POHODU trvá dlouho. Databázi POHODA SQL převede cesta 3 (107.1.6).
+POHODU trvá dlouho. Databázi POHODA SQL převede cesta 3 ([§ 107.9.1.6](#107916-cesta-3-export-z-pohoda-sql)).
 
 1. V POHODĚ ověřte firmu a účetní rok, které chcete převést. Připravte
    odpovídající datový soubor `.mdb`. Zavřete POHODU u všech uživatelů
@@ -181,7 +364,7 @@ neblokuje převod ostatních dokladů. Konkrétní doklad se přeskočí a proto
 uvede jeho číslo a důvod. Případné zápisy dokladu v účetním deníku se zachovají.
 Totéž platí pro neznámé typy dokladů v běžném XML exportu.
 
-### 107.1.6 Cesta 3: export z POHODA SQL
+#### 107.9.1.6 Cesta 3: export z POHODA SQL
 
 POHODA SQL ukládá každou účetní jednotku a rok do vlastní databáze na Microsoft
 SQL Serveru, pojmenované `StwPh_<IČO>_<rok>`. Tabulky jsou stejné jako
@@ -259,10 +442,10 @@ v konfiguraci `"driver": "odbc"` a nainstalujte
 Výsledek je s oběma ovladači stejný.
 
 Soubory `90_majetek.xml` a `91_mzdy.xml` jsou stejné jako u datového souboru
-(107.1.4). Mzdy z programu PAMICA SQL popisuje
+([§ 107.9.1.4](#107914-majetek-z-datoveho-souboru)). Mzdy z programu PAMICA SQL popisuje
 [Přechod z PAMICA](108_Prechod_z_PAMICA.md).
 
-## 107.2 Co převod přenese
+### 107.9.2 Co převod přenese
 
 | Z POHODY | Do MyÚčta |
 |---|---|
@@ -316,20 +499,20 @@ období.
 
 **Popisy zápisů se dogenerují.** POHODA veze v řádku deníku jen volný text, který
 je u celé řady dokladů shodný („Fakturujeme Vám za …"). Po navázání dokladů proto
-převod popisy přeskládá do tvaru **doklad — protistrana — obsah**, aby se zápisy
-v deníku daly rozlišit; v protokolu to uvidíš jako *„U N převedených zápisů se popis
+převod popisy přeskládá do tvaru **doklad - protistrana - obsah**, aby se zápisy
+v deníku daly rozlišit; v protokolu to uvidíte jako *„U N převedených zápisů se popis
 doplnil o číslo dokladu a protistranu."* Částek, účtů ani dat se to nedotýká a jde
-to kdykoli zopakovat — viz [§ 52.12.1](52_Ucetni_denik.md#52121-dogenerovani-popisu-u-prevzatych-zapisu).
+to kdykoli zopakovat - viz [§ 52.14.13.1](52_Ucetni_denik.md#5214131-dogenerovani-popisu-u-prevzatych-zapisu).
 
 **Doklady v režimu OSS.** Vydaná faktura, jejíž členění DPH stojí mimo přiznání
 a přesto nese daň, je typicky prodej koncovému zákazníkovi do jiného členského
-státu — v POHODĚ se vede vlastní zkratkou členění bez řádku přiznání, sazbou
+státu - v POHODĚ se vede vlastní zkratkou členění bez řádku přiznání, sazbou
 státu spotřeby, odběratelem bez DIČ a vyplněným **státem MOSS**. Převod takový
 doklad převezme rovnou jako [OSS plnění](45_OSS.md): nastaví na řádcích příznak
 OSS, zemi spotřeby a typ sazby a doklad vstoupí do OSS přiznání, ne do českého.
 Zemí spotřeby je stát MOSS z dokladu, adresa odběratele jen tehdy, když stát
 MOSS chybí. Rozhoduje o tom stejné pravidlo jako u všech ostatních cest
-([§ 45.4](45_OSS.md#454-jak-vznika-oss-radek)), tedy číselník sazeb členských států.
+([§ 45.10.8](45_OSS.md#45108-jak-vznika-oss-radek)), tedy číselník sazeb členských států.
 
 Doklad s členěním mimo přiznání a s daní, který stát MOSS nemá, POHODA do svého
 OSS přiznání nezahrnula. Převod ho proto převezme jako koncept k ruční kontrole
@@ -344,10 +527,10 @@ zůstává v korunách.
 
 Aby to fungovalo, musí být před převodem splněné dvě věci:
 
-- firma má **zapnutý režim OSS** ([§ 45.3.1](45_OSS.md#4531-zapnuti-rezimu-a-platnost-registrace))
+- firma má **zapnutý režim OSS** ([§ 45.10.4](45_OSS.md#45104-platnost-registrace))
   s platností pokrývající převáděný rok,
 - v číselníku DPH sazeb jsou **sazby států spotřeby** se správným státem
-  ([§ 45.3.2](45_OSS.md#4532-sazby-dph-pro-cizi-zeme-hlidej-pole-stat) — formulář
+  ([§ 45.10.5](45_OSS.md#45105-sazby-dph-cizich-zemi-a-pole-stat) - formulář
   předvyplňuje `CZ`, což je nejčastější příčina, proč se doklad nepřevede).
 
 Když některá chybí, řekne to protokol jednou větou hned u prvního takového
@@ -356,8 +539,8 @@ je jmenovitě; po doplnění nastavení stačí převod zopakovat, doplní se je
 Typ plnění (zboží/služba) převod bere z typu plnění MOSS na položce dokladu:
 dodání zboží je zboží, ostatní druhy (elektronické, telekomunikační a ostatní
 služby) jsou služba. Jen když ho položka nemá, odvodí se z měrné jednotky, karty
-odběratele a CZ-NACE — pak u e-shopu se zbožím před převodem vyplňte
-[výchozí typ plnění na kartě odběratele](45_OSS.md#4534-vychozi-nastaveni-na-karte-odberatele)
+odběratele a CZ-NACE - pak u e-shopu se zbožím před převodem vyplňte
+[výchozí typ plnění na kartě odběratele](45_OSS.md#45107-nastaveni-na-karte-odberatele)
 nebo převažující činnost firmy, jinak řádky spadnou na výchozí „služba" (protokol
 na to upozorní).
 
@@ -372,7 +555,7 @@ Koncept nevstoupí do přiznání k DPH, kontrolního hlášení ani do účtov�
 Protokol ho vypíše i s důvodem. Po opravě klasifikace DPH ho potvrďte.
 U dokladů, které vypadaly na OSS a nerozhodlo se o nich, důvod rovnou říká, co
 doplnit; hromadně je pak dorovná akce
-[Nastavit OSS](14_Faktury.md#1432-hromadne-nastaveni-oss) v seznamu faktur.
+[Nastavit OSS](14_Faktury.md#148-krok-za-krokem-hromadne-nastaveni-oss) v seznamu faktur.
 
 Otevřené ostatní pohledávky a závazky bez DPH vzniknou jako samostatné položky,
 jen když se shodují s jediným již převedeným zápisem v deníku na účtu 315 nebo
@@ -383,7 +566,7 @@ kontrole. Interní doklady mimo přiznání k DPH zůstávají v deníku.
 Číslo dokladu, které už ve firmě je, dostane příponu roku, například
 `FV-0001/2026`.
 
-## 107.3 Co převod nepřenese
+### 107.9.3 Co převod nepřenese
 
 - **Sklad.** Zápisy jsou v převedeném deníku, zásoby se zakládají v MyÚčtu.
 - **Mzdy.** Tento průvodce mzdy nepřevádí, ani z datového souboru
@@ -400,9 +583,9 @@ kontrole. Interní doklady mimo přiznání k DPH zůstávají v deníku.
   odpočet nedaňové zálohy, částečná úhrada vydaného dokladu, položky jen
   z rekapitulace, nesedící přepočet nebo měna mimo číselník měn firmy.
 
-## 107.4 Postup
+### 107.9.4 Postup
 
-1. **Export z POHODY.** Vytvořte export nástrojem (107.1) a nahrajte soubor
+1. **Export z POHODY.** Vytvořte export nástrojem ([§ 107.3](#1073-krok-za-krokem-export-z-pohody)) a nahrajte soubor
    `.zip`. Rozbalení a načtení běží na serveru na pozadí, u velkého exportu
    i několik minut; obnovení stránky mezitím průvodce nepřeruší.
 2. **Náhled a volby.** Tabulka ukáže všechny agendy v exportu: IČO, firmu,
@@ -421,7 +604,7 @@ kontrole. Interní doklady mimo přiznání k DPH zůstávají v deníku.
    v bance a pokladně, faktury a úhrady s datem v něm nepřevede a protokol
    uvede jejich počty. Faktura uhrazená až v nevybraném roce zůstane
    v MyÚčtu neuhrazená. Chcete-li třeba jen rok 2025, zaškrtněte jen jeho
-   agendu; rok 2026 doplníte později opakovaným převodem (107.7).
+   agendu; rok 2026 doplníte později opakovaným převodem ([§ 107.9.7](#10797-opakovany-prevod)).
 
    Kontrola před převodem se ukáže pro každý vybraný rok zvlášť. Převod
    zastaví, když u kteréhokoli vybraného roku:
@@ -447,11 +630,11 @@ kontrole. Interní doklady mimo přiznání k DPH zůstávají v deníku.
    deník a obratovou předvahu. Převod jedné firmy běží vždy jen jeden, druhý
    se do jeho konce nespustí.
 
-### 107.4.1 Navázání na existující číselnou řadu
+#### 107.9.4.1 Navázání na existující číselnou řadu
 
 Převod přenáší doklady s čísly, která měly v POHODĚ, ale počítadlo nové řady
 tím sám nenastaví. Číslo, kterým má řada v MyÚčtu pokračovat, zadejte
-v Nastavení → Doklady → **Číslování faktur** do pole **Příští číslo** u příslušné
+v `Firma → Nastavení`, záložce **Fakturace**, sekci **Číslování faktur** do pole **Příští číslo** u příslušné
 šablony a potvrďte tlačítkem *Nastavit počítadlo*. Ukládá se samostatně, mimo
 tlačítko *Uložit*, a po potvrzení ukáže náhled výsledného čísla.
 
@@ -459,15 +642,17 @@ Vlastní řadu může mít i jednotlivý zákazník nebo kategorie tržby; pole 
 číslo* je pak u jejich šablony. U zděděné šablony se pole nenabízí, protože se
 čísluje řadou dodavatele a počítadlo je společné.
 
-> ⚠️ Zkontrolujte, že **perioda resetu sedí se šablonou**: u masky bez `{MM}`
+> [!WARNING]
+> Zkontrolujte, že **perioda resetu sedí se šablonou**: u masky bez `{MM}`
 > a měsíčního resetu by počítadlo prvního dne dalšího měsíce spadlo zpátky na
 > začátek a čísla by kolidovala. Podrobně viz
-> [§ 95.5.3](95_Multi_supplier.md#9553-cislovani-faktur).
+> [§ 95.6](95_Multi_supplier.md#956-krok-za-krokem-cislovani-faktur).
 
-> 🛈 Sestava *Úplnost číselné řady* začne řadu počítat až od nastaveného čísla,
+> [!TIP]
+> Sestava *Úplnost číselné řady* začne řadu počítat až od nastaveného čísla,
 > takže začátek řady na vyšším čísle nehlásí jako chybějící doklady.
 
-## 107.5 Rekonciliace a protokol
+### 107.9.5 Rekonciliace a protokol
 
 Každý převáděný rok (ve zkoušce i v převodu) má vlastní běh a protokol. Najdete v něm kroky převodu
 s počty, upozornění a chyby a rekonciliaci převáděného roku:
@@ -494,7 +679,7 @@ ručně nebo hromadně v Účetnictví → Doúčtovat doklady.
 Co je v protokolu chyba, upozornění a rozdíl k přijetí (například doklad se
 sazbou DPH, kterou číselník nezná, nebo zápis bez data) a jak rozdíly přijmout
 a převést i s nimi, popisuje
-[§ 103.5.1](103_Prechod_z_Money_S3.md#10351-chyby-upozorneni-a-rozdily-k-prijeti).
+[§ 103.10.5.1](103_Prechod_z_Money_S3.md#1031051-chyby-upozorneni-a-rozdily-k-prijeti).
 
 Úhradu faktury páruje převod podle likvidace, kterou POHODA u faktury drží:
 číslo bankovního nebo pokladního dokladu a datum úhrady. Mezi pohyby se
@@ -503,7 +688,7 @@ a protokol ji vypíše k ručnímu spárování. Úhrada zápočtem nebo záloho
 jako úhrada bankou ani pokladnou nepáruje. Spárovaná faktura dostane stav
 uhrazeno.
 
-### 107.5.1 Pohyby, které POHODA nezaúčtovala
+#### 107.9.5.1 Pohyby, které POHODA nezaúčtovala
 
 Bankovní pohyb s předkontací „Nevím" v deníku POHODY zápis nemá. Bývá to
 úhrada faktury, kterou účetní ještě nezlikvidovala. Převod ji spáruje
@@ -534,7 +719,7 @@ a protokol uvede jejich počet.
 Protokoly všech běhů zůstávají v přehledu pod průvodcem. Protokol zkoušky
 nanečisto z přehledu smažete, protokol ostrého převodu zůstává.
 
-## 107.6 Režim účetnictví a automatika
+### 107.9.6 Režim účetnictví a automatika
 
 Převod zapíše podvojné účetnictví od začátku převáděného roku do nastavení
 firmy. Automatika účtování je během převodu vypnutá: deník přichází hotový
@@ -545,7 +730,7 @@ podvojné účetnictví zapíná právě převodem, dostane výchozí nastavení
 jednotky jako po aktivaci. Skončí-li převod chybou, automatika zůstane
 vypnutá, dokud převod nedoběhne bez chyb.
 
-## 107.7 Opakovaný převod
+### 107.9.7 Opakovaný převod
 
 Převod si pamatuje, co z které agendy už vzniklo. Opakovaný převod téhož nebo
 novějšího exportu založí jen to, co ještě chybí, a nic nezdvojí. Převod
@@ -563,9 +748,9 @@ v POHODĚ celková částka faktury, protokol ji vypíše jako změněnou v POHO
 a ponechanou v MyÚčtu; upravte ji ručně.
 
 Před převodem firmy znovu od začátku stáhněte v průvodci **profil firmy** a po
-ostrém převodu ho nahrajte zpět, viz [§ 96.18](96_Nastaveni.md#9618-profil-firmy).
+ostrém převodu ho nahrajte zpět, viz [§ 96.13](96_Nastaveni.md#9613-krok-za-krokem-profil-firmy).
 
-## 107.8 Omezení
+### 107.9.8 Omezení
 
 - Převádí se kalendářní účetní rok, období se vždy založí od 1. 1. do 31. 12.
   (i období následujícího roku pro doklady agendy s pozdějším datem).
@@ -576,5 +761,13 @@ ostrém převodu ho nahrajte zpět, viz [§ 96.18](96_Nastaveni.md#9618-profil-f
   ostrém převodu, který prošel všechny agendy firmy v exportu, jinak ho
   aplikace smaže po týdnu bez práce s ním.
   Obsahuje-li export i `91_mzdy.xml`, nahrajte ho beze změny i do průvodce
-  [Přechod z PAMICA](108_Prechod_z_PAMICA.md) — mzdy tento průvodce
+  [Přechod z PAMICA](108_Prechod_z_PAMICA.md) - mzdy tento průvodce
   nepřevede.
+
+## 107.10 Související kapitoly
+
+- [Přechod z PAMICA](108_Prechod_z_PAMICA.md) - mzdy z POHODY Mzdy a PAMICA
+- [Přechod z PREMIER](109_Prechod_z_PREMIER.md)
+- [Režim OSS](45_OSS.md)
+- [Souběh se starým systémem](111_Soubeh_se_starym_systemem.md)
+- [Řešení problémů](999_Reseni_problemu.md)

@@ -1,36 +1,181 @@
 # 43. Daň z příjmů (DPFO / DPPO)
 
+> Návod, jak z účetních dat sestavit roční přiznání k dani z příjmů, zkontrolovat
+> ho a stáhnout XML pro EPO. Pro OSVČ (DPFO, formulář DPFDP7) i pro s.r.o. a a.s.
+> (DPPO, formulář DPPDP9) a pro účetní, která za ně přiznání připravuje.
+
 Životní cyklus finálního XML, potvrzení podání a porovnání proti podanému souboru
 shrnuje samostatná kapitola [Archiv podání a daňová
 rekonciliace](49_Archiv_podani_a_rekonciliace.md).
 
-V menu **Daně → Daň z příjmů** sestavíš **roční přiznání k dani z příjmů** z účetních dat
-a stáhneš **validované XML pro EPO** (portál Moje daně):
+## 43.1 Kdy to potřebujete
 
-- **DPFO** (fyzické osoby, formulář **DPFDP7**) — pro OSVČ; včetně **Přílohy 1 (§ 7)** a
-  **Přehledů pojistného** (sociální ČSSZ + zdravotní pojišťovna).
-- **DPPO** (právnické osoby, formulář **DPPDP9**) — pro s.r.o. / a.s.
+- Končí rok nebo zdaňovací období a potřebujete roční přiznání k dani z příjmů.
+- Jste OSVČ a potřebujete spolu s přiznáním i přehledy pojistného pro ČSSZ a zdravotní pojišťovnu.
+- Chcete znát odhad daně před uzávěrkou nebo plánované zálohy na další období.
+- Zjistili jste chybu v podaném přiznání a potřebujete opravné nebo dodatečné.
+- Máte podané přiznání z jiného programu a chcete ho porovnat s účetnictvím nebo převzít jeho vstupy.
+- Platíte nerezidentovi licenční poplatek, dividendu nebo úrok a musíte podat oznámení do zahraničí.
+- Chcete vyloučit z daně z příjmů osvobozený příjem nebo přefakturaci.
 
-> [!NOTE]
-> Výpočty jsou **pomůckou pro poplatníka a účetní**. Sazby, minima a limity se každý rok
-> mění — před podáním hodnoty ověřte a případně konzultujte s daňovým poradcem. Vygenerované
-> XML se ověřuje proti oficiálnímu **XSD schématu** finanční správy a archivuje.
+<!-- cols: 26 40 34 -->
+| Kdy | Co udělat | Kde v aplikaci |
+|---|---|---|
+| po uzavření roku | Sestavit přiznání, projít kontroly, uzamknout, stáhnout XML a podat | `Daně → Daň z příjmů` |
+| 1. 4. následujícího roku | Podat přiznání FO (bez poradce) a PO (řádně, podle účetního období) | viz [§ 43.11.17](#431117-terminy-podani) |
+| 1. 5. (v roce 2026 4. 5.) | Podat přiznání FO elektronicky | `Daně → EPO podání a archív` |
+| 1. 7. | Podat přiznání se zastoupením daňovým poradcem nebo advokátem | viz [§ 43.11.17](#431117-terminy-podani) |
+| měsíc po lhůtě k přiznání | Podat přehledy pojistného OSVČ | karta **Export**, část **Pojistné OSVČ (Přehledy)** |
+| po finalizaci řádného přiznání | Vygenerovat zálohy na příští rok a párovat platby | karta **Zálohy na daň a pojistné** |
+| při každé platbě nerezidentovi | Podat oznámení podle § 38da, případně hlášení podle § 38e | `Daně → Příjmy do zahraničí` |
 
-## 43.1 Workflow — 4 karty
+## 43.2 Než začnete
 
-Stránka vede od podkladů k exportu ve čtyřech kartách. Rozpracované přiznání se ukládá
-(stav **Rozpracováno**), po dokončení jde **Uzamknout (finální)** — tím se zmrazí snímek
-vypočtených řádků. Uzamčené přiznání lze zase **Odemknout**. Souběžnou editaci chrání
-verzování (při konfliktu se stránka znovu načte).
+- Mějte zaúčtované doklady a uzavřené nebo schválené účetní období roku (u DPPO). U DPFO z daňové evidence dokončete roční uzávěrku (viz [Daňová evidence](74_Danova_evidence.md#7499-rocni-uzaverka-danove-evidence)).
+- U DPPO dokončete účetní závěrku (viz [Účetní závěrka](72_Uzaverka.md)).
+- U účtů nákladů mějte na účtovém rozvrhu správně nastavenou daňovou uznatelnost (viz [Účtová osnova](66_Ucetni_osnova.md)).
+- V `Nastavení → Daně a účetnictví` zkontrolujte část **Přiznání k dani z příjmů - povaha poplatníka**. Výchozí hodnoty odpovídají běžné firmě a OSVČ, takže je ponechte, pokud se vás netýkají (viz [§ 43.11.10](#431110-situace-ktere-aplikace-v-priznani-neumi)).
+- Chcete-li prodloužení lhůty, vyplňte zastoupení daňovým poradcem v `Nastavení → Daně a účetnictví`, část **Zastoupení a podepisující osoba**.
+- Pro párování záloh potřebujete naimportované bankovní výpisy.
+- Pro stažení XML a PDF potřebujete oprávnění k exportu výkazů.
 
-### 43.1.1 1. Podklady
+> [!WARNING]
+> Výpočty jsou pomůckou pro poplatníka a účetní. Sazby, minima a limity se každý rok mění. Před podáním hodnoty ověřte a případně konzultujte s daňovým poradcem. Vygenerované XML se ověřuje proti oficiálnímu XSD schématu finanční správy a archivuje.
+
+## 43.3 Krok za krokem: sestavení a podání přiznání
+
+1. Otevřete `Daně → Daň z příjmů`.
+2. Nahoře zvolte **DPFO** nebo **DPPO** (nabízí se jen typ odpovídající vaší firmě), druh **Řádné** a rok. Vedle roku vidíte zdaňovací období a stav **Rozpracováno** nebo **Finální**.
+3. Prohlédněte si upozornění nad kartami: **Situace, které aplikace v přiznání neumí** a **Předfinalizační kontrola**. Nález si přečtěte a vyřešte nebo ověřte (viz [§ 43.10](#4310-kdyz-neco-nejde)).
+4. Na kartě **Podklady** zkontrolujte načtená data. U DPPO je to výsledek hospodaření, nedaňové náklady, rozdíl odpisů a vyřazený majetek. U DPFO příjmy a výdaje § 7, případně činnosti.
+5. Na kartě **Úpravy a odpočty** doplňte ruční položky, které systém nezná: ztrátu, dary, odečty, slevy, zálohy, příjmy podle § 6, § 8 až § 10 (u DPFO). Klikněte na **Uložit**.
+6. Na kartě **Náhled přiznání** projděte řádky formuláře (číslo řádku, popis, hodnota, zdroj), **celkovou daň** a **doplatek nebo přeplatek**. U DPPO uvidíte i předpis záloh na další období.
+7. Klikněte na **Uzamknout (finální)**. Tím se zmrazí snímek vypočtených řádků.
+8. Na kartě **Export** klikněte na **Stáhnout XML**. XML se ověří proti XSD a uloží do archivu.
+9. Soubor nahrajte na [mojedane.gov.cz](https://mojedane.gov.cz) přes „Načtení souboru" nebo ho předejte do předvyplněného formuláře EPO z archivu podání a podání odešlete.
+10. Přetáhněte do archivu odeslané XML a potvrzení a záznam označte jako podaný (viz [Archiv podání](49_Archiv_podani_a_rekonciliace.md)).
+
+**Jak poznáte, že je hotovo:** Přiznání má stav **Finální**, v `Daně → EPO podání a archív` je záznam s XML a máte uložené potvrzení z portálu.
+
+> [!TIP]
+> Chcete-li přiznání zkontrolovat s účetní, klikněte na **PDF sestava**. Je to pracovní sestava, ne tiskopis pro finanční úřad. Nic se tím neuzamyká ani neukládá do archivu.
+
+K dispozici je i **Pracovní XML** pro rozpracované přiznání. Nearchivuje se a není určeno k podání. Podrobnosti o kartách a exportu jsou v [§ 43.11.1](#43111-karty-a-stavy-priznani) a [§ 43.11.5](#43115-export).
+
+Rozpracované přiznání se ukládá. Uzamčené přiznání lze znovu **Odemknout**. Souběžnou editaci chrání verzování: při konfliktu se stránka znovu načte.
+
+## 43.4 Krok za krokem: opravné nebo dodatečné přiznání
+
+Použijte, když potřebujete změnit už podané přiznání (§ 141 daňového řádu).
+
+1. Otevřete `Daně → Daň z příjmů` a zvolte typ a rok.
+2. V přepínači nahoře zvolte **Opravné** (před uplynutím lhůty k podání, jen jedno) nebo **Dodatečné** (po lhůtě). Každý druh je samostatný záznam za totéž období.
+3. U dodatečného se pod přepínačem zobrazí výběr pořadí **Dodatečné č. N**. Další dodatečné založíte tlačítkem **Nové dodatečné**. Časová osa ukazuje dosavadní podání za období se stavem a datem.
+4. Zkontrolujte předvyplněnou **Poslední známou daň** a podle potřeby ji přepište. Vyplňte **Datum zjištění** a **Důvody podání**.
+5. Dokončete podklady, úpravy a náhled jako u řádného přiznání, uzamkněte a stáhněte XML (viz [§ 43.3](#433-krok-za-krokem-sestaveni-a-podani-priznani)).
+
+**Jak poznáte, že je hotovo:** V náhledu je přehled **Dodatečné přiznání - přehled** s nově zjištěnou daní, poslední známou daní a rozdílem a záznam v archivu je označený jako podaný.
+
+Pravidla výpočtu poslední známé daně jsou v [§ 43.11.13](#431113-opravne-a-dodatecne-priznani-141-dr).
+
+## 43.5 Krok za krokem: zálohy na daň a pojistné
+
+1. Finalizujte řádné přiznání za rok (viz [§ 43.3](#433-krok-za-krokem-sestaveni-a-podani-priznani)).
+2. Otevřete kartu **Zálohy na daň a pojistné**. Předpisy záloh na příští rok se založí automaticky, případně je vyvoláte tlačítkem **Vygenerovat předpisy**. Zálohy pro rok bez finalizace minulého přiznání vytvoříte tlačítkem v části **Zálohy pro tento rok**.
+3. Změnil-li výši záloh finanční úřad rozhodnutím, zadejte ho na kartě **Rozhodnutí FÚ o zálohách** (viz [§ 43.11.8](#43118-zalohy-na-dan-a-pojistne)).
+4. Po úhradě záloh klikněte na **Spárovat platby**. Aplikace v bankovních výpisech najde odchozí úhrady, označí předpisy jako zaplacené a předvyplní zaplacené zálohy do rozpracovaného přiznání nebo přehledu daného roku.
+5. Platbu, kterou párování nenašlo, potvrďte ručně tlačítkem **Potvrdit úhradu** u předpisu. Všechny najednou potvrdíte tlačítkem **Vše zaplaceno**.
+
+**Jak poznáte, že je hotovo:** Předpisy mají stav **Zaplaceno** nebo **Uhrazeno**. Nejbližší splatnosti vidíte také na widgetu **Nadcházející zálohy na daň a pojistné** na Přehledu.
+
+> [!TIP]
+> Zálohy se nepárují na doklady, jen na bankovní pohyby. Bez naimportovaných výpisů je nespárujete.
+
+## 43.6 Krok za krokem: pojistné OSVČ
+
+1. V `Daně → Daň z příjmů` zvolte **DPFO** a rok.
+2. Otevřete kartu **Export** a v části **Pojistné OSVČ (Přehledy)** klikněte na **Spočítat** (po změně podkladů na **Přepočítat**).
+3. Zkontrolujte u sociálního (ČSSZ) a zdravotního pojištění vyměřovací základ, pojistné, doplatek po zálohách, **novou měsíční zálohu** a případně nemocenské.
+4. Stáhněte výstup: **Stáhnout PDF přehledů** (souhrnná pomůcka), **Stáhnout XML ČSSZ** (validovaná datová věta) nebo **Přehled pro ZP** (PDF ve struktuře oficiálního formuláře). Pojišťovnu podle kódu a číslo pojištěnce aplikace bere z **Nastavení firmy**.
+5. XML nahrajte na ePortál ČSSZ nebo do datové schránky. Přehled pro zdravotní pojišťovnu přepište do formuláře pojišťovny.
+
+**Jak poznáte, že je hotovo:** Máte odeslaný přehled pro ČSSZ i pro zdravotní pojišťovnu a v bance nastavenou novou měsíční zálohu.
+
+> [!WARNING]
+> XML ČSSZ umí jen jeden režim hlavní nebo vedlejší činnosti na celý rok. Při změně režimu, přerušení činnosti, zaměstnání nebo nové OSVČ údaje ručně dokončete (viz [§ 43.11.16](#431116-pojistne-osvc-dulezita-omezeni)).
+
+## 43.7 Krok za krokem: kontrola proti podanému DPPO a převzetí vstupů
+
+Použijte u firmy převedené z jiného programu nebo od účetní kanceláře, která má podaná přiznání za minulé roky.
+
+1. Otevřete `Daně → Daň z příjmů`, zvolte **DPPO** a rok, který chcete porovnat.
+2. Na kartě **Export** v části **Rekonciliace proti podanému přiznání** vyberte soubor s XML skutečně podaného přiznání DPPDP9.
+3. Klikněte na **Porovnat**. Uvidíte shody, rozdíly a hodnoty přítomné jen v podaném souboru.
+4. Chcete-li převzít vstupy, klikněte na **Náhled převzetí do vstupů** a zkontrolujte navržené vstupy.
+5. Klikněte na **Převzít do vstupů přiznání** a potvrďte případné přepsání ručních položek.
+6. Roky převádějte od nejstaršího.
+
+**Jak poznáte, že je hotovo:** Aplikace potvrdí, že vstupy přiznání byly převzaty. Řádky ze vstupů pak sedí na podání a případné rozdíly zbývají jen na řádcích spočtených z účetnictví.
+
+Pravidla převzetí a hromadný převod více let jsou v [§ 43.11.14](#431114-prevzeti-podaneho-dppo-do-vstupu-priznani).
+
+## 43.8 Krok za krokem: osvobozený příjem a přefakturace
+
+Použijte u vydaných dokladů, které nejsou základem daně z příjmů (osvobozený prodej movité věci, přefakturace).
+
+1. Otevřete vydanou fakturu v editoru.
+2. Zaškrtněte **Osvobozeno od daně z příjmů** a volitelně doplňte důvod.
+3. Fakturu uložte.
+
+**Jak poznáte, že je hotovo:** Částka je ve výkazech a v optimalizátoru vedena odděleně jako osvobozená. V přiznání DPH a v obratu zůstává beze změny.
+
+Pravidla jsou v [§ 43.11.12](#431112-prijem-mimo-zaklad-dane-z-prijmu-osvobozeny-prefakturace).
+
+## 43.9 Krok za krokem: oznámení o příjmech do zahraničí
+
+1. Otevřete `Daně → Příjmy do zahraničí`. Tiskopisy najdete také v archivu podání ve složce **Příjmy nerezidentů**.
+2. Zvolte tiskopis: oznámení podle § 38da, nebo hlášení podle § 38e.
+3. Vyplňte poplatníka (typ, jméno nebo název, daňovou identifikaci ve státě rezidence, adresu, stát rezidence) a údaje o příjmu. Údaje se zadávají ručně.
+4. Klikněte na **Vygenerovat a stáhnout XML**. Podání se uloží do archivu a stáhne.
+5. Pokračujte jako u ostatních písemností EPO (viz [Archiv podání](49_Archiv_podani_a_rekonciliace.md)).
+
+**Jak poznáte, že je hotovo:** Podání je v archivu ve složce **Příjmy nerezidentů** a po odeslání ho označíte jako podané.
+
+> [!WARNING]
+> Ani jedna z těchto písemností není mzdové podání. Týkají se plateb do zahraničí, typicky licenčních poplatků, dividend, úroků nebo odměn za služby. Podrobnosti a omezení jsou v [§ 43.11.18](#431118-oznameni-o-prijmech-plynoucich-do-zahranici-a-zajisteni-dane).
+
+## 43.10 Když něco nejde
+
+<!-- cols: 30 34 36 -->
+| Co vidíte | Proč | Co udělat |
+|---|---|---|
+| Panel **Situace, které aplikace v přiznání neumí** s varováním | Povaha poplatníka nebo data zasahují do případu, který aplikace nepodporuje | Přečtěte si, **co s tím**, a daný údaj dokončete v EPO ručně. Finalizace i export zůstávají povolené. |
+| Panel **Předfinalizační kontrola** s upozorněním | Kontrola našla nesoulad (odpisy, dary, výsledek hospodaření, období, DPH) | Otevřete rozpad u problému a opravte podklady, případně nález ověřte (viz [§ 43.11.9](#43119-predfinalizacni-kontrola)) |
+| Přiznání se nevydá | Typ poplatníka nebo situace je mezi vědomě nepodporovanými | Viz [§ 43.11.19](#431119-rozsah-a-co-aplikace-vedome-nepodporuje) a podání dokončete v EPO |
+| Varování, že chybí finanční úřad | V nastavení firmy není vyplněn kód FÚ | Doplňte ho v nastavení firmy |
+| Varování, že dary pod 2 000 Kč se neodečtou | Dar pod zákonnou hranicí systém vyloučí | Ověřte položky darů |
+| Varování o daňové ztrátě k převodu | Ztráta se uplatní až v dalších obdobích | Zkontrolujte přehled **Daňové ztráty** na kartě **Úpravy a odpočty** |
+| Pracovní XML bylo staženo s obsahovými nesrovnalostmi | Podklady jsou neúplné nebo nesouhlasí | Zkontrolujte podklady a uvedená upozornění před podáním |
+| XML bylo staženo, ale neprošlo kontrolou schématu | Údaje jsou chybné | Opravte chyby uvedené v archivu podání |
+| Není vybrán druh příjmu § 10 | Druh příjmu je povinný, finanční úřad podání vytkne | Vyberte druh příjmu v kartě **Úpravy a odpočty** |
+| Zálohy se nespárovaly | Chybí výpis, nesedí variabilní symbol, částka nebo datum | Naimportujte výpis nebo potvrďte úhradu ručně |
+| Přiznání je uzamčené, nelze upravit | Je ve stavu **Finální** | Klikněte na **Odemknout** |
+| Tlačítko pro stažení XML nebo PDF chybí | Chybí oprávnění k exportu výkazů | Požádejte správce firmy o oprávnění |
+
+## 43.11 Podrobnosti a pravidla
+
+### 43.11.1 Karty a stavy přiznání
+
+Stránka vede od podkladů k exportu v kartách **Podklady**, **Úpravy a odpočty**, **Náhled přiznání** a **Export**. K nim přistupují karty **Zálohy na daň a pojistné** a **Rozhodnutí FÚ o zálohách**. Rozpracované přiznání se ukládá (stav **Rozpracováno**), po dokončení jde **Uzamknout (finální)**, čímž se zmrazí snímek vypočtených řádků. Uzamčené přiznání lze **Odemknout**. Souběžnou editaci chrání verzování, při konfliktu se stránka znovu načte.
+
+### 43.11.2 Podklady
 
 Automaticky načtená data ze systému:
 
 - **DPPO:** výsledek hospodaření (Σ výnosy − Σ náklady mimo daň z příjmů, **bez uzávěrkových
    zápisů**), daňově **neuznatelné náklady dle § 25** (účty označené v osnově), **rozdíl
    daňových a účetních odpisů** a **daňová zůstatková cena vyřazeného majetku** (§ 24/§ 25).
-- **DPFO:** dílčí základ **§ 7** — příjmy a výdaje z **kasové báze** (daňová evidence) nebo
+- **DPFO:** dílčí základ **§ 7** - příjmy a výdaje z **kasové báze** (daňová evidence) nebo
   **výdajovým paušálem**. Každá činnost má vlastní název, CZ-NACE, sazbu a příjmy;
   příjmy činností musí přesně navazovat na příjem deníku. Zákonný strop se u činností
   se stejnou paušální sazbou uplatní jednou za celou skupinu a výdaj se mezi ně
@@ -41,11 +186,11 @@ Automaticky načtená data ze systému:
   ZTP/P a měsíční režim OSVČ se spravují přímo v daňovém profilu. U dítěte se
   eviduje identita, pořadí, oprávněné měsíce a ZTP/P; neúplný nárok vyvolá varování.
 
-### 43.1.2 2. Úpravy a odpočty
+### 43.11.3 Úpravy a odpočty
 
 Ruční položky, které systém nezná a které **přežijí mezi sezeními**:
 
-- **DPPO:** odečet ztráty minulých let (§ 34), dary (§ 20/8) — buď souhrnně, nebo **položkově**
+- **DPPO:** odečet ztráty minulých let (§ 34), dary (§ 20/8) - buď souhrnně, nebo **položkově**
   (dary v hodnotě pod **2 000 Kč** se dle § 20/8 neodečtou a systém je vyloučí), **odečet na
   podporu výzkumu a vývoje** (§ 34/4, ř. 242) a **na podporu odborného vzdělávání** (§ 34/4,
   ř. 243), přepočtený počet zaměstnanců se zdravotním postižením (sleva § 35), **sleva za
@@ -54,26 +199,26 @@ Ruční položky, které systém nezná a které **přežijí mezi sezeními**:
 - **DPFO:** příjmy a sražené zálohy ze **závislé činnosti (§ 6)**, dílčí základy **§ 8/§ 9**
   a položkové druhy příjmů **§ 10** (výdaj se u každého druhu omezí jeho příjmem),
   (kapitál, nájem, ostatní), **samostatný základ daně (§ 16a)**, **odečet daňové ztráty minulých
-  let (§ 34)** — uplatní se max do výše úhrnu § 7–§ 10 (ř. 41), zaplacené zálohy na daň i na
+  let (§ 34)** - uplatní se max do výše úhrnu § 7-§ 10 (ř. 41), zaplacené zálohy na daň i na
   **pojistné** (sociální/zdravotní).
 
 #### Odečty § 34 odst. 4 (DPPO)
 
 Výši odečtu na **výzkum a vývoj** ani na **odborné vzdělávání** systém z účetnictví spočítat
-nemůže — plyne z projektu výzkumu a vývoje, resp. z evidence odborného vzdělávání. Zadává ji
+nemůže - plyne z projektu výzkumu a vývoje, resp. z evidence odborného vzdělávání. Zadává ji
 poplatník a systém hlídá **pořadí a strop**: odborné vzdělávání se odečítá až od základu
 sníženého o ztrátu a o odečet na výzkum a vývoj, limit darů § 20/8 se počítá až ze základu
 sníženého podle § 34. Nevyužitý zbytek odečtu na výzkum a vývoj lze podle § 34 odst. 5 uplatnit
-v následujících **3 obdobích** — tenhle přenos systém neeviduje a upozorní na něj.
+v následujících **3 obdobích** - tenhle přenos systém neeviduje a upozorní na něj.
 
 #### Sleva za zastavené exekuce (§ 35 odst. 4, DPPO)
 
 Odpovídá výši náhrady, kterou přiznal exekutor v usnesení o zastavení exekuce. Z účetnictví
-ji odvodit nelze — nárok zakládá usnesení, ne doklad — proto se zadává ručně. Vstupuje do
+ji odvodit nelze - nárok zakládá usnesení, ne doklad - proto se zadává ručně. Vstupuje do
 ř. 3 tabulky H přílohy č. 1 II. oddílu a spolu se slevami za zaměstnance se zdravotním
 postižením do úhrnu na ř. 4 a dál na **ř. 300** přiznání, nejvýše však do výše daně na ř. 290.
 
-#### Opravné položky a rezervy — tabulka C přílohy č. 1 II. oddílu (DPPO)
+#### Opravné položky a rezervy - tabulka C přílohy č. 1 II. oddílu (DPPO)
 
 Účtuje-li firma o zákonných opravných položkách k pohledávkám nebo o zákonné rezervě na
 opravy hmotného majetku, přiznání dostane **tabulku C přílohy č. 1 II. oddílu**. Systém ji
@@ -85,22 +230,22 @@ staví z účetnictví a z uzávěrkového kroku **Opravné položky**:
 - **rozpad podle paragrafu** (§ 8 insolvence, § 8a nepromlčené pohledávky, § 8b ručení
   za celní dluh, § 8c drobné pohledávky) z volby účetní v kroku Opravné položky.
 
-Paragraf z hlavní knihy odvodit nejde — kontace 558/391 je pro všechny stejná. Proto u každé
+Paragraf z hlavní knihy odvodit nejde - kontace 558/391 je pro všechny stejná. Proto u každé
 zákonné opravné položky vyberte v uzávěrce sloupec **Paragraf ZoR**. Chybí-li volba, nebo
 zůstatek účtu 391 neodpovídá evidenci kroku, systém rozpad **nevyplní** a přiznání na to
-upozorní varováním — tabulku C pak doplňte ručně v EPO.
+upozorní varováním - tabulku C pak doplňte ručně v EPO.
 
 Systém eviduje jedinou zákonnou rezervu, a to na opravy hmotného majetku podle § 7 zákona
-o rezervách (kontace 552/451, ř. 25 a 26 tabulky). Rezervu podle § 9, § 10 nebo § 11a–11c
-přesuňte na ř. 27–31 ručně. U zdaňovacího období kratšího než 12 měsíců se ř. 25 a 26 podle
+o rezervách (kontace 552/451, ř. 25 a 26 tabulky). Rezervu podle § 9, § 10 nebo § 11a-11c
+přesuňte na ř. 27-31 ručně. U zdaňovacího období kratšího než 12 měsíců se ř. 25 a 26 podle
 pokynů nevyplňují a systém na to upozorní. Účetní (daňově neuznatelné) opravné položky na
-účtu 559 a ostatní rezervy na 554/459 do tabulky C nepatří — vykazují se na ř. 40.
+účtu 559 a ostatní rezervy na 554/459 do tabulky C nepatří - vykazují se na ř. 40.
 
 #### Samostatný základ daně (§ 16a, DPFO)
 
 Zahraniční podíly na zisku a obdobné příjmy podle § 8 odst. 1 lze **volitelně** zdanit
 samostatně sazbou **15 %**. Příjmy zahrnuté sem se v § 8 (ř. 38) neuvádějí a slevy § 35ba
-ani § 35c se na tuto daň neuplatňují — přičítá se až k výsledné dani. Do XML se údaj
+ani § 35c se na tuto daň neuplatňují - přičítá se až k výsledné dani. Do XML se údaj
 **nezapisuje** (atributy nejsou v úředním schématu popsané), příslušné řádky vyplňte ručně v EPO;
 systém na to u nenulové částky upozorní.
 
@@ -120,31 +265,31 @@ U ř. 20, 30, 109 až 112 a 140 se text položky přenese i do zvláštní pří
 
 #### Daňové ztráty (§ 34)
 
-Na kartě **Úpravy a odpočty** je přehled **Daňové ztráty**: každá ztráta z minulých let
+Na kartě **Úpravy a odpočty** je přehled **Daňové ztráty (§ 34)**: každá ztráta z minulých let
 (rok vzniku, stanovená výše, kolik už bylo uplatněno, zbývající zůstatek a **rok expirace** =
 rok vzniku + 5). Ztráta vzniká **automaticky** při finalizaci přiznání se záporným základem
 (FO i PO) a v následujících **5 obdobích** ji lze uplatnit. Systém nabídne **návrh uplatnění
-(FIFO** — od nejstarší ztráty) tlačítkem **Uplatnit návrh**; uplatnění se eviduje k roku
+(FIFO** - od nejstarší ztráty) tlačítkem **Uplatnit návrh**; uplatnění se eviduje k roku
 uplatnění (při vrácení přiznání do rozpracovaného stavu se automaticky uvolní). Poplatník
 uplatňující ztrátu přikládá k přiznání **samostatnou přílohu podle § 34 odst. 1**.
 
-### 43.1.3 3. Náhled přiznání
+### 43.11.4 Náhled přiznání
 
 Tabulka řádků formuláře (číslo řádku, popis, hodnota, zdroj) + **celková daň**,
 **doplatek/přeplatek** a u DPPO **předpis záloh na další období** (§ 38a, prahy 30/150 tis. Kč).
-Nad tabulkou se zobrazují **upozornění** (chybějící FÚ, nadlimitní dary, daňová ztráta k převodu…).
+Nad tabulkou se zobrazují **upozornění** (chybějící FÚ, nadlimitní dary, daňová ztráta k převodu...).
 
-### 43.1.4 4. Export
+### 43.11.5 Export
 
-- **Náhled XML** — pracovní XML rozpracovaného přiznání; nearchivuje se a není určeno
+- **Pracovní XML** - pracovní XML rozpracovaného přiznání; nearchivuje se a není určeno
   k podání.
-- **Stáhnout XML** — ostré DPPDP9 / DPFDP7 ověřené proti XSD a obsahovým kontrolám.
+- **Stáhnout XML** - ostré DPPDP9 / DPFDP7 ověřené proti XSD a obsahovým kontrolám.
   Finalizované **DPFO i DPPO** uchovávají neměnný výpočet a XML včetně příloh.
   Opakované stažení vrátí stejné uložené XML. Pokud starší finální DPPO uložené XML
   nemá, export jej sestaví z uloženého výpočtu a aktuálních identifikačních údajů
   a příloh. Chybí-li i výpočet, použije aktuální podklady. Obrazovka na tuto
   rekonstrukci upozorní. Nová finalizace vytvoří další
-  revizi; původní uložené XML zůstává zachované. Soubor nahraješ na
+  revizi; původní uložené XML zůstává zachované. Soubor nahrajete na
   [mojedane.gov.cz](https://mojedane.gov.cz) přes „Načtení souboru". Ostrý export se
   **archivuje**. Pokud jsou nalezeny nesrovnalosti, stránka po stažení zůstane
   otevřená s varováním; jinak aplikace otevře **Daně → EPO podání a archív**.
@@ -152,7 +297,7 @@ Nad tabulkou se zobrazují **upozornění** (chybějící FÚ, nadlimitní dary,
   předvyplněného formuláře EPO a po odeslání k němu přetáhnout XML a potvrzení.
   Dokumenty DPFO a DPPO se ukládají pod samostatně konfigurovatelný kořen
   **Daň z příjmů** a dále podle roku a typu formuláře.
-- **PDF sestava** — přehledná pracovní sestava přiznání (DPPO i DPFO) pro kontrolu
+- **PDF sestava** (tlačítko **Stáhnout PDF sestavu**) - přehledná pracovní sestava přiznání (DPPO i DPFO) pro kontrolu
   s účetní a do archivu. Není podáním pro finanční úřad a netváří se jako tiskopis; každá
   strana to uvádí. Obsahuje identifikaci poplatníka, zdaňovací období, druh a stav
   přiznání, souhrn (základ daně, sazba, daň, slevy, zálohy, doplatek nebo přeplatek,
@@ -164,15 +309,15 @@ Nad tabulkou se zobrazují **upozornění** (chybějící FÚ, nadlimitní dary,
   EPO (u rozpracovaného DPFO z pracovního XML), takže se od něj nemohou lišit; otisk
   XML je v hlavičce sestavy. Stažení sestavy nic nearchivuje a nevyžaduje finalizaci.
   Přehledy pojistného OSVČ se tisknou zvlášť, viz níže.
-- **DPFO — Pojistné:** karta **sociálního** a **zdravotního** pojištění OSVČ — vyměřovací
+- **DPFO - Pojistné OSVČ (Přehledy):** část **sociálního** a **zdravotního** pojištění OSVČ - vyměřovací
   základ, pojistné, doplatek po zálohách, **nová měsíční záloha**, případně **nemocenské**
-  (dobrovolné). Tlačítka: **PDF přehledů** (souhrnná pomůcka), **XML ČSSZ** (validovaná datová
-  věta) a **Přehled pro ZP** — PDF „Přehled OSVČ pro zdravotní pojišťovnu" ve struktuře
+  (dobrovolné). Tlačítka: **Stáhnout PDF přehledů** (souhrnná pomůcka), **Stáhnout XML ČSSZ** (validovaná datová
+  věta) a **Přehled pro ZP** - PDF „Přehled OSVČ pro zdravotní pojišťovnu" ve struktuře
   oficiálního formuláře (výběr pojišťovny dle kódu a číslo pojištěnce z **Nastavení firmy**).
   Oba přehledy vycházejí ze stejného základu § 7, ale používají vlastní sazby, minima
   a pravidla. Shodný zdroj proto neznamená shodný vyměřovací základ ani částku.
 
-## 43.2 Jak se počítá DPFO
+### 43.11.6 Jak se počítá DPFO
 
 Výpočet odděluje dílčí základy § 6, § 7, § 8, § 9 a položkové § 10. Výdaj u každého
 druhu § 10 je nejvýše jeho příjem. Záporný úhrn § 7 až § 10 může vytvořit daňovou
@@ -184,7 +329,7 @@ z číselníku A až H podle § 10 odst. 1 zákona (příležitostná činnost, 
 movitých věcí, cenných papírů, převod podle písm. c), jiné ostatní příjmy, bezúplatné
 příjmy, loterie a tomboly), volitelný **kód** P/S/Z/N (zemědělská výroba s výdaji procentem
 z příjmů, majetek ve společném jmění manželů, zdroj v zahraničí, bezúplatný příjem, který
-je nemovitostí) a slovní popis. Druh příjmu je povinný — bez něj finanční úřad podání
+je nemovitostí) a slovní popis. Druh příjmu je povinný - bez něj finanční úřad podání
 vytkne; aplikace zobrazí varování a finalizaci umožní.
 
 V Příloze č. 1 se u daňové evidence vykazuje také údaj **Mzdy**, tedy celkový objem
@@ -196,7 +341,7 @@ Od základu se následně odečtou položky § 15. Úroky z bytové potřeby pou
 limit podle data obstarání a počtu měsíců; penzijní produkty, soukromé životní pojištění,
 DIP a pojištění dlouhodobé péče sdílejí zákonný roční limit. Do pole penzijního příspěvku
 se nezadává hrubá roční platba, ale rovnou odčitatelná částka z ročního potvrzení penzijní
-společnosti — tedy příspěvek snížený o částky připadající na měsíce, kdy nepřevýšil hranici
+společnosti - tedy příspěvek snížený o částky připadající na měsíce, kdy nepřevýšil hranici
 pro maximální státní příspěvek; systém dál pracuje jen s touto (již sníženou) hodnotou.
 Dary musí splnit spodní hranici a souhrnný procentní strop. Základ po odpočtech se zaokrouhlí
 dolů na celé stokoruny, daň v pásmech 15/23 % se zaokrouhlí nahoru na celé Kč.
@@ -223,7 +368,7 @@ zůstává v roční uzávěrce daňové evidence. Částky se rozdělují na ce
 aby jejich součet odpovídal zaokrouhlenému součtu podkladů. Skutečný nesoulad
 podkladů s úhrnem na řádku 105 nebo 106 se hlásí samostatně.
 
-## 43.3 Jak se počítá DPPO
+### 43.11.7 Jak se počítá DPPO
 
 Výchozí řádek 10 je výsledek hospodaření z účtů 6xx minus 5xx bez daně z příjmů a bez
 technických uzávěrkových zápisů. Základ upravují nedaňové náklady, ruční položky § 23,
@@ -262,55 +407,58 @@ stejně jako u zaúčtovaných odpisů. Opravné a dohadné položky jsou jen n�
 k potvrzení, zobrazí se šedě a do projekce se nesčítají. Každá položka odkazuje na
 uzávěrku období, odpisy na Majetek. Zaúčtovaný krok z projekce zmizí, takže se nic
 nezapočte dvakrát. Samotné přiznání (řádky a XML) počítá jen se zaúčtovanými položkami
-a schválenými ručními úpravami. Účetní závěrku dokonči podle
+a schválenými ručními úpravami. Účetní závěrku dokončete podle
 [kapitoly Účetní závěrka](72_Uzaverka.md).
 
-## 43.4 Zálohy na daň a pojistné
+### 43.11.8 Zálohy na daň a pojistné
 
-V kartě **Export** je pod přehledy panel **Zálohy na daň a pojistné**. Z **finalizovaného
-řádného** přiznání se automaticky (nebo tlačítkem **Vygenerovat předpisy**) založí předpisy
+Na kartě **Zálohy na daň a pojistné** se z **finalizovaného
+řádného** přiznání automaticky (nebo tlačítkem **Vygenerovat předpisy**) založí předpisy
 záloh na **příští rok**:
 
-- **DPPO — daň § 38a:** dle poslední známé daňové povinnosti (ř. 340) — **žádné** zálohy do
+- **DPPO - daň § 38a:** dle poslední známé daňové povinnosti (ř. 340) - **žádné** zálohy do
   30 000 Kč, **pololetní** (40 %) do 150 000 Kč, **čtvrtletní** (25 %) nad 150 000 Kč. Splatnost
   15. den příslušného měsíce. U kalendářního roku jsou pololetní zálohy splatné 15. 6. a
   15. 12.; čtvrtletní 15. 6., 15. 9., 15. 12. a 15. 3. následujícího roku. Březnová záloha
   před podáním přiznání ještě patří do předchozího zálohového období. Při prodloužené lhůtě
   do července začíná nový harmonogram až zářijovou, resp. prosincovou zálohou.
-- **OSVČ (DPFO) — sociální a zdravotní:** nové **měsíční** zálohy dle přehledů pojistného.
+- **OSVČ (DPFO) - sociální a zdravotní:** nové **měsíční** zálohy dle přehledů pojistného.
   Nová výše se použije až od měsíce podání přehledu; do té doby platí dosavadní výše,
   nejméně aktuální zákonné minimum. Sociální je splatná do konce kalendářního měsíce,
   zdravotní do **8. dne** následujícího měsíce.
-- **OSVČ (DPFO) — daň § 38a:** stejné prahy 30/150 tis. Kč jako u DPPO, ale výše
+- **OSVČ (DPFO) - daň § 38a:** stejné prahy 30/150 tis. Kč jako u DPPO, ale výše
   se krátí podle podílu příjmů ze závislé činnosti (§ 6). Při podílu alespoň 50 %
-  zálohy nevzniknou; při podílu 15–50 % se počítají v poloviční výši.
+  zálohy nevzniknou; při podílu 15-50 % se počítají v poloviční výši.
 
 Tlačítko **Spárovat platby** najde v **bankovních výpisech** odchozí úhrady podle **variabilního
 symbolu**, částky, data a vlastnictví účtu (daň = kmenová část DIČ, sociální = VS ČSSZ,
 zdravotní = číslo pojištěnce), označí
 odpovídající předpisy jako **zaplacené** a **předvyplní** zaplacené zálohy do rozpracovaného
 přiznání / přehledu daného roku. Nejbližší splatnosti ukazuje i **widget na Přehledu** (dashboard).
-Zálohy se **nepárují na doklady**, jen na bankovní pohyby — proto je nutné mít naimportované výpisy.
+Zálohy se **nepárují na doklady**, jen na bankovní pohyby - proto je nutné mít naimportované výpisy.
 
-> 🛈 QR platba záloh není součástí — předpis slouží jako plánovací a párovací pomůcka.
+Karta **Rozhodnutí FÚ o zálohách** (§ 174 DŘ) umožní zadat rozhodnutí finančního úřadu o změně výše záloh na daň napříč roky. Každé rozhodnutí platí pro zvolené období (**Účinnost OD** až **Účinnost DO**, případně otevřený konec): uvnitř období se zálohy počítají podle rozhodnutí (výše a periodicita), mimo něj podle predikce z přiznání (§ 38a). Rozsahy se nesmí překrývat. Karta ukazuje i předpis placení záloh napříč roky se stavem úhrady, který se určuje automaticky spárováním s bankovními platbami.
 
-## 43.5 Předfinalizační kontrola („závěrková kontrola účetní")
+> [!TIP]
+> QR platba záloh není součástí. Předpis slouží jako plánovací a párovací pomůcka.
 
-Než přiznání **finalizuješ**, systém nad kartami zobrazí panel **Předfinalizační kontrola** — sadu
+### 43.11.9 Předfinalizační kontrola
+
+Než přiznání **finalizujete**, systém nad kartami zobrazí panel **Předfinalizační kontrola** - sadu
 kontrol, které dělá zkušená účetní ručně, aby se do XML nedostala tichá chyba. Každá kontrola má
 stav **OK / upozornění** (nebo **nerelevantní** tam, kde se netýká daného typu poplatníka),
 u problémů rovnou ukáže **částky a prokliknutelný rozpad**:
 
-- **Účetní období uzavřeno** — období roku má být `uzavřené`/`schválené`, ne otevřené.
-- **Obrat účtu 551 = účetní odpisy** — zaúčtované účetní odpisy (551) musí odpovídat odpisům
+- **Účetní období uzavřeno** - období roku má být `uzavřené`/`schválené`, ne otevřené.
+- **Obrat účtu 551 = účetní odpisy** - zaúčtované účetní odpisy (551) musí odpovídat odpisům
   evidovaným v modulu majetku; rozdíl = odpisy nezaúčtované nebo zaúčtované ručně jinou částkou
   (řádek 50/150 by pak zkreslil základ).
-- **Obrat účtu 543 = zadané dary (§ 20/8)** — dary na účtu 543 musí sedět s dary zadanými do přiznání.
-- **VH přiznání = VH výsledovky** — výsledek hospodaření z přiznání se porovná s výsledovkou
+- **Obrat účtu 543 = zadané dary (§ 20/8)** - dary na účtu 543 musí sedět s dary zadanými do přiznání.
+- **VH přiznání = VH výsledovky** - výsledek hospodaření z přiznání se porovná s výsledovkou
   (nezávislá cesta výpočtu přes výkaz zisku a ztráty); rozdíl signalizuje chybu v mapování osnovy.
-- **Nedaňové účty s obratem (ř. 40)** — informativní výčet nedaňových účtů s nenulovým obratem
-  a částkami (drill-down do deníku), ať máš jistotu o řádku 40.
-- **Archivní pokrytí DPH za rok** — u plátce kontrola, že za všechna měsíční nebo
+- **Nedaňové účty s obratem (ř. 40)** - informativní výčet nedaňových účtů s nenulovým obratem
+  a částkami (drill-down do deníku), ať máte jistotu o řádku 40.
+- **DPH přiznání za rok podána** (archivní pokrytí DPH za rok) - u plátce kontrola, že za všechna měsíční nebo
   čtvrtletní období existuje archivní záznam DPH. Současná kontrola nerozlišuje stažené
   a skutečně odeslané XML, proto je jen upozorněním a nenahrazuje doručenky z EPO.
 
@@ -318,117 +466,118 @@ U DPFO se jako **varování** zobrazují také nedokončená roční uzávěrka 
 nezařazený příjem, bankovní
 úhrada mimo vlastněný výpis, chyba peněžního deníku, nevyřešený přechod § 23 odst. 8,
 neúplné osoby, činnosti nebo měsíce OSVČ. Výsledek kontrol se ukládá do neměnného
-snapshotu. Nálezy finalizaci ani export nezakazují; před podáním je ověř.
+snapshotu. Nálezy finalizaci ani export nezakazují; před podáním je ověřte.
 
-### 43.5.1 Situace, které aplikace v přiznání neumí
+### 43.11.10 Situace, které aplikace v přiznání neumí
 
 Nad předfinalizační kontrolou se u obou přiznání zobrazuje panel **Situace, které
 aplikace v přiznání neumí**. Vzniká z povahy poplatníka a z účetních dat.
 Všechny nálezy jsou žlutá **varování**. Finalizace i export jsou povolené;
-údaje si před podáním ověř.
+údaje si před podáním ověřte.
 
-Ke každému nálezu je napsané, **co s tím** — typicky „podejte přiznání za toto období
+Ke každému nálezu je napsané, **co s tím** - typicky „podejte přiznání za toto období
 v portálu EPO ručně" nebo „opravte údaj v nastavení firmy".
 
 Část povahy poplatníka aplikace z účetnictví poznat nemůže, proto se zadává
-v **Nastavení → Daně a účetnictví → Přiznání k dani z příjmů — povaha poplatníka**:
+v `Nastavení → Daně a účetnictví`, část **Přiznání k dani z příjmů - povaha poplatníka**:
 
+<!-- cols: 36 64 -->
 | Pole | K čemu je |
 |---|---|
-| Typ poplatníka (§ 17 ZDP) | Kód z tiskopisu DPPO. Aplikace umí sestavit přiznání jen pro typ **1 (ostatní)**. Dokud typ nepotvrdíš, staví se přiznání jako pro typ 1. |
-| Účetní vyhláška závěrky | Podle které vyhlášky sestavuješ rozvahu a výsledovku. Aplikace umí jen **500/2002 Sb.** pro podnikatele. |
+| Typ poplatníka (§ 17 ZDP) | Kód z tiskopisu DPPO. Aplikace umí sestavit přiznání jen pro typ **1 (ostatní)**. Dokud typ nepotvrdíte, staví se přiznání jako pro typ 1. |
+| Účetní vyhláška závěrky | Podle které vyhlášky sestavujete rozvahu a výsledovku. Aplikace umí jen **500/2002 Sb.** pro podnikatele. |
 | Stav poplatníka + rozhodný den | Běžný / v likvidaci / v insolvenci / po fúzi nebo přeměně. |
 | Veřejně prospěšný poplatník (§ 17a) | Spolek, nadace, ústav, církev, veřejná vysoká škola. |
 | Investiční pobídka (§ 35a/§ 35b) | Nositel příslibu investiční pobídky. |
-| ATAD / CFC (§ 23e–23h, § 38fa) | Omezení nadměrných výpůjčních výdajů, příjmy ovládané zahraniční společnosti. |
-| Spolupracující osoba (§ 13) — OSVČ | Rozdělení příjmů a výdajů na spolupracující osobu. |
-| Zahraniční příjmy se zápočtem (§ 38f) — OSVČ | Zápočet daně zaplacené v zahraničí, Příloha č. 3. |
+| ATAD / CFC (§ 23e-23h, § 38fa) | Omezení nadměrných výpůjčních výdajů, příjmy ovládané zahraniční společnosti. |
+| Spolupracující osoba (§ 13) - OSVČ | Rozdělení příjmů a výdajů na spolupracující osobu. |
+| Zahraniční příjmy se zápočtem (§ 38f) - OSVČ | Zápočet daně zaplacené v zahraničí, Příloha č. 3. |
 
-Výchozí hodnoty odpovídají běžné firmě a OSVČ, takže je nechej být, pokud se tě netýkají.
+Výchozí hodnoty odpovídají běžné firmě a OSVČ, takže je nechte být, pokud se vás netýkají.
 Je-li rozhodný den změny stavu až po konci období přiznání, tento stav starší
 přiznání neovlivňuje. Při chybějícím nebo neplatném datu se zobrazí varování.
 Vypnutý příznak ale **není tichý předpoklad**: kde jde podezření poznat z dat, aplikace se
-ozve sama — u firmy s převažující činností z **finančního sektoru** (banky, investiční
+ozve sama - u firmy s převažující činností z **finančního sektoru** (banky, investiční
 fondy, pojišťovny, penzijní společnosti) upozorní na nepotvrzený typ poplatníka,
 u **organizací sdružujících osoby** varuje na veřejně prospěšného poplatníka
 a u **výroby elektřiny** upozorní na odpisy fotovoltaiky podle § 30b.
 
 Ruční seznam nepodporovaných situací z [roční uzávěrky daňové evidence](74_Danova_evidence.md)
-se do stejného panelu slévá — nálezy jsou na jednom místě, ne ve dvou seznamech.
+se do stejného panelu slévá - nálezy jsou na jednom místě, ne ve dvou seznamech.
 
-## 43.6 Daňová (ne)uznatelnost nákladů (§ 25) — DPPO
+### 43.11.11 Daňová (ne)uznatelnost nákladů (§ 25) - DPPO
 
 Nedaňové náklady se u DPPO poznají podle příznaku **Daňová uznatelnost** na účtu v
 [účtovém rozvrhu](66_Ucetni_osnova.md). Šablona rovnou označí jako nedaňové syntetiky
 **513** (reprezentace), **528** (ostatní sociální), **543** (dary), **545** (pokuty a
 penále), **549** (manka nad náhrady), **554** (účetní rezervy), **559** (účetní opravné
 položky). Analytiky **dědí** příznak ze syntetiky; ručně jej lze změnit. Odpisy (551) a
-daň z příjmů (59x) se neflagují — řeší se vlastní mechanikou (rozdíl odpisů, resp. vyloučení
+daň z příjmů (59x) se neflagují - řeší se vlastní mechanikou (rozdíl odpisů, resp. vyloučení
 z výsledku hospodaření).
 
-## 43.7 Příjem mimo základ daně z příjmů (osvobozený / přefakturace)
+### 43.11.12 Příjem mimo základ daně z příjmů (osvobozený, přefakturace)
 
-Některé **vydané** doklady nejsou základem daně z příjmů — typicky:
+Některé **vydané** doklady nejsou základem daně z příjmů - typicky:
 
-- **Prodej movité věci osvobozený dle § 4 odst. 1 písm. c) ZDP** — např. vozidlo prodané po
+- **Prodej movité věci osvobozený dle § 4 odst. 1 písm. c) ZDP** - např. vozidlo prodané po
   více než 1 roce od nabytí; u OSVČ na paušálu, kde věc nebyla v obchodním majetku, neběží
   ani 5letý test po vyřazení.
-- **Přefakturace / průběžné položky** (§ 23 odst. 4 ZDP) — částka, která není ani příjmem,
+- **Přefakturace / průběžné položky** (§ 23 odst. 4 ZDP) - částka, která není ani příjmem,
   ani výdajem.
 
-U takové faktury zaškrtni v editoru **„Osvobozeno od daně z příjmů"** (volitelně doplň důvod).
+U takové faktury zaškrtněte v editoru **Osvobozeno od daně z příjmů** (volitelně doplňte důvod).
 Příznak **nezahrne částku do základu daně z příjmů** (výkaz i optimalizátor; osvobozená část
-se ukáže odděleně) a **nedotkne se DPH** — doklad zůstává v přiznání DPH i v obratu beze změny.
+se ukáže odděleně) a **nedotkne se DPH** - doklad zůstává v přiznání DPH i v obratu beze změny.
 
-Osvobozený příjem nevstupuje ani do **rozhodných příjmů pro pásmo paušálního režimu** —
+Osvobozený příjem nevstupuje ani do **rozhodných příjmů pro pásmo paušálního režimu** -
 rozhodnými příjmy jsou podle § 2a odst. 5 ZDP příjmy ze samostatné činnosti a § 7a odst. 1
 písm. b) bod 1 ZDP uvádí příjmy od daně osvobozené jako kategorii, kterou poplatník smí mít
 *vedle* rozhodných příjmů. Na teploměru limitu 2 mil. Kč v Optimalizátoru se proto neobjeví.
 U plátce DPH se počítá **částka bez DPH**, stejně jako u zdanitelného příjmu.
 
-### 43.7.1 Souvislost se sociálním a zdravotním pojištěním (OSVČ)
+#### Souvislost se sociálním a zdravotním pojištěním (OSVČ)
 
 U OSVČ se **vyměřovací základ** pojistného odvozuje z **daňového základu § 7**. Když částka
-nevstoupí do základu daně z příjmů, zmizí i z vyměřovacího základu SP a ZP — jeden příznak
+nevstoupí do základu daně z příjmů, zmizí i z vyměřovacího základu SP a ZP - jeden příznak
 sedí na daň i na pojistné.
 
+<!-- cols: 24 40 36 -->
 | Veličina | Co znamená | OSVČ |
 |---|---|---|
 | **Vyměřovací základ** | z čeho se pojistné počítá | 55 % (SP) / 50 % (ZP) daňového základu § 7, nejméně roční **minimum**; u SP nejvýše 48× průměrná mzda |
 | **Sazba odvodu** | kolik se odvádí | SP 29,2 %, ZP 13,5 %, nemocenské 2,7 % (drží roční daňové konstanty) |
 
-> 🛈 Snížení pojistného se projeví **jen nad rámec minimálního vyměřovacího základu** — OSVČ
+> [!TIP]
+> Snížení pojistného se projeví **jen nad rámec minimálního vyměřovacího základu**. OSVČ
 > na zákonném minimu osvobozením příjmu na pojistném neušetří. U **s.r.o.** se SP/ZP z obratu
 > netýká; příznak tam ovlivní jen základ DPPO. Vedlejší činnost pod **rozhodnou částkou**
 > neplatí sociální pojistné vůbec.
 
-## 43.8 Opravné a dodatečné přiznání (§ 141 DŘ)
+### 43.11.13 Opravné a dodatečné přiznání (§ 141 DŘ)
 
-Přepínačem **Řádné / Opravné / Dodatečné** nahoře zvolíš druh přiznání; každý druh je samostatný
+Přepínačem **Řádné / Opravné / Dodatečné** nahoře zvolíte druh přiznání; každý druh je samostatný
 záznam za totéž období.
 
-- **Opravné** — plná náhrada řádného přiznání **před uplynutím lhůty** k podání (jen jedno).
-- **Dodatečné** — po lhůtě, počítá se **rozdílově** proti **poslední známé dani**. Za jedno období
-  jich lze podat **víc** (dodatečné č. 1, č. 2, …). Pod přepínačem se u dodatečného zobrazí výběr
+- **Opravné** - plná náhrada řádného přiznání **před uplynutím lhůty** k podání (jen jedno).
+- **Dodatečné** - po lhůtě, počítá se **rozdílově** proti **poslední známé dani**. Za jedno období
+  jich lze podat **víc** (dodatečné č. 1, č. 2, ...). Pod přepínačem se u dodatečného zobrazí výběr
   **pořadí (č. N)**, tlačítko **Nové dodatečné** a **časová osa** dosavadních podání za období
   (stav, kdy bylo změněno/podáno).
 
-**Poslední známá daň** se odvozuje z **naposledy pravomocně stanovené daně** (§ 141 odst. 1 DŘ) —
-tedy z posledního finalizovaného přiznání v řetězu **řádné → opravné → dodatečné č. 1 → č. 2 → …**
+**Poslední známá daň** se odvozuje z **naposledy pravomocně stanovené daně** (§ 141 odst. 1 DŘ) -
+tedy z posledního finalizovaného přiznání v řetězu **řádné → opravné → dodatečné č. 1 → č. 2 → ...**
 Systém ji u nového dodatečného předvyplní (lze ručně přepsat); rozdíl proti nově zjištěné dani se
 promítne do V. oddílu formuláře (u DPPO řádky iv1/iv2/iv3). Dodatečné přiznání č. N tedy vždy
 navazuje na to předchozí, ne na řádné.
 
-### 43.8.1 Kontrola proti skutečně podanému DPPO
+### 43.11.14 Převzetí podaného DPPO do vstupů přiznání
 
-U DPPO lze v kartě Export nahrát XML DPPDP9, které bylo skutečně podáno účetní nebo
+U DPPO lze v kartě **Export** v části **Rekonciliace proti podanému přiznání** nahrát XML DPPDP9, které bylo skutečně podáno účetní nebo
 upraveno na EPO. Aplikace nejprve zkontroluje typ formuláře a rok a potom porovná
 formulářové řádky s aktuálním výpočtem. Zobrazí shody, rozdíly a hodnoty přítomné jen
 v podaném souboru. Jde o read-only kontrolu: nahrání nic nezaúčtuje, nepřepíše přiznání
 a soubor samo neoznačí jako přijatý finanční správou. Importní rekonciliace
 skutečně podaného DPFO, DPHDP3 a KH není k dispozici.
-
-### 43.8.2 Převzetí podaného DPPO do vstupů přiznání
 
 Firma převedená z jiného programu nebo od účetní kanceláře má podaná přiznání za minulé roky,
 ale v MyÚčtu jen účetnictví. Tlačítko **Náhled převzetí do vstupů** ve stejném bloku převezme
@@ -468,7 +617,7 @@ opravným a řádným) a roky zpracuje vzestupně. Volba `--replace-draft` přep
 rozpracovaná přiznání, `--loss=RRRR:ČÁSTKA` doplní ztrátu roku, za který podání není,
 a `--dry-run` jen vypíše náhled.
 
-## 43.9 Roční uzávěrka daňové evidence a snapshot DPFO
+### 43.11.15 Roční uzávěrka daňové evidence a snapshot DPFO
 
 DPFO ze skutečných výdajů upozorní na nedokončenou roční uzávěrku podle § 7b.
 Přiznání lze finalizovat i exportovat s tímto varováním.
@@ -477,17 +626,17 @@ závazky, vysoké nákupy, změny režimu a cizí měny. Zadávají se počáte�
 stavy majetku, hotovosti, banky, zásob, pohledávek, ostatních aktiv, dluhů a rezerv.
 
 Nepeněžní úpravy mohou být například zápočet, barter, naturální příjem, prominutý dluh,
-soukromá spotřeba, manko, škoda nebo jiná úprava § 23. Směr **zvýšení/snížení** přímo
-ovlivní § 7; volba **neutrální** pouze uloží auditní stopu. Aplikace právní směr neurčuje.
+soukromá spotřeba, manko, škoda nebo jiná úprava § 23. Směr **Zvýšení základu** nebo **Snížení základu** přímo
+ovlivní § 7; volba **Pouze stavová evidence** pouze uloží auditní stopu. Aplikace právní směr neurčuje.
 Finalizace uzávěrky vyžaduje všechny kontroly, vypořádaný roční koeficient § 76, vyřešené
 blokery deníku a posouzené nadlimitní nákupy. Checklist potvrzuje provedení inventury,
 nenahrazuje její fyzické podklady.
 
 Finální DPFO uloží výpočet, podklady, kontroly, seznam zdrojových pohybů, XML a jejich
 kontrolní otisky. Oprava podkladů vyžaduje znovu otevřít uzávěrku i přiznání a vytvořit
-nový snapshot. Podrobnosti jsou v [Daňové evidenci](74_Danova_evidence.md#7483-rocni-uzaverka-danove-evidence).
+nový snapshot. Podrobnosti jsou v [Daňové evidenci](74_Danova_evidence.md#7499-rocni-uzaverka-danove-evidence).
 
-## 43.10 Pojistné OSVČ — důležitá omezení
+### 43.11.16 Pojistné OSVČ - důležitá omezení
 
 Měsíční profil eviduje aktivní, hlavní, vedlejší a přerušenou činnost a příznak, zda
 se v daném měsíci uplatní minimum zdravotního pojištění. Tato data se používají při
@@ -496,25 +645,25 @@ zdravotní z 50 %, oba s příslušnými minimy a maximem; vyměřovací základ
 zaokrouhlují nahoru na celé Kč.
 
 Současné XML ČSSZ však umí pouze jeden režim hlavní/vedlejší činnosti pro celý rok.
-Neodesílej je bez ručního dokončení, pokud činnost začala, skončila či byla přerušena,
+Neodesílejte je bez ručního dokončení, pokud činnost začala, skončila či byla přerušena,
 střídala hlavní a vedlejší režim, existovalo zaměstnání ovlivňující maximální základ,
-nebo jde o novou OSVČ či jiný zvláštní režim. Pole `state_insured`, `employed`,
-`new_osvc` a individuální vyměřovací základ nejsou do konečného pojistného zapojeny
+nebo jde o novou OSVČ či jiný zvláštní režim. Údaje **Státní pojištěnec**, **Zaměstnání**,
+**Nová OSVČ** a individuální vyměřovací základ nejsou do konečného pojistného zapojeny
 ve všech zákonných kombinacích. Zdravotní přehled je pouze PDF pomůcka bez jednotného
-podávacího XML. V těchto případech přepiš údaje do formuláře instituce a ověř je.
+podávacího XML. V těchto případech přepište údaje do formuláře instituce a ověřte je.
 
-## 43.11 Termíny podání
+### 43.11.17 Termíny podání
 
 - **Daň z příjmů FO (bez poradce):** **1. 4.** následujícího roku · **elektronicky:** **1. 5.**, připadne-li na víkend nebo svátek, nejbližší následující pracovní den (v roce 2026 tedy 4. 5.), **s poradcem:** **1. 7.**
 - **Daň z příjmů PO:** dle účetního období (řádně 1. 4., s auditem/poradcem 1. 7.)
 - **Přehledy pojistného OSVČ:** do **1 měsíce** po lhůtě pro daňové přiznání.
 
 Lhůtu 1. 7. prodlužuje jen zastoupení daňovým poradcem nebo advokátem (kód
-podepisující osoby 4b nebo 4c v **Nastavení firmy → Zastoupení a podepisující
-osoba**). Obecný zmocněnec, například účetní kancelář bez osvědčení daňového
-poradce, lhůtu neprodlužuje (viz 41.2.5).
+podepisující osoby 4b nebo 4c v `Nastavení → Daně a účetnictví`, část **Zastoupení a
+podepisující osoba**). Obecný zmocněnec, například účetní kancelář bez osvědčení daňového
+poradce, lhůtu neprodlužuje (viz [Zastoupení a podepisující osoba](41_Vykazy_DPH.md#zastoupeni-a-podepisujici-osoba)).
 
-## 43.12 Oznámení o příjmech plynoucích do zahraničí a zajištění daně
+### 43.11.18 Oznámení o příjmech plynoucích do zahraničí a zajištění daně
 
 Platí-li firma daňovému nerezidentovi příjem ze zdrojů v České republice, vzniká
 vedle vlastní srážky ještě samostatná oznamovací povinnost. MyÚčto pro ni
@@ -530,7 +679,8 @@ připraví dvě písemnosti:
   který není daňovým rezidentem státu EU ani EHP, a to z příjmu, který srážkové
   dani nepodléhá.
 
-> ⚠️ Pozor: **ani jedna z těchto písemností není mzdové podání.** Týkají se plateb
+> [!WARNING]
+> Ani jedna z těchto písemností není mzdové podání. Týkají se plateb
 > do zahraničí, typicky licenčních poplatků, dividend, úroků nebo odměn za služby,
 > a s výplatní listinou nemají nic společného. Mzdový modul zdaňuje srážkovou daní
 > jedině příjmy podle § 6 odst. 4, a ty jsou z oznamovací povinnosti výslovně
@@ -540,19 +690,18 @@ připraví dvě písemnosti:
 > dostupná i firmě, která mzdy vůbec nevede: kdo platí licenční poplatek do třetí
 > země, má povinnost stejně.
 
-**Kde to najdeš.** Obrazovka je na adrese `/reports/foreign-income`; v menu na ni
-zatím nevede položka, dostaneš se na ni přímým odkazem nebo z archivu podání,
-kde se oba tiskopisy řadí do složky **Příjmy nerezidentů**. Ke čtení stačí
+**Kde to najdete.** Obrazovka je v menu `Daně → Příjmy do zahraničí` (komerční modul). Oba tiskopisy
+se v archivu podání řadí do složky **Příjmy nerezidentů**. Ke čtení stačí
 oprávnění pro sestavy, ke stažení XML navíc právo exportovat.
 
-**Údaje zadáváš ručně, a je to záměr.** Aplikace tyto platby nikde neeviduje:
+**Údaje zadáváte ručně, a je to záměr.** Aplikace tyto platby nikde neeviduje:
 z mezd nevznikají a přijaté doklady srážkovou daň ani zajištění nenesou. Cokoli
 by se tu odvozovalo, by znamenalo podat nepravdivé oznámení, proto je formulář
 prázdný. Sám doplní jen to, co skutečně ví:
 
 - větu o plátci z údajů firmy,
 - cílový finanční úřad podle nastaveného kódu FÚ; není-li vyplněný, dosadí se
-  FÚ pro Prahu 1 a podání dostane varování, ať kód ověříš,
+  FÚ pro Prahu 1 a podání dostane varování, ať kód ověříte,
 - skupinu druhu příjmu podle vybraného kódu z číselníku,
 - kontroly proti tiskopisu a validaci proti XSD.
 
@@ -574,33 +723,33 @@ nahoru.
 
 **Co aplikace nehlídá.** Osvobozené úroky se oznamují až od okamžiku, kdy jejich
 úhrn za kalendářní měsíc přesáhne 300 000 Kč (§ 38da odst. 5 písm. a)). Aplikace
-takový úhrn nevede, protože platby do zahraničí neeviduje, takže limit posoudíš
-sám a pod ním oznámení prostě nezakládáš. Nehlídá ani lhůty: oznámení se podává
+takový úhrn nevede, protože platby do zahraničí neeviduje, takže limit posoudíte
+sami a pod ním oznámení prostě nezakládáte. Nehlídá ani lhůty: oznámení se podává
 ve lhůtě pro odvod sražené daně, u osvobozeného příjmu do 31. ledna
 následujícího roku. Tyto tiskopisy proto nemají řádek v daňovém kalendáři.
 **Vyúčtování zajištění daně se nepodává vůbec** (§ 38e odst. 12).
 
 **Výstup a odeslání.** Tlačítko **Vygenerovat a stáhnout XML** vytvoří jedno
 podání k jedné platbě, uloží je do archivu podání i s otiskem a stáhne. Odtud
-pokračuješ stejně jako u ostatních písemností EPO, tedy asistovaným nebo přímým
+pokračujete stejně jako u ostatních písemností EPO, tedy asistovaným nebo přímým
 podáním; postup je v kapitole
 [EPO podání, archív a daňová rekonciliace](49_Archiv_podani_a_rekonciliace.md).
 Obrazovka sama nevede seznam ani koncepty: každé odeslání formuláře je jedno
-hotové podání, historii hledej v archivu. Na uzávěrku DPH se tato podání
+hotové podání, historii hledejte v archivu. Na uzávěrku DPH se tato podání
 nenavazují, protože se týkají jednotlivé platby.
 
 Nesrovnalosti, které podání nezablokují, se uloží jako varování, například
 následné hlášení bez data zjištění důvodů nebo bez poznámky, ke které původní
 písemnosti patří, chybějící odvod u neosvobozeného příjmu, nebo úhrn odvodů
-odlišný od sražené daně. Přečti si je před odesláním.
+odlišný od sražené daně. Přečtěte si je před odesláním.
 
 Formulář zatím neumí víc odvodů sražené daně v jednom oznámení, byť je tiskopis
 připouští, a nepracuje s řádky 27a a 27b (příjem navýšený o povinné pojistné).
-Nevytváří textovou přílohu ani zástupce; takový případ dokonči v EPO.
+Nevytváří textovou přílohu ani zástupce; takový případ dokončete v EPO.
 
-## 43.13 Rozsah a co ještě není
+### 43.11.19 Rozsah a co aplikace vědomě nepodporuje
 
-Pokrývá **řádné, opravné i dodatečné** přiznání DPPO (s.r.o./a.s., kalendářní rok i
+Aplikace pokrývá **řádné, opravné i dodatečné** přiznání DPPO (s.r.o./a.s., kalendářní rok i
 **hospodářský rok**, česká rezidence) a DPFO (OSVČ § 7 automaticky; § 6 z potvrzení
 zaměstnavatele, § 8/§ 9/§ 10 jako ruční vstupy), pojistné OSVČ vč. nemocenského, XML
 validované proti XSD a **e-podání pro ČSSZ** (Přehled OSVČ jako validovaná XML datová věta
@@ -611,29 +760,38 @@ Shodu s datovou větou ČSSZ lze očekávat jen u podporovaného celoročního r
 
 Přehled pro **zdravotní pojišťovny** je pouze PDF pomůcka, protože pojišťovny
 nemají jednotné veřejné schéma. Přímé odeslání na EPO ani ePortál ČSSZ tato
-obrazovka neprovádí: XML stáhni a nahraj na mojedane.gov.cz, resp. ePortál ČSSZ.
+obrazovka neprovádí: XML stáhněte a nahrajte na mojedane.gov.cz, resp. ePortál ČSSZ.
 
 Pokud náhled nebo XSD projde, znamená to strukturální a implementovanou obsahovou
 kontrolu, nikoli potvrzení věcné správnosti každého daňového případu. Chybějící případ
-dokonči v EPO a archivuj právě finální odeslanou verzi.
+dokončete v EPO a archivujte právě finální odeslanou verzi.
 
-### 43.13.1 Co aplikace vědomě nepodporuje
+#### Co aplikace vědomě nepodporuje
 
-Následující případy nejsou „zatím", ale rozhodnutí. Žádný z nich neprojde tiše — aplikace
-je pozná a nález ukáže v panelu [Situace, které aplikace v přiznání neumí](#4351-situace-ktere-aplikace-v-priznani-neumi)
+Následující případy nejsou „zatím", ale rozhodnutí. Žádný z nich neprojde tiše - aplikace
+je pozná a nález ukáže v panelu [Situace, které aplikace v přiznání neumí](#431110-situace-ktere-aplikace-v-priznani-neumi)
 ještě před podáním.
 
+<!-- cols: 34 66 -->
 | Případ | Jak se projeví |
 |---|---|
 | Investiční fond, investiční nebo penzijní společnost, banka, pojišťovna | Přiznání se nevydá. Mají vlastní typ poplatníka a účtují podle vyhlášky 501/502/503, kdežto aplikace umí jen vyhlášku 500. |
 | Veřejně prospěšný poplatník (§ 17a) | Přiznání se nevydá. Jiné dělení činností, jiný základ daně a vyhláška 504. |
 | Daňový nerezident, stálá provozovna | Přiznání se nevydá při typu poplatníka 2. Sídlo mimo ČR samo o sobě nerezidenta nedělá (rozhoduje místo vedení podle § 17 odst. 3 ZDP), proto je samotné zahraniční sídlo jen upozorněním. |
-| Likvidace, insolvence, fúze nebo přeměna | Přiznání se nevydá. Mění typ přiznání i zdaňovací období; hláška ti řekne, který typ přiznání úřad čeká. |
+| Likvidace, insolvence, fúze nebo přeměna | Přiznání se nevydá. Mění typ přiznání i zdaňovací období; hláška vám řekne, který typ přiznání úřad čeká. |
 | Investiční pobídky (§ 35a/§ 35b) | Přiznání se nevydá. Podmínky se sledují roky zpětně mimo účetnictví. |
-| ATAD, CFC (§ 23e–23h, § 38fa) | Přiznání se nevydá. Úpravy základu daně se nepočítají, základ by byl podhodnocený. |
-| Atypické zdaňovací období | Přiznání se nevydá, pokud období neodpovídá kalendářnímu ani hospodářskému roku, nebo je delší než dvanáct měsíců. **Hospodářský rok podporovaný je** — jen na něj upozorní, protože lhůty, zálohy a roční sazby se odvozují od kalendářního roku. |
+| ATAD, CFC (§ 23e-23h, § 38fa) | Přiznání se nevydá. Úpravy základu daně se nepočítají, základ by byl podhodnocený. |
+| Atypické zdaňovací období | Přiznání se nevydá, pokud období neodpovídá kalendářnímu ani hospodářskému roku, nebo je delší než dvanáct měsíců. **Hospodářský rok podporovaný je** - jen na něj upozorní, protože lhůty, zálohy a roční sazby se odvozují od kalendářního roku. |
 | Fyzická osoba v podvojném účetnictví | Přiznání se nevydá. Účetní výkazy fyzické osoby (věty přílohy DPFDP7) aplikace nesestavuje, podání by odešlo bez povinné přílohy. |
-| Spolupracující osoba (§ 13) — OSVČ | Přiznání se nevydá. Vazba mezi poplatníky se nevede, dílčí základ § 7 by vyšel vyšší, než jaký ti náleží. |
-| Zahraniční příjmy se zápočtem (§ 38f, Příloha č. 3) — OSVČ | Přiznání se nevydá. Evidence příjmů a daní po státech se nevede. Samostatný základ daně podle § 16a bez zapnutého příznaku vyvolá aspoň upozornění. |
-| Fotovoltaika (§ 30b) a účetní odpisy majetku mimo zákonnou definici (§ 24 odst. 2 písm. v) | Upozornění u výroby elektřiny. Evidence majetku ty režimy nerozlišuje, příslušné řádky tabulky B zůstanou prázdné — doplň je v EPO. |
-| Zvláštní příloha k ř. 62, Příloha A k ř. 40 | Slovní popis, ne dopočet. Aplikace na ně upozorňuje, text napíšeš v EPO. |
+| Spolupracující osoba (§ 13) - OSVČ | Přiznání se nevydá. Vazba mezi poplatníky se nevede, dílčí základ § 7 by vyšel vyšší, než jaký vám náleží. |
+| Zahraniční příjmy se zápočtem (§ 38f, Příloha č. 3) - OSVČ | Přiznání se nevydá. Evidence příjmů a daní po státech se nevede. Samostatný základ daně podle § 16a bez zapnutého příznaku vyvolá aspoň upozornění. |
+| Fotovoltaika (§ 30b) a účetní odpisy majetku mimo zákonnou definici (§ 24 odst. 2 písm. v) | Upozornění u výroby elektřiny. Evidence majetku ty režimy nerozlišuje, příslušné řádky tabulky B zůstanou prázdné - doplňte je v EPO. |
+| Zvláštní příloha k ř. 62, Příloha A k ř. 40 | Slovní popis, ne dopočet. Aplikace na ně upozorňuje, text napíšete v EPO. |
+
+## 43.12 Související kapitoly
+
+- [Archiv podání a daňová rekonciliace](49_Archiv_podani_a_rekonciliace.md)
+- [Výkazy DPH](41_Vykazy_DPH.md)
+- [Daňová evidence](74_Danova_evidence.md)
+- [Účetní závěrka](72_Uzaverka.md)
+- [Účtová osnova](66_Ucetni_osnova.md)

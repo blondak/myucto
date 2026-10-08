@@ -1,17 +1,72 @@
 # 60. Saldokonto
 
-**Cesta: `Účetnictví → Saldokonto`**
+> Porovnání otevřených položek podle partnerů se zůstatkem saldokontního účtu v hlavní knize k vybranému dni. Podklad pro inventarizaci pohledávek, závazků a záloh. Kapitola je pro účetní v podvojném účetnictví.
 
-Saldokonto porovnává otevřené položky podle partnerů se zůstatkem
-saldokontního účtu v hlavní knize k vybranému dni. Je podkladem pro
-inventarizaci pohledávek, závazků a záloh a navazuje na
-[Inventarizaci účtů](69_Inventarizace_rozvahovych_uctu.md).
+## 60.1 Kdy to potřebujete
 
-## 60.1 Období a účty
+Kapitolu otevřete, když:
+
+- se blíží konec měsíce nebo roku a potřebujete ověřit účty 311, 321, 314, 324, 315 a 325,
+- chcete zjistit, kolik vám dluží odběratelé nebo kolik dlužíte dodavatelům k určitému dni,
+- potřebujete rozhodnout, co poslat na [upomínku](22_Upominky.md) nebo na [zápočet](67_Zapocty.md),
+- zůstatek účtu v hlavní knize nesedí na doklady,
+- připravujete inventarizační protokol (navazuje na [Inventarizaci účtů](69_Inventarizace_rozvahovych_uctu.md)),
+- chcete z otevřeného roku nahlédnout na 31. 12. loňska a porovnat počáteční stav nového roku.
+
+## 60.2 Než začnete
+
+1. **Podvojné účetnictví.** Saldokonto je dostupné jen firmám v podvojném účetnictví.
+2. **Zaúčtované doklady.** Otevřené položky vznikají z dokladů navázaných na účetní zápis. Nezaúčtované doklady dořešte v [K doúčtování](54_Rucni_fronta_doctovani.md).
+3. **Zaúčtované úhrady.** Pozdější úhrada nezmění historické saldokonto, platí datum platby.
+
+## 60.3 Krok za krokem: kontrola saldokonta k rozvahovému dni
+
+1. Otevřete `Účetnictví → Saldokonto`.
+2. V poli **Období** zvolte účetní období a v poli **Rozvahový den** datum. Bez data se použije dřívější z posledního dne období a dneška.
+3. V poli **Účet** zvolte **Vše (311/321/314/324/315/325)**, nebo jeden účet.
+4. Podívejte se na konfrontační pruh: **Zůstatek účtu (hlavní kniha)**, **Σ otevřených položek** a **Rozdíl**.
+5. Je-li rozdíl nulový, účet je v pořádku. Nenulový rozdíl řešte podle [§ 60.4](#604-krok-za-krokem-dohledani-rozdilu).
+6. Přepněte zobrazení: **Podle dokladů** (plochý seznam, výchozí) nebo **Podle partnera** (rozbalením partnera uvidíte jeho doklady).
+7. V pohledu **Podle dokladů** můžete zúžit seznam filtrem **Partner** a **Po splatnosti (dní, min.)**. Sloupce řadíte kliknutím na záhlaví.
+8. Klikněte na **Export PDF** (inventarizační protokol) nebo **Export XLSX**.
+
+**Jak poznáte, že je hotovo:** **Rozdíl** je nulový na všech kontrolovaných účtech a protokol je vyexportovaný.
+
+> [!WARNING]
+> Nulový rozdíl sám nepotvrzuje existenci pohledávky, vymahatelnost ani úplnost závazků. Tyto skutečnosti je nutné doložit nezávislými podklady.
+
+## 60.4 Krok za krokem: dohledání rozdílu
+
+1. Přepněte na pohled **Podle partnera** a najděte partnera, u kterého částky nesedí.
+2. Rozbalte partnera. Kliknutím na doklad otevřete detail vydané nebo přijaté faktury.
+3. Zkontrolujte úhrady, částečné platby, dobropisy, zápočty a storna.
+4. U ručního nebo kurzového zápisu pokračujte do opisu účtu v [Hlavní knize](55_Hlavni_kniha.md).
+5. Opravte příčinu (zaúčtujte úhradu, opravte datum platby, stornujte chybný ruční zápis) a sestavu načtěte znovu.
+
+**Jak poznáte, že je hotovo:** **Rozdíl** je nulový, nebo je zbývající rozdíl vysvětlený a doložený.
+
+Nenulový rozdíl může ukazovat na ruční zápis bez vazby na doklad, chybějící či špatně datovanou úhradu, storno, kurzový pohyb nebo nezúčtovanou zálohu.
+
+## 60.5 Když něco nejde
+
+<!-- cols: 30 34 36 -->
+| Co vidíte | Proč | Co udělat |
+|---|---|---|
+| Hláška, že rozvahový den spadá do jiného období, než je vybrané | Rozvahový den smí ležet mimo vybrané období; sestava si období dohledá sama | Klikněte na **Přepnout na období N**, nebo hlášku ignorujte, sestava je spočtena správně. |
+| Hláška, že pro rozvahový den není založené žádné účetní období | Zůstatky se počítají kumulativně od počátku historie | Zkontrolujte datum. Není-li to omyl, nejde o chybu. |
+| Server sestavu odmítl s výzvou k zúžení výběru | Sestava zvládne nejvýše 25 000 otevřených položek | Zúžte výběr jedním účtem, jedním partnerem nebo dřívějším rozvahovým dnem. |
+| **Pro zvolený rozvahový den nejsou na saldokontních účtech žádné zůstatky ani otevřené položky.** | Účty jsou k tomu dni prázdné | Zkontrolujte **Rozvahový den** a **Účet**. |
+| **Zůstatek účtu se neshoduje se součtem otevřených položek** | Ruční zápisy, storna, cizoměnové neúčtované úhrady nebo faktury bez zdrojového dokladu | Postupujte podle [§ 60.4](#604-krok-za-krokem-dohledani-rozdilu). |
+| Záloha mezi otevřenými položkami chybí | Plně zúčtovaná záloha zmizí, historické pohyby zůstanou v deníku | Nejde o chybu ([§ 60.6.3](#6063-zalohy-314-a-324)). |
+| Jiný účet než šest nabízených nelze vybrat | Běžná obrazovka nabízí jen uvedené účty | Opis jiného účtu najdete v [Hlavní knize](55_Hlavni_kniha.md). |
+
+## 60.6 Podrobnosti a pravidla
+
+### 60.6.1 Období a účty
 
 Vyberte účetní období a **Rozvahový den**. Bez data se použije dřívější z
 posledního dne období a dneška. Rozvahový den smí ležet i mimo vybrané
-období — třeba když chcete z otevřeného roku nahlédnout na 31. 12. loňska
+období - třeba když chcete z otevřeného roku nahlédnout na 31. 12. loňska
 (i uzavřeného/schváleného), abyste porovnali počáteční stav nového roku.
 Sestava si skutečné období k datu dohledá sama a spočítá se k němu správně;
 pokud se liší od období vybraného v rozbalovacím seznamu, obrazovka to
@@ -34,12 +89,12 @@ partnera, běžná obrazovka však nabízí uvedených šest účtů. Explicitn�
 účet se zobrazí i s nulami.
 
 Sestava zvládne 25 000 otevřených položek napříč zvolenými účty. Nad tímto
-počtem ji server odmítne sestavit a vyzve k zúžení výběru — jedním účtem,
+počtem ji server odmítne sestavit a vyzve k zúžení výběru - jedním účtem,
 jedním partnerem nebo dřívějším rozvahovým dnem. Zkrácený seznam se záměrně
 nevrací: součet otevřených položek by pak neodpovídal zůstatku hlavní knihy a
 chybějící řádky by se vykázaly jako inventarizační rozdíl.
 
-## 60.2 Dvě nezávislé strany konfrontace
+### 60.6.2 Dvě nezávislé strany konfrontace
 
 **Zůstatek hlavní knihy** vychází ze všech zaúčtovaných řádků účtu do
 rozvahového dne. Používá stejnou otevírací kotvu jako rozvaha a vylučuje
@@ -51,7 +106,7 @@ se proto zobrazují kladně.
 dokladu se vezme jeho zaúčtovaná hodnota v Kč a poměr úhrady známý k
 rozvahovému dni:
 
-`zbývá = zaúčtováno × (1 − poměr úhrady)`
+`zbývá = zaúčtováno × (1 - poměr úhrady)`
 
 Výpočet úhrady respektuje datum platby. Pozdější úhrada nezmění historické
 saldokonto. Plně vyrovnaná položka se vynechá, záporná otevřená položka
@@ -64,7 +119,7 @@ které jsou k rozvahovému dni zaúčtované na stejný saldokontní účet. Sto
 přeúčtování se projeví od dne příslušného účetního zápisu. Koncepty a
 potvrzené položky v daňové evidenci sem nepatří.
 
-## 60.3 Zálohy 314 a 324
+### 60.6.3 Zálohy 314 a 324
 
 U záloh se neporovnává jen stav dokladu. Systém sleduje skutečnou
 zaúčtovanou platbu a její následné čerpání:
@@ -79,11 +134,11 @@ zaúčtovanou platbu a její následné čerpání:
 Plně zúčtovaná záloha proto zmizí z otevřených položek, její historické
 účetní pohyby však zůstanou v deníku.
 
-## 60.4 Rozdíl a jeho interpretace
+### 60.6.4 Rozdíl a jeho interpretace
 
 Pro každý účet platí:
 
-`Rozdíl = zůstatek hlavní knihy − Σ otevřených položek`
+`Rozdíl = zůstatek hlavní knihy - Σ otevřených položek`
 
 Rovnost se kontroluje na haléře. Nulový rozdíl znamená, že dokladový rozpad
 vysvětluje zůstatek účtu. Nenulový rozdíl může ukazovat na ruční zápis bez
@@ -93,31 +148,39 @@ nebo nezúčtovanou zálohu.
 Nulový rozdíl sám nepotvrzuje existenci pohledávky, vymahatelnost ani úplnost
 závazků. Tyto skutečnosti je nutné doložit nezávislými podklady.
 
-## 60.5 Dva pohledy: podle partnera / podle dokladů
+### 60.6.5 Dva pohledy: podle partnera / podle dokladů
 
 Přepínač nad sestavou volí zobrazení:
 
-- **Podle dokladů** (výchozí) — plochý seznam všech otevřených položek napříč
+- **Podle dokladů** (výchozí) - plochý seznam všech otevřených položek napříč
   účty a partnery v jedné tabulce: účet, partner, doklad, datum vystavení,
   splatnost, dní po splatnosti, částka, uhrazeno, zbývá. Sloupce jdou řadit
   kliknutím na záhlaví (výchozí řazení dle splatnosti), sestavu lze zúžit
   filtrem na partnera a na minimální počet dní po splatnosti.
-- **Podle partnera** — partneři řazeni podle názvu, rozbalení partnera
+- **Podle partnera** - partneři řazeni podle názvu, rozbalení partnera
   zobrazí jeho doklady se stejnými sloupci.
 
-Doklad v obou pohledech vede na detail vydané nebo přijaté faktury.
+V obou pohledech jsou položky rozdělené do bloků **Pohledávky** (co dluží nám: vydané faktury, ostatní pohledávky a poskytnuté zálohy) a **Závazky** (co dlužíme my: přijaté faktury, ostatní závazky a přijaté zálohy), každý s celkovým součtem. Doklad vede na detail vydané nebo přijaté faktury.
 
 Storno datované až po rozvahovém dni položku k dřívějšímu dni neskrývá.
 K datu storna a později se účetní i dokladová strana vyruší.
 
-## 60.6 Export
+### 60.6.6 Export
 
 PDF vytvoří inventarizační protokol pro aktuální účet, partnera a rozvahový
 den vždy v podobě podle partnera (zůstatek hlavní knihy, součet otevřených
 položek, rozdíl a rozpad partnerů s doklady). XLSX export respektuje aktuálně
-zvolený pohled — podle partnera stejně jako protokol, podle dokladů jako
+zvolený pohled - podle partnera stejně jako protokol, podle dokladů jako
 plochý seznam pro další zpracování (např. filtrování v Excelu).
 
-> 💡 Nenulový rozdíl řešte od konfrontačního pruhu přes partnera a doklad; pro
+> [!TIP]
+> Nenulový rozdíl řešte od konfrontačního pruhu přes partnera a doklad; pro
 > ruční či kurzový zápis pokračujte proklikem do opisu účtu v
 > [Hlavní knize](55_Hlavni_kniha.md).
+
+## 60.7 Související kapitoly
+
+- [Hlavní kniha](55_Hlavni_kniha.md) - opis účtu a párování otevřených položek
+- [Inventarizace účtů](69_Inventarizace_rozvahovych_uctu.md) - inventarizační protokol
+- [Úplnost dokladů](61_Uplnost_dokladu.md) - doklady po splatnosti a bankovní pohyby bez dokladu
+- [Průvodce účetního](50_Pruvodce_ucetniho.md) - měsíční a roční postup
