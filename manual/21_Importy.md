@@ -935,6 +935,66 @@ Součástí jsou také počty zaměstnanců a mzdových záznamů, kontrola jeji
 vzájemných vazeb a období. Osobní údaje ani částky jednotlivých mezd diagnostika
 nevypisuje; mzdové výpočty neověřuje.
 
+### 21.9.16 Import firmy z Kompletního exportu dat MyÚčta
+
+Pro převod databázových grafů firmy použijte stávající **Systém → Kompletní
+export dat**, vyberte **Úplný obnovitelný archiv** a ponechte období bez omezení.
+Export již obsahuje právě vybranou firmu, JSONL data, kontrolní součty a soubory.
+Není potřeba zavádět nový formát zálohy. Běžný databázový ZIP ze sekce Zálohy
+není vstupem tohoto příkazu.
+
+Import spouští správce instalace z příkazové řádky. Cílovou firmu vyberte
+pomocí jejího ID; musí již existovat a mít stejné IČO, zemi, výchozí měnu, účetní režim, typ poplatníka, období DPH,
+plátcovství včetně historie a význam klasifikací DPH. Její nastavení, přístupy uživatelů
+ani přihlašovací údaje se nepřepisují. Cíl nesmí obsahovat vlastní obchodní data;
+přítomné výchozí číselníky se mohou použít při shodném významu.
+
+Nejprve spusťte zkoušku nanečisto:
+
+```bash
+php api/bin/myucto-import.php --file=export.zip --supplier=2 --actor=1 --source=zdrojova-instance
+```
+
+`--supplier` je ID cílové firmy, `--actor` ID aktivního uživatele a `--source`
+stabilní jedinečný název původní instance. Zkouška provede skutečné zápisy,
+ověří přenesené hodnoty a vrátí transakci i nově vytvořené soubory. Protokol
+obsahuje počty vytvořených, použitých a již převzatých řádků, rekonciliaci
+po tabulkách a `outside_scope` — nepřenesené neprázdné tabulky.
+
+První profil přenáší partnery a jejich účty, měny, kategorie, střediska,
+účtovou osnovu, účetní období, zakázky a výkazy práce, faktury a jejich položky,
+pravidelné šablony, jednoduchý ceník, pokladnu, bankovní výpisy a transakce,
+úhrady, vypořádání a zápočty, majetek s odpisy a účetní deník. Uložené částky,
+řádkové součty, daňová data a režim cen včetně DPH se zachovávají. Původní PDF
+přijatých faktur, jejich zdrojové soubory a importovaná PDF vydaných faktur se
+kopírují do nových cest; binární výpisy se obnovují k přemapovaným řádkům.
+PDF vydaných faktur vytvořená aplikací se mohou v cíli vygenerovat znovu.
+
+Mzdy, skladové grafy, DMS, přístupové a komunikační profily ani další tabulky
+mimo tento seznam první profil nepřenáší. Doklad s živou vazbou na nepodporovaný
+graf se odmítne, vazba se tiše nenuluje. Rovněž se odmítají nepodporovaná
+syntetická ID závěrkových zápisů. Zkontrolujte proto před ostrým importem
+`outside_scope` a celý výsledek zkoušky. Limit načtených dat a potřebných souborů
+je 64 MiB, nejvýše 100 000 řádků; celý ZIP může mít nejvýše 20 GiB.
+
+Po kontrole protokolu přidejte `--apply`:
+
+```bash
+php api/bin/myucto-import.php --file=export.zip --supplier=2 --actor=1 --source=zdrojova-instance --apply
+```
+
+Šablony pravidelné fakturace se přenesou **pozastavené**, s vypnutým automatickým
+vystavením a odesláním. Zkontrolujte jejich nastavení a termíny a poté je
+aktivujte. Automatické upomínky převzatých faktur jsou vypnuté. Veřejné a
+schvalovací tokeny vydaných faktur se nepřenášejí; rozpracované schvalovací
+žádosti je potřeba v cíli zahájit znovu.
+
+Opakování stejného importu nevytvoří duplicity a ověří existující hodnoty i
+soubory. Změněná zdrojová data nebo změněné převzaté doklady se odmítnou;
+příkaz neslouží k průběžné synchronizaci. Heslo ZIPu se čte z
+`MYUCTO_IMPORT_PASSWORD`, případně z `cron.backup.password` cílové konfigurace.
+Heslo nezadávejte jako argument příkazu.
+
 ## 21.10 Související kapitoly
 
 - [Export vydaných faktur](20_Exporty.md)
