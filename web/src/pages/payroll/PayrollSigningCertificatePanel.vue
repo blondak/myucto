@@ -504,7 +504,7 @@ onMounted(load)
         >
           <p>{{ t('payroll.submissions.signing.vault.empty') }}</p>
           <RouterLink
-            :to="{ name: 'reports-submissions' }"
+            :to="{ name: 'admin-electronic-signatures' }"
             class="mt-3 inline-flex"
             :class="btnOutline('primary')"
           >

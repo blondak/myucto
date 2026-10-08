@@ -7591,7 +7591,7 @@
       },
       "signing": {
         "title": "ČSSZ signing certificate",
-        "description": "Choose which stored certificate signs this company's payroll submissions. Certificates are not uploaded here. The application has a single vault: upload the certificate and enable it for the company under Taxes → EPO filing & archive → EPO certificates.",
+        "description": "Choose which stored certificate signs this company's payroll submissions. Certificates are not uploaded here. The application has a single vault: upload the certificate under System → Electronic signatures → Certificates and enable it for the company under Taxes → EPO filing & archive → EPO certificates.",
         "load_failed": "The signing certificate settings could not be loaded.",
         "state_unknown": "Until the request succeeds the system does not know whether a certificate is selected — please do not read this empty screen as proof that none is configured.",
         "storage_unavailable": "The storage for the certificate choice is not available yet — the database migration has not run. The choice cannot be saved right now.",
@@ -7614,7 +7614,7 @@
         },
         "picker": {
           "title": "Certificate choice",
-          "description": "The list contains the vault certificates available to you. A new certificate is uploaded under Taxes → EPO filing & archive → EPO certificates, and enabled for this company there as well.",
+          "description": "The list contains the vault certificates available to you. A new certificate is uploaded under System → Electronic signatures → Certificates and enabled for this company under Taxes → EPO filing & archive → EPO certificates.",
           "label": "Certificate from the vault",
           "placeholder": "Select a certificate",
           "no_results": "No matching certificate",
@@ -7624,8 +7624,8 @@
           "option_not_enabled": "Not enabled for this company"
         },
         "vault": {
-          "empty": "Your vault contains no certificate. Certificates are uploaded in one place for the whole application, under Taxes → EPO filing & archive → EPO certificates.",
-          "open": "Open EPO filing & archive"
+          "empty": "Your vault contains no certificate. Certificates are uploaded in one place for the whole application, under System → Electronic signatures → Certificates.",
+          "open": "Open Electronic signatures"
         },
         "certificate": {
           "subject": "Issued to",

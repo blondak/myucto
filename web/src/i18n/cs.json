@@ -7591,7 +7591,7 @@
       },
       "signing": {
         "title": "Podpisový certifikát ČSSZ",
-        "description": "Vyberte, kterým z uložených certifikátů se podepisují mzdová podání této firmy. Certifikáty se sem nenahrávají. Trezor je v aplikaci jeden: certifikát nahrajete a pro firmu povolíte v Daně → EPO podání a archív → Certifikáty EPO.",
+        "description": "Vyberte, kterým z uložených certifikátů se podepisují mzdová podání této firmy. Certifikáty se sem nenahrávají. Trezor je v aplikaci jeden: certifikát nahrajete v Systém → Elektronické podpisy → Certifikáty a pro firmu ho povolíte v Daně → EPO podání a archív → Certifikáty EPO.",
         "load_failed": "Nastavení podpisového certifikátu se nepodařilo načíst.",
         "state_unknown": "Dokud se načtení nepovede, systém neví, jestli je certifikát zvolený — neberte prosím prázdnou obrazovku jako důkaz, že nastavený není.",
         "storage_unavailable": "Úložiště volby certifikátu zatím není k dispozici — neproběhla migrace databáze. Volbu teď uložit nelze.",
@@ -7614,7 +7614,7 @@
         },
         "picker": {
           "title": "Volba certifikátu",
-          "description": "Nabídka obsahuje certifikáty z trezoru, které máte k dispozici. Nový certifikát se nahrává v Daně → EPO podání a archív → Certifikáty EPO a tam se také povoluje pro tuhle firmu.",
+          "description": "Nabídka obsahuje certifikáty z trezoru, které máte k dispozici. Nový certifikát se nahrává v Systém → Elektronické podpisy → Certifikáty a pro tuhle firmu se povoluje v Daně → EPO podání a archív → Certifikáty EPO.",
           "label": "Certifikát z trezoru",
           "placeholder": "Vyberte certifikát",
           "no_results": "Žádný odpovídající certifikát",
@@ -7624,8 +7624,8 @@
           "option_not_enabled": "Pro tuhle firmu není povolený"
         },
         "vault": {
-          "empty": "V trezoru nemáte žádný certifikát. Nahrává se na jednom místě pro celou aplikaci, v Daně → EPO podání a archív → Certifikáty EPO.",
-          "open": "Otevřít EPO podání a archív"
+          "empty": "V trezoru nemáte žádný certifikát. Nahrává se na jednom místě pro celou aplikaci, v Systém → Elektronické podpisy → Certifikáty.",
+          "open": "Otevřít Elektronické podpisy"
         },
         "certificate": {
           "subject": "Vydán pro",
