@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { btnOutlineSm } from '@/components/ui/buttonStyles'
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
@@ -24,7 +24,15 @@ const props = withDefaults(defineProps<{
   entryId: number
   /** Ve draweru dává smysl přepnout náhled na protějšek; v seznamu ne. */
   showPreview?: boolean
-}>(), { showPreview: false })
+  /**
+   * Zápisy, které volající už vykresluje vedle tohoto panelu (sekce Zaúčtování
+   * na detailu dokladu ukazuje všechny zápisy dokladu pod sebou). Protějšek
+   * s takovým zápisem by se vypsal podruhé i s rozpadem na účty.
+   */
+  hideEntryIds?: number[]
+  /** Doklad, na jehož detailu panel je — sám sobě protějškem není. */
+  hideDocument?: { sourceType: JournalRelatedItem['source_type'], sourceId: number } | null
+}>(), { showPreview: false, hideEntryIds: () => [], hideDocument: null })
 
 const emit = defineEmits<{
   (e: 'preview', entryId: number): void
@@ -38,7 +46,13 @@ const { t } = useI18n()
 const auth = useAuthStore()
 
 const loading = ref(false)
-const items = ref<JournalRelatedItem[]>([])
+const allItems = ref<JournalRelatedItem[]>([])
+const items = computed(() => allItems.value.filter(it => {
+  if (props.hideDocument !== null
+    && it.source_type === props.hideDocument.sourceType
+    && it.source_id === props.hideDocument.sourceId) return false
+  return it.entry_id === null || !props.hideEntryIds.includes(it.entry_id)
+}))
 const truncated = ref(false)
 const failed = ref(false)
 
@@ -47,12 +61,12 @@ async function load(id: number) {
   failed.value = false
   try {
     const r = await accountingApi.getJournalRelated(id)
-    items.value = r.items
+    allItems.value = r.items
     truncated.value = r.truncated
-    emit('loaded', r.items.length)
+    emit('loaded', items.value.length)
   } catch {
     // Panel je doplňková navigace — když se nenačte, nesmí shodit celý detail zápisu.
-    items.value = []
+    allItems.value = []
     truncated.value = false
     failed.value = true
     emit('loaded', 0)

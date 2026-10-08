@@ -82,6 +82,18 @@ function canRepost(entry: JournalEntryWithLines): boolean {
   return auth.canWrite('accounting') && isOwn(entry) && entry.reversed_by === null && !isReversal(entry)
 }
 
+/**
+ * Sekce ukazuje všechny zápisy dokladu pod sebou (u zálohy úhradu i zúčtování
+ * v konečné faktuře). Panel Souvisí u každého z nich proto vynechá zápisy, které
+ * jsou v sekci vidět, i samotný prohlížený doklad — jinak se týž zápis vypsal
+ * dvakrát i s rozpadem na účty.
+ */
+const entryIds = computed(() => entries.value.map(e => e.id))
+const currentDocument = computed(() => ({
+  sourceType: props.source === 'invoices' ? 'invoice' as const : 'purchase_invoice' as const,
+  sourceId: props.docId,
+}))
+
 /** Záloha má zaúčtovanou úhradu (banka/pokladna) — jinak se zaúčtuje až při ní. */
 const advancePaid = computed(() => entries.value.some(e => e.relation === 'advance_payment'))
 
@@ -148,7 +160,8 @@ defineExpose({ reload: () => load(props.docId) })
         <JournalLinesTable :lines="entry.lines" :context-date="entry.entry_date" />
         <!-- Souvisí: protějšky v grafu doklad ↔ úhrada. Panel si data tahá sám
              podle entry-id a když nic nenajde, nevykreslí se. -->
-        <JournalRelatedPanel class="mt-3 block" :entry-id="entry.id" />
+        <JournalRelatedPanel class="mt-3 block" :entry-id="entry.id"
+          :hide-entry-ids="entryIds" :hide-document="currentDocument" />
         <!-- Poznámky zápisu — tatáž komponenta jako v deníku (i u bankovního pohybu),
              takže poznámka k zaúčtování dokladu je vidět a jde psát i odsud. -->
         <JournalEntryNotes class="mt-3" :entry-id="entry.id" />

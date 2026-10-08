@@ -71,4 +71,35 @@ describe('JournalRelatedPanel', () => {
     expect(notesMock).not.toHaveBeenCalled()
     expect(wrapper.find('[data-test="related-entry-notes"]').exists()).toBe(false)
   })
+
+  it('na detailu zálohy nevypíše znovu zápisy ze sekce Zaúčtování ani samotnou zálohu', async () => {
+    notesMock.mockResolvedValue([])
+    relatedMock.mockResolvedValueOnce({
+      items: [
+        { ...payment(null), relation: 'document', source_type: 'invoice', source_id: 900, title: 'ZALOHA', postable: false },
+        { ...payment(64655), relation: 'document', source_type: 'invoice', source_id: 901, title: 'KONECNA' },
+        { ...payment(64999), relation: 'payment', source_type: 'bank', source_id: 78, title: 'JINA_PLATBA' },
+      ],
+      truncated: false,
+    })
+    const wrapper = mount(JournalRelatedPanel, {
+      props: { entryId: 64654, hideEntryIds: [64654, 64655], hideDocument: { sourceType: 'invoice', sourceId: 900 } },
+      global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+    })
+    await flushPromises()
+    const text = wrapper.text()
+    expect(text).not.toContain('ZALOHA')
+    expect(text).not.toContain('KONECNA')
+    expect(text).toContain('JINA_PLATBA')
+  })
+
+  it('když jsou všechny protějšky vidět jinde, panel se nevykreslí', async () => {
+    relatedMock.mockResolvedValueOnce({ items: [payment(64655)], truncated: false })
+    const wrapper = mount(JournalRelatedPanel, {
+      props: { entryId: 64654, hideEntryIds: [64654, 64655] },
+      global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+    })
+    await flushPromises()
+    expect(wrapper.find('section').exists()).toBe(false)
+  })
 })
