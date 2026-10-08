@@ -19,6 +19,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1XmlValidator;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenarioRequirementSourceCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionEnvelope;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzVerifiedPreparationSnapshot;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzWholeHours;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
 use MyInvoice\Tests\Support\JmhzControlValidatorFactory;
 use PHPUnit\Framework\TestCase;
@@ -1887,6 +1888,46 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
                 . '<form:prescas>3.000</form:prescas></form:rozpad>',
             $xml,
         );
+    }
+
+    /**
+     * Pokyny k vyplnění MH 1.4.14 (revize) u 10273: hodiny rizikové práce jako
+     * celé nezáporné číslo, zbytek minut pod 60 se počítá za 1 hodinu. 165 h
+     * 30 min je proto 166, ne „165.500“. Kontrolu 57 to neporuší, protože
+     * katalog kontrol desetinné 10268 pro ni zaokrouhluje také nahoru.
+     */
+    public function testRiskWorkHoursAreWholeHoursRoundedUp(): void
+    {
+        $payload = $this->payload();
+        $payload['people'][0]['employments'][0]['term']['social_employer_rate_category'] = 'risk_employment';
+        $values = &$payload['people'][0]['employments'][0]['work_month']
+            ['jmhz_work_summary']['values'];
+        $values['worked_millihours'] = 165_500;
+        unset($values);
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+        $xml = preg_replace('/>\s+</', '><', $result['xml']) ?? '';
+
+        self::assertStringContainsString('<form:pocet>165.500</form:pocet>', $xml);
+        self::assertStringContainsString(
+            '<form:riziko><form:hodinyOdpracovanePocet>166</form:hodinyOdpracovanePocet>'
+                . '<form:kategorizaceRizika>1</form:kategorizaceRizika></form:riziko>',
+            $xml,
+        );
+    }
+
+    public function testWholeHoursRoundUpOnlyTheRemainder(): void
+    {
+        self::assertSame(0, JmhzWholeHours::fromMillihours(0));
+        self::assertSame(1, JmhzWholeHours::fromMillihours(1));
+        self::assertSame(168, JmhzWholeHours::fromMillihours(168_000));
+        self::assertSame(169, JmhzWholeHours::fromMillihours(168_001));
+        self::assertSame([166, 0], JmhzWholeHours::ceilScaled([165_500, 3]));
+        self::assertSame([165, 0], JmhzWholeHours::ceilScaled([165_000, 3]));
+        self::assertSame([165, 0], JmhzWholeHours::ceilScaled([165, 0]));
     }
 
     /**

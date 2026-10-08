@@ -2778,7 +2778,9 @@ final class JmhzScenario1ControlEvaluator
             if ($risky === null || $worked === null) {
                 return null;
             }
-            if (self::compareScaled($risky, $worked) > 0) {
+            // Katalog kontrol 1.4.2.10, kontrola 57: desetinné 10268 se pro
+            // účely kontroly zaokrouhluje nahoru (10273 je v celých hodinách).
+            if (self::compareScaled($risky, JmhzWholeHours::ceilScaled($worked)) > 0) {
                 return 'Hodiny v rizikové práci překračují počet odpracovaných hodin.';
             }
 

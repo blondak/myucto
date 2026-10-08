@@ -2393,6 +2393,13 @@ final class JmhzScenario1XmlSerializer
                  * Zařazení platí pro celý vztah, takže hodiny jsou odpracované
                  * hodiny vztahu (kontrola 57: nepřekročí 10268). Při nule
                  * odpracovaných hodin se blok nevykazuje (kontrola 282).
+                 *
+                 * Pokyny k vyplnění MH 1.4.14 (revize) u 10273: „celé nezáporné
+                 * číslo (případný zbytek minut nižší než 60 se považuje za
+                 * 1 hodinu)“, stejně jako evidence doby rizikových prací podle
+                 * zákona č. 582/1991 Sb. Hodiny se proto zaokrouhlují NAHORU na celé.
+                 * Kontrolu 57 to neporuší: katalog kontrol 1.4.2.10 pro ni
+                 * desetinné 10268 také zaokrouhluje nahoru.
                  */
                 $riskNode = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:riziko');
                 $this->text(
@@ -2400,7 +2407,7 @@ final class JmhzScenario1XmlSerializer
                     $riskNode,
                     JmhzSchemaCatalog::NS_FORM,
                     'form:hodinyOdpracovanePocet',
-                    $this->decimal($worked, 3, '10273'),
+                    (string) JmhzWholeHours::fromMillihours($worked),
                 );
                 foreach ($riskCodes as $code) {
                     if (!in_array($code, ['1', '6', '7'], true)) {

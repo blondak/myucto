@@ -133,8 +133,10 @@ final class PayrollJmhzConcurrencyFlowTest extends TestCase
 
         self::assertStringContainsString('<form:pismenoC>40000</form:pismenoC>', $xml);
         self::assertSame(1, preg_match('#<form:odpracovaneHodiny><form:pocet>([0-9.]+)</form:pocet>#', $xml, $worked));
+        // 10273 je v celých hodinách se zbytkem nahoru (Pokyny MH 1.4.14 revize).
+        $riskHours = (int) ceil((float) $worked[1]);
         self::assertStringContainsString(
-            "<form:riziko><form:hodinyOdpracovanePocet>{$worked[1]}</form:hodinyOdpracovanePocet>"
+            "<form:riziko><form:hodinyOdpracovanePocet>{$riskHours}</form:hodinyOdpracovanePocet>"
                 . '<form:kategorizaceRizika>1</form:kategorizaceRizika></form:riziko>',
             $xml,
         );
