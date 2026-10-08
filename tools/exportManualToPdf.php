@@ -222,6 +222,10 @@ function mdToHtml(string $md, bool $firstChapter, array &$toc, string $imgBaseDi
 
     $headingCounter = 0;
     foreach ($lines as $line) {
+        // Celořádkový HTML komentář (např. `<!-- cols: 34 66 -->` pro MD2PDF) se nevypisuje.
+        if (!$inCodeBlock && preg_match('/^\s*<!--.*-->\s*$/', $line)) {
+            continue;
+        }
         // Fenced code block
         if (preg_match('/^```/', trim($line))) {
             if (!$inCodeBlock) {

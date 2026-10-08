@@ -148,6 +148,11 @@ function mdToHtml(string $md, array &$tocOut, string $imgUrlBase): string {
     };
 
     foreach ($lines as $line) {
+        // Celořádkový HTML komentář (např. `<!-- cols: 34 66 -->` pro šířky sloupců
+        // v MD2PDF) je pokyn pro jiný renderer, ne text — do HTML se nepropisuje.
+        if (!$inCodeBlock && preg_match('/^\s*<!--.*-->\s*$/', $line)) {
+            continue;
+        }
         // Code blocks
         if (preg_match('/^```/', trim($line))) {
             if (!$inCodeBlock) {
