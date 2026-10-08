@@ -10,6 +10,7 @@ use MyInvoice\Repository\Payroll\PayrollOfficeRegistrationRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Submission\CsszEmployerVariableSymbol;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -47,6 +48,24 @@ final class PayrollOfficeRegistrationAction
         // pojistného a jde na každý platební příkaz i do podání.
         if (!$dateIsValid || !preg_match('/^\\d{10}$/', $symbol) || mb_strlen($source) > 500) {
             return Json::error($response, 'validation_failed', 'Registrace vyžaduje datum účinnosti a desetimístný variabilní symbol ČSSZ.', 422);
+        }
+        // Kontrolní číslici a kód okresu hlídá stejné pravidlo jako příprava
+        // podání ČSSZ. Jen u nového nebo měněného symbolu: verze se stejným VS
+        // jako dosud nic nemění a zástupné symboly starších instalací ji
+        // blokovat nesmí.
+        $newest = $this->registrations->list($this->currentSupplierId($request), (int) $args['officeId'])[0] ?? null;
+        $reason = ($newest['social_security_variable_symbol'] ?? null) === $symbol
+            ? null
+            : CsszEmployerVariableSymbol::invalidReason($symbol);
+        if ($reason !== null) {
+            return Json::error(
+                $response,
+                'payroll_office_variable_symbol_invalid',
+                "Variabilní symbol ČSSZ {$symbol} není platný: {$reason}. ČSSZ by podání "
+                    . 'odmítla. Opište symbol přesně z oznámení ČSSZ.',
+                422,
+                ['field' => 'social_security_variable_symbol', 'reason' => $reason],
+            );
         }
         try {
             $registration = $this->registrations->add($this->currentSupplierId($request), (int) $args['officeId'], $date, $symbol, $source, $this->userId($request));

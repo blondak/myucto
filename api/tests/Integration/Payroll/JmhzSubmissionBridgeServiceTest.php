@@ -283,7 +283,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             self::SNAPSHOT_HASH,
             $result['source_snapshot_hash'],
         );
-        self::assertSame('1234567890', $result['variable_symbol']);
+        self::assertSame('1101234563', $result['variable_symbol']);
         self::assertMatchesRegularExpression(
             '/^[0-9A-F]{8}-[0-9A-F]{4}-7[0-9A-F]{3}-[0-9A-F]{4}-[0-9A-F]{12}$/D',
             $result['submission_guid'],
@@ -1508,8 +1508,8 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         self::assertTrue($second['created']);
         self::assertNotSame($first['submission_id'], $second['submission_id']);
         self::assertNotSame($first['submission_guid'], $second['submission_guid']);
-        self::assertSame('1234567890', $first['variable_symbol']);
-        self::assertSame('9990001234', $second['variable_symbol']);
+        self::assertSame('1101234563', $first['variable_symbol']);
+        self::assertSame('1100001237', $second['variable_symbol']);
 
         // Opakování TÉŽE registrace naopak musí vrátit původní podání i GUID.
         $replay = $this->officeBridge()->bridge(
@@ -1537,8 +1537,8 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
      */
     public function testMultiOfficeRunWithPerEmploymentEvidenceReachesFrozenSubmission(): void
     {
-        $first = $this->resolutionForOffice(4, '1234567890');
-        $second = $this->resolutionForOffice(5, '9990001234');
+        $first = $this->resolutionForOffice(4, '1101234563');
+        $second = $this->resolutionForOffice(5, '1100001237');
 
         self::assertSame([], $first->blockers);
         self::assertSame([], $second->blockers);
@@ -1571,7 +1571,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             5,
         );
         self::assertTrue($frozen['created']);
-        self::assertSame('9990001234', $frozen['variable_symbol']);
+        self::assertSame('1100001237', $frozen['variable_symbol']);
     }
 
     /**
@@ -1841,14 +1841,14 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
                 JmhzTransportSample::partialProtocol(correlationId: self::SPLIT_CORRELATION_2),
             )),
         ], $history, $protocols);
-        $first = $dispatch->poll($this->supplierId, self::ENVIRONMENT, (int) $sent[0]['id'], '1234567890');
+        $first = $dispatch->poll($this->supplierId, self::ENVIRONMENT, (int) $sent[0]['id'], '1101234563');
         self::assertTrue($first->isSettled());
         self::assertSame(
             'processing',
             $this->submissions->get($this->supplierId, $submissionId)['status'],
             'Po protokolu prvního balíku čeká hlášení na zbytek.',
         );
-        $dispatch->poll($this->supplierId, self::ENVIRONMENT, (int) $sent[1]['id'], '1234567890');
+        $dispatch->poll($this->supplierId, self::ENVIRONMENT, (int) $sent[1]['id'], '1101234563');
         self::assertSame(
             'accepted',
             $this->submissions->get($this->supplierId, $submissionId)['status'],
@@ -1918,7 +1918,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             self::ENVIRONMENT,
             $submissionId,
             null,
-            '1234567890',
+            '1101234563',
             $idempotencyKey,
             $this->userId,
         );
@@ -2100,9 +2100,9 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         $this->acceptWithFormOutcome($original, $this->firstFormGuid($originalXml), 'accepted');
 
         $payload = $this->payload();
-        $payload['employer_summary']['office']['social_security_variable_symbol'] = '9990001234';
-        $changed = $this->resolutionFor($this->pvpoj(variableSymbol: '9990001234'), $payload);
-        self::assertSame('9990001234', $changed->requireResolvedDocument()->payload['header']['variable_symbol']);
+        $payload['employer_summary']['office']['social_security_variable_symbol'] = '1100001237';
+        $changed = $this->resolutionFor($this->pvpoj(variableSymbol: '1100001237'), $payload);
+        self::assertSame('1100001237', $changed->requireResolvedDocument()->payload['header']['variable_symbol']);
 
         $service = $this->contentCorrections($changed);
         $candidates = $service->candidates(
@@ -2122,8 +2122,8 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         );
 
         $xml = $this->submissions->artifactBytes($this->supplierId, $correction['artifact_id']);
-        self::assertStringContainsString('<variabilniSymbol>1234567890</variabilniSymbol>', $xml);
-        self::assertSame('1234567890', $correction['variable_symbol']);
+        self::assertStringContainsString('<variabilniSymbol>1101234563</variabilniSymbol>', $xml);
+        self::assertSame('1101234563', $correction['variable_symbol']);
     }
 
     public function testContentCorrectionForAnotherPeriodNamesBothPeriods(): void
@@ -2235,8 +2235,8 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
                 int $preparationId,
                 ?int $officeId = null,
             ): JmhzScenario1Resolution => $officeId === 5
-                ? $this->resolutionForOffice(5, '9990001234')
-                : $this->resolutionForOffice(4, '1234567890'),
+                ? $this->resolutionForOffice(5, '1100001237')
+                : $this->resolutionForOffice(4, '1101234563'),
         );
 
         return new JmhzSubmissionBridgeService(
@@ -2500,13 +2500,13 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
                 'id' => 4,
                 'code' => 'UC4',
                 'name' => 'Mzdová účtárna 4',
-                'social_security_variable_symbol' => '1234567890',
+                'social_security_variable_symbol' => '1101234563',
             ],
             [
                 'id' => 5,
                 'code' => 'UC5',
                 'name' => 'Mzdová účtárna 5',
-                'social_security_variable_symbol' => '9990001234',
+                'social_security_variable_symbol' => '1100001237',
             ],
         ];
         // Revize přes DVĚ účtárny: každá osoba má vlastní vztah, vlastní
@@ -2588,7 +2588,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
     private function pvpoj(
         int $employerTotal = 248,
         int $officeId = 4,
-        string $variableSymbol = '1234567890',
+        string $variableSymbol = '1101234563',
         int $people = 1,
         ?string $period = null,
     ): JmhzPvpojPreview {
@@ -2664,7 +2664,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             ],
             'employer_summary' => [
                 'employer' => ['identification_number' => '00000019'],
-                'office' => ['social_security_variable_symbol' => '1234567890'],
+                'office' => ['social_security_variable_symbol' => '1101234563'],
             ],
             'ordinary_evidence' => [[
                 'scope' => ['employee_id' => 11, 'employment_id' => 101],

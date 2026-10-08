@@ -9028,7 +9028,8 @@
         "account_not_found": "Účet není v účtové osnově.",
         "account_inactive": "Účet je neaktivní.",
         "account_wrong_type": "Vyberte {type}.",
-        "registration_variable_symbol": "Variabilní symbol ČSSZ musí mít přesně deset číslic."
+        "registration_variable_symbol": "Variabilní symbol ČSSZ musí mít přesně deset číslic.",
+        "cssz_variable_symbol_invalid": "Variabilní symbol neprošel kontrolou ČSSZ: {reason}. Opište ho přesně z oznámení ČSSZ."
       },
       "read_only": "Nastavení máš pouze pro čtení. K úpravě je potřeba oprávnění Nastavení mezd.",
       "discard": "Zahodit změny",
@@ -11687,6 +11688,7 @@
         "jmhz_mapping_not_allowed": "Tuto změnu zařazení mzdové složky do JMHZ nelze provést, protože porušuje platná pravidla mapování.",
         "jmhz_negative_or_deferred_income_unsupported": "Mzdová složka nemá určenou částku za vykazovaný měsíc.",
         "jmhz_obligation_missing": "Za tuto mzdovou revizi ještě nebyl vytvořen ani připravený podklad měsíčního hlášení JMHZ.",
+        "jmhz_office_variable_symbol_invalid": "Variabilní symbol zaměstnavatele u mzdové účtárny neprošel kontrolou ČSSZ (kontrolní číslice nebo kód okresu); ČSSZ by hlášení odmítla. Opravte ho v Nastavení mezd v účinných registracích účtárny (pro testovací prostředí v testovacím VS).",
         "jmhz_office_variable_symbol_mismatch": "Variabilní symbol v přehledu pojistného neodpovídá variabilnímu symbolu nastavenému u mzdové účtárny.",
         "jmhz_office_variable_symbol_missing": "Mzdová účtárna nemá vyplněný variabilní symbol zaměstnavatele u ČSSZ v podatelném tvaru (deset číslic); bez něj nelze podat.",
         "jmhz_ordinary_evidence_catalog_mismatch": "Katalog právních skutečností pro potvrzení JMHZ v aplikaci není úplný.",

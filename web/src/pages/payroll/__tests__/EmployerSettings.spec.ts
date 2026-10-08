@@ -208,6 +208,23 @@ async function mountPage(value = settings()) {
   return wrapper
 }
 
+function csszVsError(details: Record<string, string>) {
+  return {
+    isAxiosError: true,
+    response: {
+      status: 422,
+      data: {
+        error: {
+          code: 'payroll_office_variable_symbol_invalid',
+          message: 'Variabilní symbol ČSSZ není platný.',
+          reason: 'nesouhlasí kontrolní číslice',
+          ...details,
+        },
+      },
+    },
+  }
+}
+
 async function openAccounting(wrapper: Awaited<ReturnType<typeof mountPage>>) {
   await wrapper.findAll('[role="tab"]')[2]!.trigger('click')
 }
@@ -539,6 +556,44 @@ describe('EmployerSettings — účtová osnova', () => {
       test_social_security_variable_symbol: '9988776655',
     })
 
+    wrapper.unmount()
+  })
+
+  it('chybu kontroly ČSSZ u testovacího VS ukáže u pole dané účtárny', async () => {
+    const wrapper = await mountPage()
+    m.saveEmployerSettings.mockRejectedValueOnce(csszVsError({ office_code: 'MAIN', field: 'test_social_security_variable_symbol' }))
+    await wrapper.get('[data-office-test-vs]').setValue('1112223334')
+    const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-office-test-vs-error]').text())
+      .toBe('payroll.employer.validation.cssz_variable_symbol_invalid:{"reason":"nesouhlasí kontrolní číslice"}')
+    expect(wrapper.get('[data-office-test-vs]').attributes('aria-invalid')).toBe('true')
+
+    await wrapper.get('[data-office-test-vs]').setValue('1112223332')
+    expect(wrapper.find('[data-office-test-vs-error]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('chybu kontroly ČSSZ u nové registrace ukáže pod VS v dialogu', async () => {
+    const wrapper = await mountPage()
+    m.createOfficeRegistration.mockRejectedValueOnce(csszVsError({ field: 'social_security_variable_symbol' }))
+    const open = wrapper.findAll('button').find(button => button.text().includes('manage_registration'))
+    await open!.trigger('click')
+    await flushPromises()
+    const variableSymbol = document.querySelector<HTMLInputElement>('[data-registration-vs]')!
+    variableSymbol.value = '1101234560'
+    variableSymbol.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    const save = Array.from(document.querySelectorAll('[role="dialog"] button'))
+      .find(button => button.textContent === 'common.save') as HTMLButtonElement
+    await save.click()
+    await flushPromises()
+
+    expect(document.querySelector('[data-registration-vs-server-error]')?.textContent)
+      .toBe('payroll.employer.validation.cssz_variable_symbol_invalid:{"reason":"nesouhlasí kontrolní číslice"}')
+    expect(m.toastError).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

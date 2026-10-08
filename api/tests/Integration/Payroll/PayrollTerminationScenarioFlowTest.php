@@ -42,7 +42,7 @@ final class PayrollTerminationScenarioFlowTest extends TestCase
         if (!$this->db->hasTable('payroll_employment_terminations')) {
             self::markTestSkipped('Migrace 1909 neproběhla.');
         }
-        $this->officeId = $this->createOffice('SKON', 'Syntetická účtárna skončení', '9990001234');
+        $this->officeId = $this->createOffice('SKON', 'Syntetická účtárna skončení', '1100001237');
         $this->configureSocialInsuranceOutput($this->officeId);
         $this->configureHealthInsuranceOutput();
         $this->baseComponentId = $this->createComponent('MZDA_MESICNI_FLOW', 'base_wage', 'regular');

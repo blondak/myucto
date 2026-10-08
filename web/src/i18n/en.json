@@ -9028,7 +9028,8 @@
         "account_not_found": "The account is not in the chart of accounts.",
         "account_inactive": "The account is inactive.",
         "account_wrong_type": "Select {type}.",
-        "registration_variable_symbol": "The social security variable symbol must have exactly ten digits."
+        "registration_variable_symbol": "The social security variable symbol must have exactly ten digits.",
+        "cssz_variable_symbol_invalid": "The variable symbol failed the CSSZ check: {reason}. Copy it exactly from the CSSZ notice."
       },
       "read_only": "You have read-only access. The Payroll settings permission is required to make changes.",
       "discard": "Discard changes",
@@ -11687,6 +11688,7 @@
         "jmhz_mapping_not_allowed": "This change to the payroll component's JMHZ mapping cannot be made because it violates the current mapping rules.",
         "jmhz_negative_or_deferred_income_unsupported": "The payroll component has no amount determined for the reporting month.",
         "jmhz_obligation_missing": "No JMHZ monthly report, not even a preparation, has been created yet for this payroll revision.",
+        "jmhz_office_variable_symbol_invalid": "The employer variable symbol of the payroll office fails the CSSZ check (check digit or district code); CSSZ would reject the report. Correct it in Payroll settings, under the office's effective registrations (or the test variable symbol for the test environment).",
         "jmhz_office_variable_symbol_mismatch": "The variable symbol in the insurance overview does not match the variable symbol set for the payroll office.",
         "jmhz_office_variable_symbol_missing": "The payroll office has no employer variable symbol for the social security administration in a submittable format (ten digits); without it the report cannot be filed.",
         "jmhz_ordinary_evidence_catalog_mismatch": "The application's catalog of legal facts for the JMHZ confirmation is incomplete.",

@@ -36,7 +36,7 @@ final class PayrollJmhzInvalidTerminationFlowTest extends TestCase
     protected function setUp(): void
     {
         $this->bootPayrollFullFlow();
-        $this->officeId = $this->createOffice('JMHZJ', 'Syntetická registrace JMHZ', '9990005678');
+        $this->officeId = $this->createOffice('JMHZJ', 'Syntetická registrace JMHZ', '1100005675');
         $this->configureSocialInsuranceOutput($this->officeId);
         $this->configureHealthInsuranceOutput();
         $this->baseComponentId = $this->createComponent('MZDA_NEPLATNE_FLOW', 'base_wage', 'regular');

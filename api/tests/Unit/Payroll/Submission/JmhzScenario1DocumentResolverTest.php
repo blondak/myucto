@@ -1316,13 +1316,13 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
 
         $first = (new JmhzScenario1DocumentResolver())->resolve(
             $preparation,
-            $this->pvpoj(),
+            $this->pvpoj(variableSymbol: '1101234563'),
             null,
             4,
         );
         $second = (new JmhzScenario1DocumentResolver())->resolve(
             $preparation,
-            $this->pvpoj(officeId: 5, variableSymbol: '9990001234'),
+            $this->pvpoj(officeId: 5, variableSymbol: '1100001237'),
             null,
             5,
         );
@@ -1330,11 +1330,11 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         self::assertSame([], $first->blockers);
         self::assertSame([], $second->blockers);
         self::assertSame(
-            '1234567890',
+            '1101234563',
             $first->candidate?->payload['header']['variable_symbol'],
         );
         self::assertSame(
-            '9990001234',
+            '1100001237',
             $second->candidate?->payload['header']['variable_symbol'],
         );
         self::assertSame(
@@ -1364,29 +1364,73 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
 
         $test = (new JmhzScenario1DocumentResolver())->resolve(
             $preparation,
-            $this->pvpoj(),
+            $this->pvpoj(variableSymbol: '1101234563'),
             null,
             4,
-            [4 => '1112223334', 5 => '5556667778'],
+            [4 => '1112223332', 5 => '5556667778'],
         );
         $otherOfficeOnly = (new JmhzScenario1DocumentResolver())->resolve(
             $preparation,
-            $this->pvpoj(),
+            $this->pvpoj(variableSymbol: '1101234563'),
             null,
             4,
             [5 => '5556667778'],
         );
         $production = (new JmhzScenario1DocumentResolver())->resolve(
             $preparation,
-            $this->pvpoj(),
+            $this->pvpoj(variableSymbol: '1101234563'),
             null,
             4,
         );
 
         self::assertSame([], $test->blockers);
-        self::assertSame('1112223334', $test->candidate?->payload['header']['variable_symbol']);
-        self::assertSame('1234567890', $otherOfficeOnly->candidate?->payload['header']['variable_symbol']);
-        self::assertSame('1234567890', $production->candidate?->payload['header']['variable_symbol']);
+        self::assertSame('1112223332', $test->candidate?->payload['header']['variable_symbol']);
+        self::assertSame('1101234563', $otherOfficeOnly->candidate?->payload['header']['variable_symbol']);
+        self::assertSame('1101234563', $production->candidate?->payload['header']['variable_symbol']);
+    }
+
+    /**
+     * VS s chybnou kontrolní číslicí ČSSZ odmítne (EDV ID 10221, Luhn + C_COKR);
+     * registrace to hlídají přes CsszEmployerVariableSymbol, JMHZ musí stejně.
+     * V testovacím prostředí se kontroluje testovací VS, který hlavička ponese.
+     */
+    public function testInvalidOfficeVariableSymbolBlocksWithRemedyInPayrollSettings(): void
+    {
+        $preparation = $this->multiOfficePreparation();
+        $payload = $preparation->payload;
+        $payload['employer_summary']['offices'][0]['social_security_variable_symbol'] = '1101234564';
+        $invalidOffice = $this->withVersionedPayload(
+            $preparation,
+            JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
+            $payload,
+        );
+
+        $production = (new JmhzScenario1DocumentResolver())->resolve(
+            $invalidOffice,
+            $this->pvpoj(variableSymbol: '1101234564'),
+            null,
+            4,
+        );
+        $invalidTest = (new JmhzScenario1DocumentResolver())->resolve(
+            $preparation,
+            $this->pvpoj(variableSymbol: '1101234563'),
+            null,
+            4,
+            [4 => '1112223334'],
+        );
+
+        foreach ([$production, $invalidTest] as $resolution) {
+            self::assertContains(
+                'jmhz_office_variable_symbol_invalid',
+                array_map(static fn ($blocker): string => $blocker->code, $resolution->blockers),
+            );
+            try {
+                $resolution->requireResolvedDocument();
+                self::fail('Dokument s neplatným VS ČSSZ se nesmí sestavit.');
+            } catch (JmhzPreparationSnapshotException $exception) {
+                self::assertSame('jmhz_scenario1_resolution_blocked', $exception->validationCode);
+            }
+        }
     }
 
     public function testSelectedRegistrationIgnoresReadinessIssuesFromAnotherOffice(): void
@@ -1426,7 +1470,7 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
 
         $resolution = (new JmhzScenario1DocumentResolver())->resolve(
             $preparation,
-            $this->pvpoj(officeId: 5, variableSymbol: '9990001234'),
+            $this->pvpoj(officeId: 5, variableSymbol: '1100001237'),
             null,
             5,
         );
@@ -1451,7 +1495,7 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
     {
         $resolution = (new JmhzScenario1DocumentResolver())->resolve(
             $this->multiOfficePreparation(),
-            $this->pvpoj(),
+            $this->pvpoj(variableSymbol: '1101234563'),
         );
 
         self::assertContains(
@@ -1470,7 +1514,7 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
     {
         $resolution = (new JmhzScenario1DocumentResolver())->resolve(
             $this->multiOfficePreparation(),
-            $this->pvpoj(officeId: 5, variableSymbol: '9990001234'),
+            $this->pvpoj(officeId: 5, variableSymbol: '1100001237'),
             null,
             4,
         );
@@ -1526,13 +1570,13 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
                 'id' => 4,
                 'code' => 'UC4',
                 'name' => 'Mzdová účtárna 4',
-                'social_security_variable_symbol' => '1234567890',
+                'social_security_variable_symbol' => '1101234563',
             ],
             [
                 'id' => 5,
                 'code' => 'UC5',
                 'name' => 'Mzdová účtárna 5',
-                'social_security_variable_symbol' => '9990001234',
+                'social_security_variable_symbol' => '1100001237',
             ],
         ];
         $payload['people'][0]['employments'][0]['employment']['office_id'] = 4;

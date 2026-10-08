@@ -776,6 +776,16 @@ final class JmhzScenario1DocumentResolver
                 $variableSymbol,
                 $testVariableSymbols[$registration['id']] ?? null,
             );
+            // EDV ID 10221 (C_COKR + Luhn) jako u registrací: ČSSZ by hlášení
+            // s takovým symbolem odmítla, takže se dokument nesestaví.
+            if (CsszEmployerVariableSymbol::invalidReason($variableSymbol) !== null) {
+                $blockers[] = $this->blocker(
+                    'jmhz_office_variable_symbol_invalid',
+                    'office',
+                    $registration['id'],
+                    ['10221'],
+                );
+            }
         }
 
         // Nálezy zůstávají na revizi (ne na osobě): adresnost už nese readiness

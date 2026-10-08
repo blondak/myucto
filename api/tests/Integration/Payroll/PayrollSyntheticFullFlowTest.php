@@ -495,7 +495,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         bool $scenarioThree = false,
         bool $withAverageEarning = true,
     ): void {
-        $officeId = $this->createOffice('JMHZ', 'Syntetická registrace JMHZ', '9990001234');
+        $officeId = $this->createOffice('JMHZ', 'Syntetická registrace JMHZ', '1100001237');
         $person = $this->createEmployment(
             $officeId,
             'Dana Testovací',
