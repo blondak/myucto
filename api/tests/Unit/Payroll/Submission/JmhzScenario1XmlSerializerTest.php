@@ -8,6 +8,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionForm;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionPlan;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlContext;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlFinding;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPackageSplitter;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPvpojPreview;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1DocumentResolver;
@@ -492,6 +493,141 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         } catch (JmhzXmlException $exception) {
             self::assertSame('jmhz_xml_form_limit_exceeded', $exception->validationCode);
         }
+    }
+
+    /**
+     * 10321 = 10322 + 10323 (kontrola 78). Bez přeplatku na dani (10322 = 0)
+     * a s přeplaceným bonusem, který zaměstnanec vrací (10323 = −230), je
+     * výsledek záporný. XSD `cisloN14Type` i Pokyny MH (kap. 2.4.8) zápornou
+     * hodnotu připouštějí; dřív ji serializér odmítl jako nevyřešený atribut.
+     */
+    public function testNegativeAnnualSettlementResultIsSerializedWithSign(): void
+    {
+        $payload = $this->resolution()->requireResolvedDocument()->payload;
+        $payload['people'][0]['summary']['annual'] = [
+            'performed' => true,
+            'result' => [
+                'settlement_difference_czk' => -230,
+                'tax_difference_czk' => 0,
+                'bonus_difference_czk' => -230,
+                'spouse_credit_claimed' => false,
+                'child_credit_claimed' => false,
+            ],
+        ];
+
+        $xml = (new JmhzScenario1XmlValidator())->dryRun(
+            new JmhzScenario1Resolution(new JmhzScenario1NormalizedDocument($payload), []),
+            $this->envelope(),
+        )['xml'];
+
+        self::assertStringContainsString('<form:preplatekRok>-230</form:preplatekRok>', $xml);
+        self::assertStringContainsString('<form:danPreplatekRok>0</form:danPreplatekRok>', $xml);
+        self::assertStringContainsString(
+            '<form:danBonusPreplatekRok>-230</form:danBonusPreplatekRok>',
+            $xml,
+        );
+        self::assertSame([], $this->failedControls($xml, [78]));
+    }
+
+    /**
+     * Pravidla podání JMHZ 1.4.5, kap. 3: opravné hlášení nad limit součástí
+     * balíku se dělí do dílčích podání. Souhrn a pojistnou část nese jen první
+     * balík, všechny nesou GUID řádného podání a úhrn formulářů celkem.
+     * Limit je tu snížený na 1, aby šly dva balíky postavit ze dvou vztahů.
+     */
+    public function testContentCorrectionAboveThePackageLimitIsSplit(): void
+    {
+        $payload = $this->resolution()->requireResolvedDocument()->payload;
+        $secondPerson = $payload['people'][0];
+        $secondPerson['employee_id'] = 12;
+        $secondPerson['employments'][0]['employment_id'] = 102;
+        $payload['people'][] = $secondPerson;
+
+        $result = (new JmhzScenario1XmlValidator(
+            serializer: new JmhzScenario1XmlSerializer(new JmhzPackageSplitter(1)),
+        ))->dryRunCorrectionPackages(
+            new JmhzScenario1Resolution(new JmhzScenario1NormalizedDocument($payload), []),
+            JmhzSubmissionEnvelope::createForExistingSubmission(
+                'AAAAAAAA-1111-2222-8333-BBBBBBBBBBBB',
+                [
+                    101 => 'CCCCCCCC-4444-5555-8666-DDDDDDDDDDDD',
+                    102 => 'CCCCCCCC-4444-5555-8666-DDDDDDDDDDDE',
+                ],
+                '2026-08-26T09:30:00Z',
+                'MyÚčto.cz',
+                '5.6.0',
+            ),
+            JmhzContentCorrectionPlan::create([
+                JmhzContentCorrectionForm::amendAccepted(
+                    101,
+                    'CCCCCCCC-4444-5555-8666-DDDDDDDDDDDD',
+                    affectsSummary: true,
+                    affectsPvpoj: true,
+                ),
+                JmhzContentCorrectionForm::amendAccepted(
+                    102,
+                    'CCCCCCCC-4444-5555-8666-DDDDDDDDDDDE',
+                    affectsSummary: true,
+                    affectsPvpoj: true,
+                ),
+            ]),
+        );
+
+        self::assertCount(2, $result['packages']);
+        [$first, $second] = array_column($result['packages'], 'xml');
+        foreach ([$first, $second] as $xml) {
+            self::assertStringContainsString('<idPodani>AAAAAAAA-1111-2222-8333-BBBBBBBBBBBB</idPodani>', $xml);
+            self::assertStringContainsString('<typPodani>O</typPodani>', $xml);
+            self::assertStringContainsString('<balikyPocet>2</balikyPocet>', $xml);
+            self::assertStringContainsString('<formularePocetCelkem>4</formularePocetCelkem>', $xml);
+            self::assertSame(1, substr_count($xml, '<formularOsoby'));
+        }
+        self::assertStringContainsString('<balikPoradi>1</balikPoradi>', $first);
+        self::assertStringContainsString('<formularePocetVBaliku>3</formularePocetVBaliku>', $first);
+        self::assertStringContainsString('<so:souhrn', $first);
+        self::assertStringContainsString('<pvpoj:PVPOJ', $first);
+        self::assertStringContainsString('<balikPoradi>2</balikPoradi>', $second);
+        self::assertStringContainsString('<formularePocetVBaliku>1</formularePocetVBaliku>', $second);
+        self::assertStringNotContainsString('<so:souhrn', $second);
+        self::assertStringNotContainsString('<pvpoj:PVPOJ', $second);
+    }
+
+    /**
+     * Limit balíku se poměřuje s opravovanými součástmi, ne s celou přípravou:
+     * oprava jediného vztahu ve firmě s 1 501 zaměstnanci je jeden balík.
+     */
+    public function testCorrectionOfOneFormInALargePreparationIsOnePackage(): void
+    {
+        $payload = $this->resolution()->requireResolvedDocument()->payload;
+        $template = $payload['people'][0];
+        for ($index = 1; $index <= 1500; ++$index) {
+            $person = $template;
+            $person['employee_id'] = 10_000 + $index;
+            $person['employments'][0]['employment_id'] = 20_000 + $index;
+            $payload['people'][] = $person;
+        }
+
+        $result = (new JmhzScenario1XmlValidator())->dryRunCorrection(
+            new JmhzScenario1Resolution(new JmhzScenario1NormalizedDocument($payload), []),
+            JmhzSubmissionEnvelope::createForExistingSubmission(
+                'AAAAAAAA-1111-2222-8333-BBBBBBBBBBBB',
+                [101 => 'CCCCCCCC-4444-5555-8666-DDDDDDDDDDDD'],
+                '2026-08-26T09:30:00Z',
+                'MyÚčto.cz',
+                '5.6.0',
+            ),
+            JmhzContentCorrectionPlan::create([
+                JmhzContentCorrectionForm::amendAccepted(
+                    101,
+                    'CCCCCCCC-4444-5555-8666-DDDDDDDDDDDD',
+                    affectsSummary: false,
+                    affectsPvpoj: false,
+                ),
+            ]),
+        );
+
+        self::assertSame(1, substr_count($result['xml'], '<formularOsoby'));
+        self::assertStringContainsString('<formularePocetCelkem>1</formularePocetCelkem>', $result['xml']);
     }
 
     public function testCorrectionAggregatesComeFromTheWholePreparationNotSelectedForms(): void
@@ -1523,6 +1659,102 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
             '<pvpoj:pojistneSleva>50</pvpoj:pojistneSleva>',
             $result['xml'],
         );
+    }
+
+    /**
+     * 10373 je týdenní doba ze všech pracovních poměrů osoby u zaměstnavatele
+     * dohromady (Pokyny k vyplnění MH kap. 3.6.9). Má-li osoba vedle vztahu se
+     * slevou (20 h) ještě druhý pracovní poměr (8 h), vykazuje se 28 h, tedy
+     * úhrn, který výsledek pojistného nese u vztahu se slevou.
+     */
+    public function testShorterWorkingTimeIsTheTotalOfAllEmploymentsOfThePerson(): void
+    {
+        $payload = $this->payloadWithDiscount();
+        $payload['people'][0]['employments'][0]['insurance']
+            ['part_time_discount_weekly_working_millihours_total'] = 28_000;
+
+        $xml = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload, $this->discountPvpoj()),
+            $this->envelope(),
+        )['xml'];
+
+        self::assertStringContainsString(
+            '<form:pracovniDobaKratsi>28.00</form:pracovniDobaKratsi>',
+            $xml,
+        );
+    }
+
+    /**
+     * Výsledek zmrazený dřív úhrn nenese. Vlastní sjednanou dobu lze vzít jen
+     * u osoby s jediným pracovním poměrem; s druhým by hlášení vykázalo
+     * kratší rozsah, než jaký zaměstnanec u zaměstnavatele má.
+     */
+    public function testLegacyResultWithoutTotalIsRefusedForMoreEmployments(): void
+    {
+        $payload = $this->payloadWithDiscount();
+        $second = $payload['people'][0]['employments'][0];
+        $second['employment_id'] = 102;
+        $second['insurance'] = [
+            'relationship_id' => 'employment:102',
+            'kind' => 'employment',
+        ] + $second['insurance'];
+        unset(
+            $second['insurance']['part_time_employer_discount'],
+            $second['insurance']['part_time_employer_discount_outcome'],
+            $second['insurance']['part_time_employer_discount_reason'],
+        );
+        $payload['people'][0]['employments'][] = $second;
+
+        $resolution = $this->resolutionFor($payload, $this->discountPvpoj());
+
+        self::assertContains(
+            'jmhz_employer_part_time_discount_working_time_unresolved',
+            array_map(
+                static fn ($blocker): string => $blocker->code,
+                $resolution->blockers,
+            ),
+        );
+    }
+
+    /**
+     * Měsíc dovršení důchodového věku jako dvě sekce ELDP (pravidla podání
+     * JMHZ 1.4.5, kap. 4): obě jdou do hlášení a projdou XSD i kontrolami
+     * sekcí, včetně 3. části kontroly 59 (sekce před dovršením má základ 0).
+     */
+    public function testPensionAgeSplitSectionsAreSerializedAndPassSectionControls(): void
+    {
+        $payload = $this->payload();
+        $payload['people'][0]['employments'][0]['eldp']['eldp_sections'] = [
+            [
+                'ordinal' => 1,
+                'code' => '1++',
+                'valid_from' => '2026-07-01',
+                'valid_to' => '2026-07-15',
+                'insurance_days' => 15,
+                'assessment_base_czk' => 0,
+                'excluded_days' => null,
+                'deducted_days' => null,
+            ],
+            [
+                'ordinal' => 2,
+                'code' => '1D+',
+                'valid_from' => '2026-07-16',
+                'valid_to' => '2026-07-31',
+                'insurance_days' => 16,
+                'assessment_base_czk' => 1_000,
+                'excluded_days' => null,
+                'deducted_days' => null,
+            ],
+        ];
+
+        $xml = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        )['xml'];
+
+        self::assertSame(2, substr_count($xml, '<form:eldp>'));
+        self::assertStringContainsString('<form:kod>1D+</form:kod>', $xml);
+        self::assertSame([], $this->failedControls($xml, [59, 99, 100, 134, 135, 330]));
     }
 
     /**

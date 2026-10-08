@@ -10,7 +10,10 @@ use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCancellationXmlSerializer;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzComponentCancellationXmlSerializer;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCorrectiveSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPackageSplitter;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEffectiveFormLedgerResolver;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEffectiveFormStateResolver;
@@ -50,7 +53,10 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
     private const SUBMISSION_GUID = 'AAAABBBB-1111-7222-8333-CCCCDDDDEEEE';
     private const FORM_GUID = 'AAAABBBB-1111-7222-8333-CCCCDDDDEEEF';
     private const SECOND_FORM_GUID = 'AAAABBBB-1111-7222-8333-CCCCDDDDEEF0';
+    private const THIRD_FORM_GUID = 'AAAABBBB-1111-7222-8333-CCCCDDDDEEF1';
     private const VARIABLE_SYMBOL = '9990000001';
+
+    private bool $thirdForm = false;
 
     private Connection $db;
     private PayrollSubmissionRepository $repository;
@@ -216,6 +222,62 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
         self::assertSame(self::SUBMISSION_GUID, $this->headerValue($xml, 'idPodani'));
         self::assertStringContainsString(self::FORM_GUID, $xml);
         self::assertStringContainsString('<typFormulare>S</typFormulare>', $xml);
+    }
+
+    /**
+     * Pravidla podání JMHZ 1.4.5, kap. 3: storno víc součástí, než pojme
+     * balík, se zmrazí jako dílčí balíky jednoho podání — součást a artefakt
+     * na balík s příponou `:package:N`, podle které je odeslání najde. Limit je
+     * tu snížený na 1, aby šly dva balíky postavit ze dvou storen.
+     */
+    public function testComponentCancellationAboveThePackageLimitIsFrozenAsPackages(): void
+    {
+        $this->thirdForm = true;
+        $original = $this->acceptedRegularSubmission();
+        $corrections = new JmhzCorrectiveSubmissionService(
+            $this->repository,
+            $this->submissions,
+            $this->obligations,
+            new JmhzFrozenPayloadReader($this->repository, $this->submissions),
+            $this->clock,
+            new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider()),
+            new JmhzCancellationXmlSerializer(),
+            new JmhzComponentCancellationXmlSerializer(new JmhzPackageSplitter(1)),
+        );
+
+        $amendment = $corrections->cancelComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            [self::FORM_GUID, self::SECOND_FORM_GUID],
+        );
+
+        $packages = $this->repository->listPackageOutboundXmlArtifacts(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $amendment['submission_id'],
+        );
+        self::assertSame([1, 2], array_column($packages, 'ordinal'));
+        self::assertSame($packages[0]['artifact_id'], $amendment['artifact_id']);
+        foreach ($packages as $package) {
+            $xml = $this->submissions->artifactBytes($this->supplierId, $package['artifact_id']);
+            self::assertSame('O', $this->headerValue($xml, 'typPodani'));
+            self::assertSame(self::SUBMISSION_GUID, $this->headerValue($xml, 'idPodani'));
+            self::assertSame((string) $package['ordinal'], $this->headerValue($xml, 'balikPoradi'));
+            self::assertSame('2', $this->headerValue($xml, 'balikyPocet'));
+            self::assertSame('1', $this->headerValue($xml, 'formularePocetVBaliku'));
+            self::assertSame('2', $this->headerValue($xml, 'formularePocetCelkem'));
+        }
+
+        $this->clock->modify('+1 second');
+        $again = $corrections->cancelComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            [self::SECOND_FORM_GUID, self::FORM_GUID],
+        );
+        self::assertFalse($again['created']);
+        self::assertSame($amendment['artifact_id'], $again['artifact_id']);
     }
 
     public function testComponentCancellationAfterTheDeadlineIsRefused(): void
@@ -1012,7 +1074,18 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
             . '<form:ikMpsv>1234567891</form:ikMpsv>'
             . '<form:idPpv>987654322</form:idPpv>'
             . '</form:identifikace></form:bezPriznaku>'
-            . '</formularOsoby></formulareOsob></jmhz>';
+            . '</formularOsoby>'
+            . ($this->thirdForm
+                ? '<formularOsoby><hlavicka>'
+                    . '<idFormulare>' . self::THIRD_FORM_GUID . '</idFormulare>'
+                    . '<typFormulare>R</typFormulare>'
+                    . '</hlavicka><form:bezPriznaku><form:identifikace>'
+                    . '<form:ikMpsv>1234567892</form:ikMpsv>'
+                    . '<form:idPpv>987654323</form:idPpv>'
+                    . '</form:identifikace></form:bezPriznaku>'
+                    . '</formularOsoby>'
+                : '')
+            . '</formulareOsob></jmhz>';
     }
 
     private function headerValue(string $xml, string $element): string

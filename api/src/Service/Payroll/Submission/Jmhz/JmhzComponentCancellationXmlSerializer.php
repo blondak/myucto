@@ -30,7 +30,14 @@ final class JmhzComponentCancellationXmlSerializer
 {
     private const XMLNS = 'http://www.w3.org/2000/xmlns/';
 
+    public function __construct(
+        private readonly JmhzPackageSplitter $packageSplitter = new JmhzPackageSplitter(),
+    ) {}
+
     /**
+     * Storno součástí v jediném balíku; nad limit balíku viz
+     * {@see self::serializePackages()}.
+     *
      * @param list<JmhzComponentCancellation> $cancellations
      */
     public function serialize(
@@ -38,6 +45,32 @@ final class JmhzComponentCancellationXmlSerializer
         array $cancellations,
         JmhzSubmissionEnvelope $envelope,
     ): string {
+        $packages = $this->serializePackages($request, $cancellations, $envelope);
+        if (count($packages) !== 1) {
+            throw new JmhzXmlException(
+                'jmhz_xml_form_limit_exceeded',
+                'Nad 1500 stornovaných součástí se opravné hlášení dělí do dílčích balíků'
+                    . ' (serializePackages).',
+            );
+        }
+
+        return $packages[0];
+    }
+
+    /**
+     * Storno součástí rozdělené do dílčích balíků. Pravidla podání JMHZ 1.4.5,
+     * kap. 3: opravné hlášení s více než 1500 opravenými nebo stornovanými
+     * součástmi se dělí do více dílčích podání; každý balík nese GUID řádného
+     * podání a týž čas vyplnění, liší se pořadím a počtem součástí.
+     *
+     * @param list<JmhzComponentCancellation> $cancellations
+     * @return list<string>
+     */
+    public function serializePackages(
+        JmhzCancellationRequest $request,
+        array $cancellations,
+        JmhzSubmissionEnvelope $envelope,
+    ): array {
         if ($cancellations === []) {
             throw new JmhzXmlException(
                 'jmhz_amendment_without_components',
@@ -58,6 +91,27 @@ final class JmhzComponentCancellationXmlSerializer
             );
         }
 
+        $chunks = $this->packageSplitter->split($cancellations);
+        $packages = [];
+        foreach ($chunks as $index => $chunk) {
+            $packages[] = $this->package(
+                $request,
+                $chunk,
+                $envelope->forPackage($index + 1, count($chunks)),
+                count($cancellations),
+            );
+        }
+
+        return $packages;
+    }
+
+    /** @param list<JmhzComponentCancellation> $cancellations */
+    private function package(
+        JmhzCancellationRequest $request,
+        array $cancellations,
+        JmhzSubmissionEnvelope $envelope,
+        int $total,
+    ): string {
         $dom = new DOMDocument('1.0', 'UTF-8');
         $dom->formatOutput = true;
         $root = $dom->createElementNS(JmhzSchemaCatalog::NS_PODANI, 'jmhz');
@@ -92,7 +146,7 @@ final class JmhzComponentCancellationXmlSerializer
             'balikPoradi' => (string) $envelope->packageOrdinal,
             'balikyPocet' => (string) $envelope->packageCount,
             'formularePocetVBaliku' => (string) $count,
-            'formularePocetCelkem' => (string) $count,
+            'formularePocetCelkem' => (string) $total,
         ] as $name => $value) {
             $header->appendChild(
                 $dom->createElementNS(JmhzSchemaCatalog::NS_PODANI, $name, $value),

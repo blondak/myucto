@@ -576,6 +576,15 @@ a vyměřovací základ ELDP), vyloučené dny podle § 18 ale nese dál. Za
 pracujícího důchodce aplikace považuje zaměstnance s ověřenou slevou
 pracujícího důchodce v zákonné evidenci osoby.
 
+**Zaměstnanec po dosažení důchodového věku** bez ověřené slevy pracujícího
+důchodce: důchodové údaje (den dosažení důchodového věku, předčasný starobní
+důchod) se potvrzují jen ve formuláři evidenčního listu a měsíční hlášení je
+zatím nepřebírá. Kód ELDP v hlášení proto vyjde bez druhého znaku `D`.
+U zaměstnance, který starobní důchod nepobírá, se navíc nevykážou odečítané
+doby (10375) za nemoc, ošetřování, mateřskou, otcovskou, neplacené volno
+nebo neomluvenou absenci. Hlášení za takový vztah podejte ručně přes ePortál
+ČSSZ, nebo vztah odložte.
+
 Měsíc porodu, ve kterém zaměstnankyně pobírá peněžitou pomoc v mateřství a nemá
 žádný započitatelný příjem, se vykazuje jako měsíc účasti na pojištění, nikoli
 jako vyloučená doba.
@@ -1295,6 +1304,23 @@ mzdy), se hlásí u konkrétního pracovního vztahu stejně jako ostatní. Tech
 vada přípravy (změněné podklady, nesouhlasící otisk) nabídne tlačítko **Spustit
 test znovu**. Případ, který aplikace záměrně nezpracovává automaticky, řekne,
 že se podává ručně přes ePortál ČSSZ.
+
+Měsíční hlášení aplikace sestaví pro běžný formulář (druh činnosti 1 až 9
+s bližším určením 1, dohody A až J a T až ZC, druhy 15 a 16), pro formulář
+cinnostKS u druhu činnosti K a N až S s bližším určením 1 (jednatel, společník,
+prokurista, člen orgánu) a pro odložený příjem typu 1. Pracovní vztah lze
+evidovat a přihlásit i v ostatních scénářích, jejich formulář ale aplikace do
+hlášení nesestaví a test u vztahu ohlásí nález s pokynem podat hlášení ručně
+přes ePortál ČSSZ (nebo vztah odložit):
+
+| Scénář | Kdy nastane | Formulář |
+|---|---|---|
+| 2 | odměna pěstouna, druh činnosti M | pestoun |
+| 3 | pracovní vztah specifické skupiny (druh činnosti 1 až 9 s bližším určením 3), druh K a N až S s jiným bližším určením než 1 | cinnostKS |
+| 4 | výkon trestu nebo zabezpečovací detence (bližší určení 2) | vezen |
+| 5 | druh činnosti 11, 13 nebo 14 | jinyPrijem |
+| 6 | druh činnosti 12 | mezinarodniPronajemSily |
+| 7 | druh činnosti 10 | ozpTpp |
 
 ### 85.11.5 Odložení vztahu z řádného hlášení
 

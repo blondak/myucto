@@ -486,6 +486,7 @@ final class JmhzEldpEvidenceBuilder
         $code = $confirmation['code'] ?? null;
         $confirmedBase = $confirmation['assessment_base_czk'] ?? null;
         $entryMetadata = null;
+        $splitFrom = null;
         if ($eldpReported) {
             if (!is_string($code)
                 || $code !== $this->eldpCode($activityCode, $source, $insuranceFrom, $insuranceTo)
@@ -493,6 +494,14 @@ final class JmhzEldpEvidenceBuilder
                 $this->invalid('jmhz_eldp_code_activity_mismatch', 'Kód ELDP neodpovídá činnosti pracovního vztahu.');
             }
             $entryMetadata = $this->codebook()->requireValue('kod_eldp', $code);
+            $splitFrom = $this->pensionAgeSplitFrom($source, $insuranceFrom, $insuranceTo);
+            if ($splitFrom !== null && !$insured) {
+                $this->invalid(
+                    'eldp_pension_age_mid_month_unsupported',
+                    "Kód ELDP se mění uprostřed měsíce (od {$splitFrom}) v měsíci mimo dobu pojištění;"
+                    . ' takový měsíc aplikace na dvě sekce nerozdělí.',
+                );
+            }
             // Nulový základ u účastného vztahu je legitimní: měsíc mimo dobu
             // pojištění, nebo měsíc celý v omluvné nepřítomnosti (nemoc,
             // ošetřovné), který dobou pojištění zůstává. Který z nich nastal,
@@ -504,14 +513,17 @@ final class JmhzEldpEvidenceBuilder
             if ($confirmedBase * 100 !== $uncappedBase) {
                 $this->invalid('jmhz_eldp_assessment_base_mismatch', 'Potvrzený základ ELDP neodpovídá zákonnému výsledku.');
             }
-            if (($code[strlen($code) - 2] ?? '') === 'D') {
+            if (($code[strlen($code) - 2] ?? '') === 'D'
+                && $this->pensionAgeWithoutPension($source, $splitFrom ?? $insuranceFrom, $insuranceTo)
+            ) {
                 /*
-                 * Po dovršení důchodového věku se vykazují odečtené doby
-                 * (10375 a 10462–10469, interakce IN04) a dny jsou interval
-                 * minus odečtené doby. Odvodí je tentýž modul jako u ročního
-                 * listu; měsíční hlášení je ale zatím zapsat neumí, takže
-                 * měsíc s nenulovými odečtenými dobami zastaví — nikdy je
-                 * nevynechá, ČSSZ by hlášení odmítla (logické testy 39 a 48).
+                 * Odečtené doby (10375 a 10462–10469, interakce IN04) má jen
+                 * pojištěnec po dovršení důchodového věku, který starobní
+                 * důchod nepobírá; předčasný důchod je důchod. Dny jsou pak
+                 * interval minus odečtené doby. Odvodí je tentýž modul jako
+                 * u ročního listu; měsíční hlášení je ale zatím zapsat neumí,
+                 * takže měsíc s nenulovými odečtenými dobami zastaví — nikdy
+                 * je nevynechá, ČSSZ by hlášení odmítla (logické testy 39 a 48).
                  */
                 $deducted = (new EldpExcludedPeriodDeriver())->deriveDeducted(
                     $absences,
@@ -606,7 +618,19 @@ final class JmhzEldpEvidenceBuilder
                 'insurance_from' => $insuranceFrom,
                 'insurance_to' => $insuranceTo,
             ],
-            'eldp_sections' => [[
+            'eldp_sections' => $splitFrom !== null && is_string($code) && is_int($confirmedBase)
+                ? $this->pensionAgeSections(
+                    $absences,
+                    $activityCode,
+                    $code,
+                    $insuranceFrom,
+                    $insuranceTo,
+                    $splitFrom,
+                    $confirmedBase,
+                    $excluded,
+                    $participates,
+                )
+                : [[
                 'ordinal' => 1,
                 'code' => $code,
                 'valid_from' => $validFrom,
@@ -655,11 +679,14 @@ final class JmhzEldpEvidenceBuilder
      * ({@see EldpPensionAgeCode}), takže se osoba v listu a v hlášení nemůže
      * rozejít.
      *
-     * Důchodové údaje nese zdroj jen tam, kde je zaměstnavatel potvrdil
-     * (`$source['pension_status']`: `pension_age_reached_on`, `early_pension_from`);
-     * bez nich zůstává „++" a zmrazené snapshoty dřívějších měsíců se tím
-     * nemění. Den, kdy kód začíná uprostřed měsíce, nejde zachytit, vyměřovací
-     * základ se v hlášení vede za celý měsíc, a měsíc se zastaví.
+     * Důchodové údaje čte z `$source['pension_status']` (`pension_age_reached_on`,
+     * `early_pension_from`); bez nich zůstává „++" a zmrazené snapshoty
+     * dřívějších měsíců se tím nemění. Zdroj řezu
+     * ({@see \MyInvoice\Repository\Payroll\JmhzEldpEvidenceSnapshotRepository::lockSource()})
+     * je zatím nenese: potvrzují se jen v ročním evidenčním listu. Kód D,
+     * dělení měsíce dovršení věku i blokace odečítaných dob se proto v provozu
+     * nespustí, dokud je nenaplní evidence osoby. Předčasný důchod uprostřed
+     * měsíce se zastaví, protože pravidla podání rozdělení základu nestanoví.
      *
      * @param array<string,mixed> $source
      */
@@ -672,17 +699,137 @@ final class JmhzEldpEvidenceBuilder
         $code = $activityCode . '++';
         $codeFrom = $this->pensionAgeCodeFrom($source);
         $placement = EldpPensionAgeCode::placement($codeFrom, $insuranceFrom, $insuranceTo);
-        if ($placement === EldpPensionAgeCode::MID_INTERVAL) {
+        if ($placement === EldpPensionAgeCode::MID_INTERVAL
+            && $this->pensionAgeSplitFrom($source, $insuranceFrom, $insuranceTo) === null
+        ) {
             $this->invalid(
                 'eldp_pension_age_mid_month_unsupported',
-                "Kód ELDP se mění uprostřed měsíce (od {$codeFrom}: dovršení důchodového věku nebo předčasný "
-                . 'starobní důchod). Vyměřovací základ se v hlášení vede za celý měsíc a nejde rozdělit na dvě sekce.',
+                "Kód ELDP se mění uprostřed měsíce (od {$codeFrom}: přiznání předčasného starobního "
+                . 'důchodu). Rozdělení vyměřovacího základu mezi dvě sekce pro tento případ pravidla'
+                . ' podání nestanoví.',
             );
         }
 
-        return $placement === EldpPensionAgeCode::PENSION_AGE
-            ? EldpPensionAgeCode::withPensionAge($code)
-            : $code;
+        // Měsíc, ve kterém kód D začíná dovršením důchodového věku, potvrzuje
+        // účetní kódem D; sekci před tím dnem odvodí řez sám.
+        return $placement === EldpPensionAgeCode::PLAIN
+            ? $code
+            : EldpPensionAgeCode::withPensionAge($code);
+    }
+
+    /**
+     * Den dovršení důchodového věku uvnitř intervalu pojištění, od kterého se
+     * měsíc dělí na dvě sekce ELDP; jinak `null`.
+     *
+     * Pravidla podání JMHZ 1.4.5, kap. 4: změní-li se kód ELDP v měsíci, má
+     * každý kód samostatný záznam s vlastními dny a vyměřovacím základem.
+     * Kontrola 59 (3. část) určuje rozdělení základu: navazuje-li na sekci
+     * před dovršením věku sekce s kódem D téže činnosti a se započtenými dny,
+     * má sekce před dovršením základ 0 a celý základ měsíce nese sekce D.
+     * Pravidlo mluví o dovršení důchodového věku; pro předčasný starobní
+     * důchod uvnitř měsíce rozdělení nestanoví, a ten se proto nedělí.
+     *
+     * @param array<string,mixed> $source
+     */
+    private function pensionAgeSplitFrom(array $source, string $intervalFrom, string $intervalTo): ?string
+    {
+        $codeFrom = $this->pensionAgeCodeFrom($source);
+        if (EldpPensionAgeCode::placement($codeFrom, $intervalFrom, $intervalTo)
+            !== EldpPensionAgeCode::MID_INTERVAL
+        ) {
+            return null;
+        }
+        $status = $this->object($source['pension_status'] ?? null, 'pension_status');
+        $earlyFrom = $status['early_pension_from'] ?? null;
+        if (($status['pension_age_reached_on'] ?? null) !== $codeFrom
+            || (is_string($earlyFrom) && $earlyFrom <= $intervalTo)
+        ) {
+            return null;
+        }
+
+        return $codeFrom;
+    }
+
+    /**
+     * Dvě sekce ELDP měsíce, ve kterém zaměstnanec dovršil důchodový věk:
+     * do dne před dovršením kód bez D a základ 0, od dovršení kód D a celý
+     * základ měsíce (kontrola 59, 3. část). Vyloučené doby i vyloučené dny
+     * § 18 odst. 7 se odvozují pro každou sekci zvlášť týmž modulem jako
+     * u celého měsíce; jejich součet musí dát úhrn měsíce.
+     *
+     * @param list<array<string,mixed>> $absences
+     * @param array{components:array<string,int>,total:int,provenance:list<array<string,mixed>>} $excluded
+     * @return list<array<string,mixed>>
+     */
+    private function pensionAgeSections(
+        array $absences,
+        string $activityCode,
+        string $code,
+        string $insuranceFrom,
+        string $insuranceTo,
+        string $splitFrom,
+        int $assessmentBaseCzk,
+        array $excluded,
+        bool $participates,
+    ): array {
+        $beforeTo = (new \DateTimeImmutable($splitFrom))->modify('-1 day')->format('Y-m-d');
+        $parts = [
+            [$activityCode . '++', $insuranceFrom, $beforeTo, 0],
+            [$code, $splitFrom, $insuranceTo, $assessmentBaseCzk],
+        ];
+        $sections = [];
+        $excludedTotal = 0;
+        foreach ($parts as $index => [$partCode, $partFrom, $partTo, $partBase]) {
+            $this->codebook()->requireValue('kod_eldp', $partCode);
+            $partDays = EldpExcludedPeriodDeriver::inclusiveDays($partFrom, $partTo);
+            $partExcluded = (new EldpExcludedPeriodDeriver())->derive(
+                $absences,
+                $partFrom,
+                $partTo,
+                substr($partFrom, 0, 7),
+            );
+            if ($partExcluded['blockers'] !== []
+                || array_sum($partExcluded['components']) !== $partExcluded['total']
+                || $partExcluded['total'] > $partDays
+            ) {
+                $this->invalid(
+                    'jmhz_eldp_absences_unsupported',
+                    'Nepřítomnost nelze bezpečně rozdělit na vyloučené doby sekcí před dovršením'
+                        . ' důchodového věku a po něm.',
+                );
+            }
+            $excludedTotal += $partExcluded['total'];
+            $partSection18 = $this->section18Periods(
+                $absences,
+                $partFrom,
+                $partTo,
+                $participates ? $partDays : 0,
+                $partExcluded['total'],
+            );
+            $sections[] = [
+                'ordinal' => $index + 1,
+                'code' => $partCode,
+                'valid_from' => $partFrom,
+                'valid_to' => $partTo,
+                'insurance_days' => $partDays,
+                'assessment_base_czk' => $partBase,
+                'excluded_days' => $partExcluded['components'],
+                'excluded_days_total' => $partExcluded['total'],
+                'excluded_days_provenance' => $partExcluded['provenance'],
+                'section18_days' => $partSection18['components'] ?? null,
+                'section18_days_total' => $partSection18['total'] ?? null,
+                'section18_days_provenance' => $partSection18['provenance'] ?? [],
+                'deducted_days_total' => null,
+            ];
+        }
+        if ($excludedTotal !== $excluded['total']) {
+            $this->invalid(
+                'jmhz_eldp_excluded_days_sum_mismatch',
+                'Vyloučené doby sekcí před dovršením důchodového věku a po něm nedávají úhrn měsíce.',
+            );
+        }
+
+        return $sections;
     }
 
     /**
@@ -705,6 +852,37 @@ final class JmhzEldpEvidenceBuilder
         }
 
         return EldpPensionAgeCode::codeFrom($dates);
+    }
+
+    /**
+     * Dovršila osoba důchodový věk před intervalem a nepobírá v něm starobní
+     * důchod? Jen pro ni se vedou odečítané doby (datový slovník JMHZ 1.4.1.6
+     * u 10375: „pojištěnec, který … nepobírá starobní důchod a je výdělečně
+     * činný po dovršení důchodového věku"). Předčasný důchod je důchod, takže
+     * kód D z něj odečítané doby nezakládá.
+     *
+     * @param array<string,mixed> $source
+     */
+    private function pensionAgeWithoutPension(array $source, string $intervalFrom, string $intervalTo): bool
+    {
+        $status = $source['pension_status'] ?? null;
+        if ($status === null) {
+            return false;
+        }
+        $status = $this->object($status, 'pension_status');
+        $reachedOn = ($status['pension_age_reached_on'] ?? null) === null
+            ? null
+            : $this->date($status['pension_age_reached_on'], 'pension_status.pension_age_reached_on');
+        if ($reachedOn === null || $reachedOn > $intervalFrom) {
+            return false;
+        }
+        $earlyFrom = ($status['early_pension_from'] ?? null) === null
+            ? null
+            : $this->date($status['early_pension_from'], 'pension_status.early_pension_from');
+        $fullPaidFrom = $status['full_pension_paid_from'] ?? null;
+
+        return ($earlyFrom === null || $earlyFrom > $intervalTo)
+            && (!is_string($fullPaidFrom) || $fullPaidFrom > substr($intervalTo, 0, 7));
     }
 
     /**

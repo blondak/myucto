@@ -629,6 +629,27 @@ final class PayrollRunStatutoryInputAssembler
                  */
                 $attribution =
                     SocialIncomeAttribution::PostTerminationPaymentMonthVerified;
+            } elseif ($employmentTo !== null
+                && $employmentTo < $periodStart
+                && self::deferredIncomeType($snapshot) === '1'
+            ) {
+                /*
+                 * Tentýž odložený příjem u vztahu, jehož účast stojí na výši
+                 * příjmu (zaměstnání malého rozsahu, DPČ, DPP, člen orgánu). Pravidla podání
+                 * JMHZ 1.4.5, kap. 6 bod 1: v součtu s příjmem posledního měsíce
+                 * výkonu může zpětně založit účast, a pak je nutná oprava
+                 * hlášení za ten měsíc (10356, 10245); opravu kvůli 10476 je
+                 * třeba zaslat vždy. Tu aplikace nesestaví, proto se měsíc
+                 * zastaví s pokynem podat hlášení i opravu ručně. Obecná výzva
+                 * „potvrďte odložený příjem" by tu jen vedla dokola.
+                 */
+                $this->issue(
+                    'social_insurance',
+                    'post_termination_deferred_income_retroactive_participation_unsupported',
+                    $personReference,
+                    $relationshipReference,
+                );
+                $attribution = SocialIncomeAttribution::Unverified;
             } else {
                 $this->issue(
                     'social_insurance',

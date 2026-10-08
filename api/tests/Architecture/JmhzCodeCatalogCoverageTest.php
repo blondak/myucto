@@ -150,6 +150,38 @@ final class JmhzCodeCatalogCoverageTest extends TestCase
         self::assertSame([], $missing);
     }
 
+    /**
+     * Kód složený interpolací (`"jmhz_{$scenarioKey}_…"`) sken literálů
+     * nevidí, takže by prošel bez druhu nápravy i bez popisku. Přesně tak se
+     * nálezy nepodporovaných scénářů 2 až 7 dostaly do UI jako „neznámá
+     * blokace". Odkazy typu `"jmhz_submission:{$id}"` kódem nejsou.
+     */
+    public function testCodesAreNeverComposedByInterpolation(): void
+    {
+        $root = dirname(__DIR__, 3);
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($root . '/' . self::SCAN, \FilesystemIterator::SKIP_DOTS),
+        );
+        $composed = [];
+        foreach ($iterator as $file) {
+            if (!$file instanceof \SplFileInfo || $file->getExtension() !== 'php') {
+                continue;
+            }
+            preg_match_all(
+                '/"((?:jmhz|eldp)_[a-z0-9_]*\{\$[^"]*)"/',
+                (string) file_get_contents($file->getPathname()),
+                $matches,
+            );
+            foreach ($matches[1] as $literal) {
+                if (!str_contains($literal, ':')) {
+                    $composed[] = $file->getFilename() . ': "' . $literal . '"';
+                }
+            }
+        }
+
+        self::assertSame([], $composed);
+    }
+
     public function testCatalogLabelsAndAllowlistHaveNoStaleEntries(): void
     {
         $present = $this->emittedLiterals();

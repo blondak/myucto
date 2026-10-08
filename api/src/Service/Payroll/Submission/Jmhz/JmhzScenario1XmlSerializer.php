@@ -265,60 +265,107 @@ final class JmhzScenario1XmlSerializer
         return $failures;
     }
 
+    /**
+     * Obsahová oprava v jediném balíku. Nad limit součástí balíku se oprava
+     * dělí, viz {@see self::serializeCorrectionPackages()}.
+     */
     public function serializeCorrection(
         JmhzScenario1NormalizedDocument $document,
         JmhzSubmissionEnvelope $envelope,
         JmhzContentCorrectionPlan $plan,
     ): string {
-        $payload = $document->payload;
-        $this->assertProfile($payload, $envelope);
-        $forms = $this->correctionPeople($payload, $envelope, $plan);
-
-        $dom = new DOMDocument('1.0', 'UTF-8');
-        $dom->formatOutput = true;
-        $root = $dom->createElementNS(JmhzSchemaCatalog::NS_PODANI, 'jmhz');
-        $dom->appendChild($root);
-        $root->setAttribute(
-            'verze',
-            (new JmhzSchemaCatalog())->entryPoint()['data_version'],
-        );
-        foreach ([
-            'xmlns:so' => JmhzSchemaCatalog::NS_SOUHRN,
-            'xmlns:pvpoj' => JmhzSchemaCatalog::NS_PVPOJ,
-            'xmlns:form' => JmhzSchemaCatalog::NS_FORM,
-        ] as $name => $namespace) {
-            $root->setAttributeNS(self::XMLNS, $name, $namespace);
+        if ($envelope->packageCount !== 1) {
+            $this->invalid(
+                'jmhz_xml_split_submission_unsupported',
+                'Jediný balík se staví s pořadím 1 z 1; dílčí balíky staví serializeCorrectionPackages.',
+            );
         }
-
-        $vendor = $dom->createElementNS(JmhzSchemaCatalog::NS_PODANI, 'VENDOR');
-        $vendor->setAttribute('productName', $envelope->productName);
-        $vendor->setAttribute('productVersion', $envelope->productVersion);
-        $root->appendChild($vendor);
-        $root->appendChild($this->correctionHeader(
-            $dom,
-            $payload,
-            $envelope,
-            count($forms)
-                + ($plan->includeSummary ? 1 : 0)
-                + ($plan->includePvpoj ? 1 : 0),
-        ));
-        if ($plan->includeSummary) {
-            $root->appendChild($this->summary($dom, $payload));
-        }
-        if ($plan->includePvpoj) {
-            $root->appendChild($this->pvpoj($dom, $payload));
-        }
-        $root->appendChild($this->correctionForms($dom, $forms, $envelope, $plan));
-
-        $xml = $dom->saveXML();
-        if ($xml === false) {
-            throw new JmhzXmlException(
-                'jmhz_xml_serialization_failed',
-                'XML obsahové opravy měsíčního hlášení nelze serializovat.',
+        $packages = $this->serializeCorrectionPackages($document, $envelope, $plan);
+        if (count($packages) !== 1) {
+            $this->invalid(
+                'jmhz_xml_form_limit_exceeded',
+                'Nad 1500 opravených součástí se opravné hlášení dělí do dílčích balíků'
+                    . ' (serializeCorrectionPackages).',
             );
         }
 
-        return rtrim($xml, "\r\n");
+        return $packages[0];
+    }
+
+    /**
+     * Obsahová oprava rozdělená do dílčích balíků.
+     *
+     * Pravidla podání JMHZ 1.4.5, kap. 3: opravné hlášení s více než 1500
+     * opravenými nebo stornovanými součástmi se dělí do více dílčích podání
+     * stejně jako řádné ({@see self::serializePackages()}). Všechny balíky
+     * nesou GUID řádného podání a týž čas vyplnění, liší se pořadím; souhrn
+     * a pojistnou část, opravují-li se, nese jen první balík. Limit se poměřuje
+     * s opravovanými součástmi, ne s celou přípravou: oprava jediného vztahu
+     * ve firmě s 2 000 zaměstnanci je jeden balík.
+     *
+     * @return list<string>
+     */
+    public function serializeCorrectionPackages(
+        JmhzScenario1NormalizedDocument $document,
+        JmhzSubmissionEnvelope $envelope,
+        JmhzContentCorrectionPlan $plan,
+    ): array {
+        $payload = $document->payload;
+        $this->assertProfile($payload, $envelope, true);
+        $forms = $this->correctionPeople($payload, $envelope, $plan);
+        $layers = ($plan->includeSummary ? 1 : 0) + ($plan->includePvpoj ? 1 : 0);
+        $chunks = $this->packageSplitter->split($forms);
+        $total = count($forms) + $layers;
+        $packages = [];
+        foreach ($chunks as $index => $chunk) {
+            $first = $index === 0;
+            $packageEnvelope = $envelope->forPackage($index + 1, count($chunks));
+            $dom = new DOMDocument('1.0', 'UTF-8');
+            $dom->formatOutput = true;
+            $root = $dom->createElementNS(JmhzSchemaCatalog::NS_PODANI, 'jmhz');
+            $dom->appendChild($root);
+            $root->setAttribute(
+                'verze',
+                (new JmhzSchemaCatalog())->entryPoint()['data_version'],
+            );
+            foreach ([
+                'xmlns:so' => JmhzSchemaCatalog::NS_SOUHRN,
+                'xmlns:pvpoj' => JmhzSchemaCatalog::NS_PVPOJ,
+                'xmlns:form' => JmhzSchemaCatalog::NS_FORM,
+            ] as $name => $namespace) {
+                $root->setAttributeNS(self::XMLNS, $name, $namespace);
+            }
+
+            $vendor = $dom->createElementNS(JmhzSchemaCatalog::NS_PODANI, 'VENDOR');
+            $vendor->setAttribute('productName', $packageEnvelope->productName);
+            $vendor->setAttribute('productVersion', $packageEnvelope->productVersion);
+            $root->appendChild($vendor);
+            $root->appendChild($this->correctionHeader(
+                $dom,
+                $payload,
+                $packageEnvelope,
+                count($chunk) + ($first ? $layers : 0),
+                $total,
+            ));
+            if ($first && $plan->includeSummary) {
+                $root->appendChild($this->summary($dom, $payload));
+            }
+            if ($first && $plan->includePvpoj) {
+                $root->appendChild($this->pvpoj($dom, $payload));
+            }
+            $root->appendChild($this->correctionForms($dom, $chunk, $packageEnvelope, $plan));
+
+            $xml = $dom->saveXML();
+            if ($xml === false) {
+                throw new JmhzXmlException(
+                    'jmhz_xml_serialization_failed',
+                    'XML obsahové opravy měsíčního hlášení nelze serializovat.',
+                );
+            }
+            $packages[] = rtrim($xml, "\r\n");
+        }
+
+        return $packages;
     }
 
     /**
@@ -452,6 +499,7 @@ final class JmhzScenario1XmlSerializer
         array $payload,
         JmhzSubmissionEnvelope $envelope,
         int $formCount,
+        ?int $totalFormCount = null,
     ): DOMElement {
         $header = $this->object($payload['header'] ?? null);
         if ($formCount > 1502) {
@@ -492,7 +540,7 @@ final class JmhzScenario1XmlSerializer
             'balikPoradi' => (string) $envelope->packageOrdinal,
             'balikyPocet' => (string) $envelope->packageCount,
             'formularePocetVBaliku' => (string) $formCount,
-            'formularePocetCelkem' => (string) $formCount,
+            'formularePocetCelkem' => (string) ($totalFormCount ?? $formCount),
         ] as $name => $value) {
             $this->text($dom, $node, JmhzSchemaCatalog::NS_PODANI, $name, $value);
         }
@@ -1331,18 +1379,29 @@ final class JmhzScenario1XmlSerializer
                     JmhzSchemaCatalog::NS_FORM,
                     'form:vysledekRocnihoZuctovani',
                 );
-                foreach ([
-                    'form:preplatekRok' => ['settlement_difference_czk', '10321'],
-                    'form:danPreplatekRok' => ['tax_difference_czk', '10322'],
-                ] as $element => [$key, $attributeId]) {
-                    $this->text(
-                        $dom,
-                        $resultNode,
-                        JmhzSchemaCatalog::NS_FORM,
-                        $element,
-                        (string) $this->int($result[$key] ?? null, $attributeId),
-                    );
-                }
+                /*
+                 * 10321 je součet 10322 + 10323 (kontrola 78) a 10323 nese
+                 * přeplacený bonus záporně, takže výsledek smí být záporný
+                 * (Pokyny MH 1.4.14 kap. 2.4.8, `cisloN14Type`). Nedoplatek
+                 * na dani se v 10322 vykazuje nulou, proto zůstává nezáporný.
+                 */
+                $this->text(
+                    $dom,
+                    $resultNode,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:preplatekRok',
+                    (string) $this->signedInt(
+                        $result['settlement_difference_czk'] ?? null,
+                        '10321',
+                    ),
+                );
+                $this->text(
+                    $dom,
+                    $resultNode,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:danPreplatekRok',
+                    (string) $this->int($result['tax_difference_czk'] ?? null, '10322'),
+                );
                 $this->text(
                     $dom,
                     $resultNode,

@@ -554,7 +554,12 @@ final readonly class JmhzSubmissionBridgeService
         return self::partReference($preparationId, $officeId) . ":package:{$ordinal}";
     }
 
-    private static function packageArtifactKey(string $artifactKey, int $ordinal): string
+    /**
+     * Klíč artefaktu a odkaz součásti dílčího balíku. Podle přípony
+     * `:package:N` hledá balíky odeslání ({@see JmhzFrozenPayloadReader::packages()}),
+     * takže ji musí nést každé rozdělené podání, řádné i opravné.
+     */
+    public static function packageArtifactKey(string $artifactKey, int $ordinal): string
     {
         return "{$artifactKey}:package:{$ordinal}";
     }

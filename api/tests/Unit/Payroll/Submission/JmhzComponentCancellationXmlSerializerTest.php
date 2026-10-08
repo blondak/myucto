@@ -119,6 +119,48 @@ final class JmhzComponentCancellationXmlSerializerTest extends TestCase
         $this->assertSchemaValid($xml);
     }
 
+    /**
+     * Pravidla podání JMHZ 1.4.5, kap. 3: opravné hlášení s více než 1500
+     * stornovanými součástmi se dělí do více dílčích podání. Dřív vznikl
+     * jediný balík s 1501 součástmi, který by ČSSZ odmítla (kontroly 300, 301).
+     */
+    public function testMoreThan1500CancellationsAreSplitIntoPackages(): void
+    {
+        $cancellations = [];
+        for ($index = 1; $index <= 1501; ++$index) {
+            $cancellations[] = JmhzComponentCancellation::create(
+                sprintf('0195E2C4-1A2B-7C3D-8E4F-%012X', $index),
+                '1000000001',
+                '2' . sprintf('%021d', $index),
+            );
+        }
+
+        $packages = (new JmhzComponentCancellationXmlSerializer())->serializePackages(
+            $this->request(),
+            $cancellations,
+            $this->envelope(),
+        );
+
+        self::assertCount(2, $packages);
+        foreach ([[1, 1500], [2, 1]] as $index => [$ordinal, $count]) {
+            $xml = $packages[$index];
+            self::assertStringContainsString('<idPodani>' . self::REGULAR_GUID . '</idPodani>', $xml);
+            self::assertStringContainsString("<balikPoradi>{$ordinal}</balikPoradi>", $xml);
+            self::assertStringContainsString('<balikyPocet>2</balikyPocet>', $xml);
+            self::assertStringContainsString("<formularePocetVBaliku>{$count}</formularePocetVBaliku>", $xml);
+            self::assertStringContainsString('<formularePocetCelkem>1501</formularePocetCelkem>', $xml);
+            self::assertSame($count, substr_count($xml, '<typFormulare>S</typFormulare>'));
+            $this->assertSchemaValid($xml);
+        }
+
+        $this->expectException(JmhzXmlException::class);
+        (new JmhzComponentCancellationXmlSerializer())->serialize(
+            $this->request(),
+            $cancellations,
+            $this->envelope(),
+        );
+    }
+
     public function testSerializationIsByteStable(): void
     {
         self::assertSame($this->serialize(), $this->serialize());

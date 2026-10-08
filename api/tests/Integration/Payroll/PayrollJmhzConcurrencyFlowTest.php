@@ -287,6 +287,40 @@ final class PayrollJmhzConcurrencyFlowTest extends TestCase
         self::assertStringContainsString('v části Odložený příjem', (string) $run['blockers'][0]['message']);
     }
 
+    /**
+     * Odložený příjem typu 1 u dohody (účast stojí na výši příjmu): pravidla
+     * podání JMHZ 1.4.5, kap. 6 bod 1 žádají opravu hlášení za poslední měsíc
+     * výkonu (důchodové údaje, když součet založí účast, a 10476 vždy). Tu
+     * aplikace nesestaví, takže běh zastaví s pokynem podat hlášení ručně,
+     * ne s výzvou potvrdit odložený příjem, který už potvrzený je.
+     */
+    public function testDeferredIncomeOnAgreementStopsTheRunWithManualFilingGuidance(): void
+    {
+        $person = $this->hire(
+            'Dobromil Dohodář',
+            'male',
+            '1974-05-19',
+            employmentType: 'dpc',
+            relationType: 'dpc',
+            weeklyHours: 10,
+            workload: 2_500,
+        );
+        $this->endEmployment($person['employment_id'], '2026-06-30');
+        $this->declareDeferredIncome($person['employment_id'], '1');
+        $this->pay($person, 300_000);
+
+        $run = $this->runPayrollMonth(self::PERIOD_START, self::PAYDAY, $this->officeId, 'concurrency-deferred-agreement');
+
+        self::assertNull($run['approved']);
+        $social = array_values(array_filter(
+            $run['blockers'],
+            static fn (array $blocker): bool => str_contains((string) $blocker['message'], 'zpětně založit účast'),
+        ));
+        self::assertCount(1, $social, CanonicalJson::encode($run['blockers']));
+        self::assertSame('statutory_calculation_manual_review', $social[0]['code']);
+        self::assertStringContainsString('ePortál ČSSZ', (string) $social[0]['message']);
+    }
+
     public function testDeferredIncomeIsRefusedForRunningEmploymentAndUnsupportedType(): void
     {
         $running = $this->hire('Bořek Trvající', 'male', '1977-03-22');

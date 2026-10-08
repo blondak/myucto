@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenarioSelectorResolver;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -64,6 +65,15 @@ final class JmhzScenarioSelectorResolverTest extends TestCase
                 : "jmhz_{$scenarioKey}_preparation_unsupported",
             $resolution['readiness_issue_code'],
         );
+        if ($scenarioKey !== 'scenario_8') {
+            // Formulář aplikace nevydává: nález musí účetní poslat podat
+            // hlášení ručně, ne skončit jako „neznámá blokace".
+            self::assertTrue(JmhzBlockerCatalog::knows((string) $resolution['readiness_issue_code']));
+            self::assertSame(
+                'manual',
+                JmhzBlockerCatalog::remediation((string) $resolution['readiness_issue_code'])['kind'],
+            );
+        }
         self::assertNotEmpty($resolution['readiness_attribute_ids']);
         self::assertMatchesRegularExpression(
             '/^[0-9a-f]{64}$/',

@@ -297,6 +297,187 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         self::assertSame(JmhzControlOutcome::Passed, $this->finding($report, 215)->outcome);
     }
 
+    /**
+     * Kontroly 126, 214, 230 a 312 — roční obdoby měsíčních kontrol dětí nad
+     * výsledkem ročního zúčtování. Neměly implementaci, takže každé podání
+     * s ročním zvýhodněním na dítě skončilo na mezeře v pokrytí.
+     */
+    public function testCompleteAnnualChildCreditPassesItsControls(): void
+    {
+        $report = $this->validate($this->annualChildCreditXml([
+            $this->annualChild('Jana', 'Nováková', '2015-04-11', '111111111111'),
+            $this->annualChild('Petr', 'Novák', '2017-06-03', 'NN2222222222'),
+            $this->annualChild('Eva', 'Nováková', '2019-08-05', 'NNNNNNNNNNNN'),
+        ]));
+
+        foreach ([126, 214, 230, 312] as $controlId) {
+            self::assertSame(
+                JmhzControlOutcome::Passed,
+                $this->finding($report, $controlId)->outcome,
+                "Kontrola {$controlId} neprošla nad úplným ročním blokem dětí.",
+            );
+        }
+    }
+
+    public function testAnnualChildOrderMustFormASequenceInEveryMonth(): void
+    {
+        $gap = $this->validate($this->annualChildCreditXml([
+            $this->annualChild('Jana', 'Nováková', '2015-04-11', '111111222222'),
+        ]));
+        self::assertContains(312, $this->failedIds($gap));
+        self::assertStringContainsString('7. měsíci', $this->finding($gap, 312)->message);
+
+        $unclaimed = $this->validate($this->annualChildCreditXml([
+            $this->annualChild('Jana', 'Nováková', '2015-04-11', '111111NNNNNN'),
+            $this->annualChild('Petr', 'Novák', '2017-06-03', '222222222222'),
+        ]));
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($unclaimed, 312)->outcome);
+    }
+
+    public function testAnnualChildOrderCollisionInOneMonthIsReported(): void
+    {
+        $report = $this->validate($this->annualChildCreditXml([
+            $this->annualChild('Jana', 'Nováková', '2015-04-11', '111111111111'),
+            $this->annualChild('Petr', 'Novák', '2017-06-03', 'NNNNNNNNNNN1'),
+        ]));
+
+        self::assertContains(230, $this->failedIds($report));
+        self::assertStringContainsString('12. měsíci', $this->finding($report, 230)->message);
+        self::assertSame(JmhzControlPassability::Passable, $this->finding($report, 230)->passability);
+    }
+
+    /**
+     * Rok zúčtování je rok před únorovým hlášením (2025). Dítě narozené
+     * 1. 3. 1999 má 26. narozeniny 1. 3. 2025, takže za březen už uplatnit
+     * nejde, za únor ještě ano.
+     */
+    public function testAnnualChildAgedTwentySixOnFirstDayOfClaimedMonthIsRefused(): void
+    {
+        $february = $this->validate($this->annualChildCreditXml([
+            $this->annualChild('Jana', 'Nováková', '1999-03-01', '11NNNNNNNNNN'),
+        ]));
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($february, 214)->outcome);
+
+        $march = $this->validate($this->annualChildCreditXml([
+            $this->annualChild('Jana', 'Nováková', '1999-03-01', '111NNNNNNNNN'),
+        ]));
+        self::assertContains(214, $this->failedIds($march));
+        self::assertStringContainsString('3. měsíce', $this->finding($march, 214)->message);
+    }
+
+    public function testAnnualOtherHouseholdCaregiverRequiresCompleteIdentity(): void
+    {
+        $caregiver = static fn (string $birth): string => '<form:jineOsoby><form:jinaOsoba>'
+            . '<form:osoba><form:jmeno>Petr</form:jmeno><form:prijmeni>Novák</form:prijmeni>'
+            . $birth . '</form:osoba>'
+            . '<form:mesiceVyzivovani>AAAAAAAAAAAA</form:mesiceVyzivovani>'
+            . '</form:jinaOsoba></form:jineOsoby>';
+
+        $incomplete = $this->validate($this->annualChildCreditXml(
+            otherCaregiver: true,
+            caregiverXml: $caregiver(''),
+        ));
+        self::assertContains(126, $this->failedIds($incomplete));
+
+        $complete = $this->validate($this->annualChildCreditXml(
+            otherCaregiver: true,
+            caregiverXml: $caregiver('<form:datumNarozeni>1985-03-07</form:datumNarozeni>'),
+        ));
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($complete, 126)->outcome);
+    }
+
+    /**
+     * Kontrola 7 — 10023 je součet 10478 (u `cinnostKS` a pěstouna 10477)
+     * přes součásti. Propustná (cJMHZ), takže nesoulad je varování.
+     */
+    public function testEmployerBaseMustMatchTheSumOfAffectedForms(): void
+    {
+        self::assertSame(
+            JmhzControlOutcome::Passed,
+            $this->finding($this->validate(JmhzXmlSample::minimal()), 7)->outcome,
+        );
+
+        $twoForms = $this->validate(JmhzXmlSample::twoForms());
+        self::assertContains(7, $this->failedIds($twoForms));
+        self::assertSame(JmhzControlPassability::Passable, $this->finding($twoForms, 7)->passability);
+
+        $statutory = str_replace(
+            ['<form:bezPriznaku>', '</form:bezPriznaku>'],
+            ['<form:cinnostKS>', '</form:cinnostKS>'],
+            preg_replace(
+                '~\s*<form:vymerovaciZakladParagraf5>.*?</form:vymerovaciZakladParagraf5>~s',
+                '',
+                JmhzXmlSample::minimal(),
+            ) ?? '',
+        );
+        self::assertSame(
+            JmhzControlOutcome::Passed,
+            $this->finding($this->validate($statutory), 7)->outcome,
+        );
+    }
+
+    /**
+     * Kontrola 59 — vyměřovací základ ELDP podle kódu a dob. Dřív stála mezi
+     * nevyhodnotitelnými s odůvodněním, že první profil nevykazuje vyloučené
+     * doby, přestože je serializér vykazuje.
+     */
+    public function testEldpAssessmentBaseFollowsTheCodeAndDays(): void
+    {
+        $section = static fn (
+            string $code,
+            string $from,
+            string $to,
+            int $days,
+            ?int $base,
+            string $tail = '',
+        ): string => '<form:eldp><form:kod>' . $code . '</form:kod>'
+            . '<form:platnostOd>' . $from . '</form:platnostOd>'
+            . '<form:platnostDo>' . $to . '</form:platnostDo>'
+            . '<form:pocetDnu>' . $days . '</form:pocetDnu>'
+            . ($base === null ? '' : '<form:vymerovaciZaklad>' . $base . '</form:vymerovaciZaklad>')
+            . $tail . '</form:eldp>';
+        $report = fn (string $sections): JmhzControlEvaluationReport => $this->validate(
+            JmhzXmlSample::document(JmhzXmlSample::form(
+                '1000000001',
+                '2000000000000000000001',
+                eldp: $sections,
+            )),
+        );
+
+        self::assertSame(
+            JmhzControlOutcome::Passed,
+            $this->finding($report($section('1++', '2026-07-01', '2026-07-31', 31, 1000)), 59)->outcome,
+        );
+
+        $withoutBase = $report($section('1P+', '2026-07-01', '2026-07-31', 0, null));
+        self::assertContains(59, $this->failedIds($withoutBase));
+        self::assertStringContainsString('1. část', $this->finding($withoutBase, 59)->message);
+
+        $wholeMonthExcluded = $report($section(
+            '1++',
+            '2026-07-01',
+            '2026-07-31',
+            31,
+            1000,
+            '<form:vylouceneDny><form:vylouceneDobyCelkem>31</form:vylouceneDobyCelkem>'
+                . '<form:docasNeschopnost>31</form:docasNeschopnost></form:vylouceneDny>',
+        ));
+        self::assertStringContainsString('2. část', $this->finding($wholeMonthExcluded, 59)->message);
+
+        $zeroDays = $report($section('1++', '2026-07-01', '2026-07-31', 0, 500));
+        self::assertStringContainsString('5. část', $this->finding($zeroDays, 59)->message);
+
+        $pensionAge = static fn (int $before, int $after): string
+            => $section('1++', '2026-07-01', '2026-07-15', 15, $before)
+                . $section('1D+', '2026-07-16', '2026-07-31', 16, $after);
+        $split = $report($pensionAge(500, 500));
+        self::assertStringContainsString('3. část', $this->finding($split, 59)->message);
+        self::assertSame(
+            JmhzControlOutcome::Passed,
+            $this->finding($report($pensionAge(0, 1000)), 59)->outcome,
+        );
+    }
+
     public function testPersonIdentifierChecksumIsEnforced(): void
     {
         $report = $this->validate(str_replace(
@@ -965,6 +1146,30 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         ));
 
         self::assertContains(103, $this->failedIds($report));
+    }
+
+    /**
+     * Kontroly 103 a 81 — uživatel dočasného přidělení identifikovaný rodným
+     * číslem (10457) je třetí přípustná identifikace a rodné číslo musí
+     * splnit modulo. Kontrola 81 dřív implementaci neměla.
+     */
+    public function testTemporaryAssignmentUserBirthNumberMustSatisfyModulo(): void
+    {
+        $xml = static fn (string $birthNumber): string => str_replace(
+            '<form:docasnePrideleniEvidovano>false</form:docasnePrideleniEvidovano>',
+            '<form:docasnePrideleniEvidovano>true</form:docasnePrideleniEvidovano>'
+                . '<form:docasnePrideleni><form:uzivatel><form:rodneCislo>' . $birthNumber
+                . '</form:rodneCislo></form:uzivatel></form:docasnePrideleni>',
+            JmhzXmlSample::minimal(),
+        );
+
+        $valid = $this->validate($xml('1504110003'));
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($valid, 81)->outcome);
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($valid, 103)->outcome);
+
+        $invalid = $this->validate($xml('1504110004'));
+        self::assertContains(81, $this->failedIds($invalid));
+        self::assertStringNotContainsString('1504110004', $this->finding($invalid, 81)->message);
     }
 
     /**
@@ -1705,6 +1910,61 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
             . '<form:datumNarozeni>' . $birthDate . '</form:datumNarozeni>'
             . '</form:dite><form:prukazZtpp>false</form:prukazZtpp>'
             . '<form:poradi>' . $order . '</form:poradi></form:vyzivovaneDite>';
+    }
+
+    /**
+     * Únorové hlášení s provedeným ročním zúčtováním za předchozí rok
+     * a uplatněným zvýhodněním na děti.
+     *
+     * @param list<string>|null $children
+     */
+    private function annualChildCreditXml(
+        ?array $children = null,
+        bool $otherCaregiver = false,
+        string $caregiverXml = '',
+    ): string {
+        $children ??= [$this->annualChild('Jana', 'Nováková', '2015-04-11', '111111111111')];
+        $flag = $otherCaregiver ? 'true' : 'false';
+        $annual = '<form:rocniUhrny>'
+            . '<form:rocniZuctovaniProvedeno>true</form:rocniZuctovaniProvedeno>'
+            . '<form:vysledekRocnihoZuctovani>'
+            . '<form:preplatekRok>0</form:preplatekRok>'
+            . '<form:danPreplatekRok>0</form:danPreplatekRok>'
+            . '<form:danBonusPreplatekRok>0</form:danBonusPreplatekRok>'
+            . '<form:uplatnenaSlevaNaPartnera>false</form:uplatnenaSlevaNaPartnera>'
+            . '<form:uplatnenoZvyhodneniNaDeti>true</form:uplatnenoZvyhodneniNaDeti>'
+            . '<form:zvyhodneniNaDeti><form:vyzivujeJinaOsoba>' . $flag
+            . '</form:vyzivujeJinaOsoba>' . $caregiverXml
+            . '<form:vyzivovaneDeti>' . implode('', $children) . '</form:vyzivovaneDeti>'
+            . '</form:zvyhodneniNaDeti>'
+            . '</form:vysledekRocnihoZuctovani>'
+            . '</form:rocniUhrny>';
+
+        $xml = str_replace(
+            '<form:prohlaseniPoplatnika>false</form:prohlaseniPoplatnika>',
+            '<form:prohlaseniPoplatnika>false</form:prohlaseniPoplatnika>' . $annual,
+            JmhzXmlSample::document(
+                JmhzXmlSample::form('1000000001', '2000000000000000000001'),
+                month: '2',
+            ),
+        );
+        $this->assertSchemaValid($xml);
+
+        return $xml;
+    }
+
+    private function annualChild(
+        string $givenName,
+        string $familyName,
+        string $birthDate,
+        string $orderMask,
+    ): string {
+        return '<form:vyzivovaneDite><form:dite>'
+            . '<form:jmeno>' . $givenName . '</form:jmeno>'
+            . '<form:prijmeni>' . $familyName . '</form:prijmeni>'
+            . '<form:datumNarozeni>' . $birthDate . '</form:datumNarozeni>'
+            . '</form:dite>'
+            . '<form:poradi>' . $orderMask . '</form:poradi></form:vyzivovaneDite>';
     }
 
     private function assertSchemaValid(string $xml): void

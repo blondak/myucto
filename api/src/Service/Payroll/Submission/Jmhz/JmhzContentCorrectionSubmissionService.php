@@ -278,7 +278,7 @@ final readonly class JmhzContentCorrectionSubmissionService
                 self::PRODUCT_NAME,
                 EpoEnvelope::appVersion() ?? '0',
             );
-            $result = $this->validator->dryRunCorrection($resolution, $envelope, $plan);
+            $result = $this->validator->dryRunCorrectionPackages($resolution, $envelope, $plan);
             $this->assertWholeCompanyControls($resolution, $identity, $current, $set);
             $obligation = $this->repository->findObligationOfSubmission(
                 $supplierId,
@@ -312,36 +312,64 @@ final readonly class JmhzContentCorrectionSubmissionService
             if (!$submission['created']) {
                 return $this->replayed($supplierId, $environment, $submission, $artifactKey);
             }
-            $part = $this->submissions->addPart(
-                $supplierId,
-                $submission['id'],
-                $submission['row_version'],
-                "jmhz25-content-correction:{$preparationId}",
-                JmhzSubmissionBridgeService::AGENDA_CODE,
-                $obligation['subject_reference'],
-                'jmhz_preparation',
-                JmhzSubmissionBridgeService::sourceEventReference($preparationId),
-                $document->sha256(),
-            );
-            $artifact = $this->submissions->storeArtifact(
-                $supplierId,
-                $submission['id'],
-                $part['submission_row_version'],
-                $part['id'],
-                'outbound_xml',
-                'outbound',
-                'application/xml',
-                $result['xml'],
-                $result['schema']['package_key'],
-                JmhzControlSourceCatalog::CATALOG_KEY,
-                self::CHANNEL,
-                $artifactKey,
-                $createdBy,
-            );
+            /*
+             * Nad 1500 opravených součástí je oprava víc dílčích balíků
+             * (Pravidla podání JMHZ 1.4.5, kap. 3). Zmrazují se naráz jako
+             * u řádného hlášení: jedno podání, součást a artefakt na balík,
+             * s příponou `:package:N`, podle které je odeslání najde.
+             */
+            $split = count($result['packages']) > 1;
+            $rowVersion = $submission['row_version'];
+            $part = null;
+            $artifact = null;
+            foreach ($result['packages'] as $package) {
+                $packagePart = $this->submissions->addPart(
+                    $supplierId,
+                    $submission['id'],
+                    $rowVersion,
+                    $split
+                        ? JmhzSubmissionBridgeService::packageArtifactKey(
+                            "jmhz25-content-correction:{$preparationId}",
+                            $package['ordinal'],
+                        )
+                        : "jmhz25-content-correction:{$preparationId}",
+                    JmhzSubmissionBridgeService::AGENDA_CODE,
+                    $obligation['subject_reference'],
+                    'jmhz_preparation',
+                    JmhzSubmissionBridgeService::sourceEventReference($preparationId),
+                    $document->sha256(),
+                );
+                $packageArtifact = $this->submissions->storeArtifact(
+                    $supplierId,
+                    $submission['id'],
+                    $packagePart['submission_row_version'],
+                    $packagePart['id'],
+                    'outbound_xml',
+                    'outbound',
+                    'application/xml',
+                    $package['xml'],
+                    $result['schema']['package_key'],
+                    JmhzControlSourceCatalog::CATALOG_KEY,
+                    self::CHANNEL,
+                    $split
+                        ? JmhzSubmissionBridgeService::packageArtifactKey($artifactKey, $package['ordinal'])
+                        : $artifactKey,
+                    $createdBy,
+                );
+                $rowVersion = $packageArtifact['submission_row_version'];
+                $part ??= $packagePart;
+                $artifact ??= $packageArtifact;
+            }
+            if ($part === null || $artifact === null) {
+                throw new JmhzXmlException(
+                    'jmhz_content_correction_without_forms',
+                    'Obsahová oprava nevytvořila žádný balík.',
+                );
+            }
             $validated = $this->submissions->transition(
                 $supplierId,
                 $submission['id'],
-                $artifact['submission_row_version'],
+                $rowVersion,
                 'validated',
             );
             $ready = $this->submissions->transition(
@@ -716,9 +744,14 @@ final readonly class JmhzContentCorrectionSubmissionService
      */
     private function replayed(int $supplierId, string $environment, array $submission, string $artifactKey): array
     {
+        // Rozdělená oprava má artefakt za každý balík; podání zastupuje první.
         $artifact = $this->repository->findArtifactByIdempotencyForUpdate(
             $supplierId,
             hash('sha256', $artifactKey, true),
+            $environment,
+        ) ?? $this->repository->findArtifactByIdempotencyForUpdate(
+            $supplierId,
+            hash('sha256', JmhzSubmissionBridgeService::packageArtifactKey($artifactKey, 1), true),
             $environment,
         );
         if ($artifact === null || $artifact['submission_id'] !== $submission['id'] || $artifact['part_id'] === null) {

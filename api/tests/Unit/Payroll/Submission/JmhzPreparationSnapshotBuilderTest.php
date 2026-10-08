@@ -338,7 +338,41 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         );
     }
 
+    /**
+     * Měsíc dovršení důchodového věku nese dvě sekce ELDP (pravidla podání
+     * JMHZ 1.4.5, kap. 4). Příprava je nesmí odmítnout jako nesoulad evidence.
+     */
+    public function testEldpEvidenceWithPensionAgeSplitIsAccepted(): void
+    {
+        $snapshot = $this->snapshotWithEldpSections([
+            ['ordinal' => 1, 'code' => '1++'],
+            ['ordinal' => 2, 'code' => '1D+'],
+        ]);
+
+        self::assertNotContains('jmhz_eldp_evidence_mismatch', $snapshot->payload['readiness_issue_codes']);
+        self::assertCount(2, $snapshot->payload['people'][0]['employments'][0]['eldp']['eldp_sections']);
+    }
+
     public function testVerifiedEldpEvidenceRemovesOnlyEldpBlocker(): void
+    {
+        $snapshot = $this->snapshotWithEldpSections([['ordinal' => 1, 'code' => '1++']]);
+
+        self::assertNotContains(
+            'jmhz_eldp_evidence_missing',
+            $snapshot->payload['readiness_issue_codes'],
+        );
+        self::assertSame(
+            '1++',
+            $snapshot->payload['people'][0]['employments'][0]['eldp']['eldp_sections'][0]['code'],
+        );
+        self::assertSame(
+            901,
+            $snapshot->payload['source_versions']['employments'][0]['eldp_evidence_id'],
+        );
+    }
+
+    /** @param list<array<string,mixed>> $sections */
+    private function snapshotWithEldpSections(array $sections): \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshot
     {
         $source = $this->source();
         $input = json_decode(
@@ -396,14 +430,11 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
                         'scenario_key' => 'scenario_1',
                     ],
                 ],
-                'eldp_sections' => [[
-                    'ordinal' => 1,
-                    'code' => '1++',
-                ]],
+                'eldp_sections' => $sections,
             ],
         ];
 
-        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+        return (new JmhzPreparationSnapshotBuilder())->build(
             7,
             'test',
             $source,
@@ -411,19 +442,6 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
             [],
             [],
             [101 => $eldp],
-        );
-
-        self::assertNotContains(
-            'jmhz_eldp_evidence_missing',
-            $snapshot->payload['readiness_issue_codes'],
-        );
-        self::assertSame(
-            '1++',
-            $snapshot->payload['people'][0]['employments'][0]['eldp']['eldp_sections'][0]['code'],
-        );
-        self::assertSame(
-            901,
-            $snapshot->payload['source_versions']['employments'][0]['eldp_evidence_id'],
         );
     }
 

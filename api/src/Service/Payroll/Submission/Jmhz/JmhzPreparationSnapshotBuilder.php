@@ -1302,7 +1302,8 @@ final class JmhzPreparationSnapshotBuilder
                     || ($sourceEvidence['work_summary_id'] ?? null) !== ($workSummary['id'] ?? null)
                     || ($sourceEvidence['work_summary_sha256'] ?? null) !== ($workSummary['summary_sha256'] ?? null)))
             || ($deferred && !is_array($payload['deferred_income'] ?? null))
-            || count($sections) !== 1
+            // Dvě sekce má jen měsíc, ve kterém zaměstnanec dovršil důchodový věk.
+            || !in_array(count($sections), [1, 2], true)
             || !is_int($eldp['id'] ?? null)
             || !is_string($eldp['source_manifest_sha256'] ?? null)
             || !is_string($eldp['snapshot_fingerprint'] ?? null)
