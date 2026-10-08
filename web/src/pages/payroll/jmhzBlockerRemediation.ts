@@ -1,6 +1,10 @@
 import type { RouteLocationRaw } from 'vue-router'
 import { apiErrorCode, apiErrorMessage } from '@/api/errors'
-import type { PayrollJmhzRemediationKind, PayrollJmhzXmlDryRunBlocker } from '@/api/payroll'
+import type {
+  PayrollJmhzProtocolRemediation,
+  PayrollJmhzRemediationKind,
+  PayrollJmhzXmlDryRunBlocker,
+} from '@/api/payroll'
 import { averageEarningsTarget } from './payrollRemediation'
 import { payrollCodeKey } from './payrollServerMessage'
 
@@ -23,6 +27,7 @@ const EMPLOYMENT_KINDS: PayrollJmhzRemediationKind[] = [
   'employment_terms',
   'employment_profile',
   'employment_identity',
+  'registration',
   'absences',
   'averages',
   'time',
@@ -93,6 +98,10 @@ export function jmhzRemediationTarget(
             : 'jmhz.person_external_identifier'),
         },
       }
+    case 'registration':
+      return employmentId === null
+        ? { name: 'payroll-people' }
+        : { name: 'payroll-people', query: { ...scope, panel: 'registration' } }
     case 'employee_identity':
       return employeeId === null
         ? { name: 'payroll-people' }
@@ -149,6 +158,27 @@ export function jmhzRemediationTarget(
     default:
       return null
   }
+}
+
+/**
+ * Cíl prokliku u chyby z protokolu ČSSZ. Protokol zná jen IK MPSV a ID PPV,
+ * ne naše ID vztahu, takže karta konkrétního zaměstnance se neotevře: vede
+ * se na agendu, kde se náprava dělá (identifikátory hledá účetní podle
+ * údajů z protokolu, které se u chyby ukazují).
+ */
+export function jmhzProtocolRemediationTarget(
+  remediation: PayrollJmhzProtocolRemediation,
+): RouteLocationRaw | null {
+  return jmhzRemediationTarget(
+    {
+      code: remediation.code,
+      entity_type: 'protocol',
+      entity_id: null,
+      attribute_ids: [],
+      remediation: { kind: remediation.kind, field: remediation.field },
+    },
+    null,
+  )
 }
 
 /**

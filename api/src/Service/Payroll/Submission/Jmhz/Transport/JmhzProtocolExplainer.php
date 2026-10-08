@@ -26,6 +26,11 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSourceCatalog;
  * `original_at_cssz`: neznamená zamítnutí, ale to, že originál podání u ČSSZ
  * je ({@see JmhzProtocolError::reportsExistingIdenticalSubmission()}).
  *
+ * U kontrol, ke kterým ČSSZ zveřejnila postup (FAQ 9. 6. 2026, Katalog
+ * kontrol 1.4.2.10), se doplní i `remediation`: kód nápravy, místo
+ * v aplikaci a atributy, které musí zůstat prázdné
+ * ({@see JmhzProtocolRemediationCatalog}). Bez nápravy zůstává `null`.
+ *
  * Doplňuje se jen to, co je doložené. Nic se nedopočítává a nic se nehádá:
  * u platformních kódů (odmítnutí na vstupu, obálka, podpis) žádná kontrola
  * neexistuje a odvodit ji z čísla by ukázalo na pravidlo, o které vůbec nešlo.
@@ -77,23 +82,31 @@ final readonly class JmhzProtocolExplainer
         ?string $ikMpsv,
         ?string $idPpv,
     ): array {
+        // Registrační protokol nese kód post DIS validace bez kontroly (viz
+        // JmhzProtocolError::fromRegistrationCode); ke kontrole 262/263 se
+        // dohledá přes touž mapu, kterou používá parser JMHZ.
+        $controlId = $error->controlId ?? JmhzProtocolError::postDisValidationControl($error->code);
         $described = [
             'code' => $error->code,
             'origin' => $error->origin->value,
             'message' => $error->message,
-            'control_id' => $error->controlId?->value,
+            'control_id' => $controlId?->value,
             'form_guid' => $formGuid,
             'ik_mpsv' => $ikMpsv,
             'id_ppv' => $idPpv,
             'control' => null,
+            'remediation' => null,
             'original_at_cssz' => $error->reportsExistingIdenticalSubmission(),
         ];
-        if ($error->controlId === null) {
+        if ($controlId === null) {
             return $described;
         }
+        // Náprava nezávisí na připnutém katalogu: kontrolu 219 katalog
+        // 1.4.2.10 zrušil, FAQ ČSSZ ji ale dál vysvětluje.
+        $described['remediation'] = JmhzProtocolRemediationCatalog::forControl($controlId);
         $catalog = $this->catalog ?? JmhzControlSourceCatalog::load();
         try {
-            $definition = $catalog->definition($error->controlId->value);
+            $definition = $catalog->definition($controlId->value);
         } catch (\OutOfBoundsException) {
             // Kontrola, kterou náš slovník nezná. Viz docblock — nedoplní se
             // nic a jde se dál; hláška z protokolu uživateli zůstává.

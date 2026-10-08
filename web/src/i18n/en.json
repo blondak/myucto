@@ -11041,12 +11041,73 @@
       "no_file": "Nothing you dropped could be read as a file. Folders and content from other pages will not work; please pick a file from disk.",
       "pick_another": "Pick another file"
     },
+    "jmhz_protocol_help": {
+      "title": "How to fix it",
+      "empty_attributes": "These attributes must carry no value at all, not even zero:",
+      "source": {
+        "cssz_faq_2026_06_09": "Source: ČSSZ FAQ on filing the monthly report (JMHZ), 9 June 2026",
+        "cssz_control_catalog_1_4_2_10": "Source: Monthly report control catalogue 1.4.2.10"
+      },
+      "steps": {
+        "jmhz_protocol_correction_guid_invalid": [
+          "In Submission status, find the regular submission for the same period that ČSSZ accepted partially.",
+          "The corrective submission must carry the GUID of that regular submission, not a new GUID. Prepare the correction of the regular submission again and send it.",
+          "ČSSZ will not accept a submission with a new GUID as a correction; do not send it again."
+        ],
+        "jmhz_protocol_correction_form_unpaired": [
+          "In the protocol, find the employee (IK MPSV and ID PPV) whose form ČSSZ rejected in the previous submission or which was missing from it.",
+          "In the corrective submission carrying the GUID of the regular submission, such an employee form is sent as new: with a new part GUID and type regular.",
+          "Prepare the corrective submission again in Submission status and send it."
+        ],
+        "jmhz_protocol_regular_submission_duplicate": [
+          "ČSSZ already holds a regular submission for this period. It will neither accept nor process another regular submission.",
+          "In Submission status, open the original regular submission and send the changes as a corrective submission with its GUID."
+        ],
+        "jmhz_protocol_tax_withholding_with_declaration": [
+          "On the employee card, check the taxpayer declaration in the statutory evidence. With a signed declaration, tax is collected as an advance, not withheld at the special rate.",
+          "Correct the declaration or the tax regime of the employment and recalculate the payroll run.",
+          "Send a corrective submission. Attributes the protocol marked as filled in incorrectly must be left out of the affected forms entirely, not even as zero."
+        ],
+        "jmhz_protocol_tax_nonresident_with_declaration": [
+          "Check that a REGZEC action 3 (change) registration has been filed for the employee with the tax residence country code (attribute 10068) “CZ” and the change effective date (attribute 10459) from 1 January 2026, or from the start date. You file the change in the registration on the employment card.",
+          "After REGZEC action 3 is accepted, wait at least 48 hours until the data propagates to the ČSSZ systems. A report sent earlier ends with the same error.",
+          "If the report went out too early, after 48 hours a corrective submission with only the summary part is enough: the GUID of the original regular submission, type O and the current values. Employee forms and PVPOJ are not sent again.",
+          "If the employee remains a non-resident with a declaration, only the basic taxpayer relief may be claimed. Remove other reliefs and benefits on the employee card and recalculate the run."
+        ],
+        "jmhz_protocol_tax_reliefs_without_declaration": [
+          "If the employee is entitled to reliefs, first record the signed taxpayer declaration in the statutory evidence on the employee card and recalculate the run.",
+          "Without a declaration, reliefs and the child tax benefit are not claimed, not even with a zero value.",
+          "Send a corrective submission. Attributes the protocol marked as filled in incorrectly must be left out of the affected forms entirely, not even as zero."
+        ],
+        "jmhz_protocol_tax_advance_with_withholding": [
+          "On the employee card, check the taxpayer declaration and the tax regime of the employment. Without a declaration and with withholding tax, advance tax is not reported.",
+          "After correcting the data, recalculate the payroll run.",
+          "Send a corrective submission. Attributes the protocol marked as filled in incorrectly must be left out of the affected forms entirely, not even as zero."
+        ],
+        "jmhz_protocol_tax_withholding_with_advance": [
+          "On the employee card, check the taxpayer declaration and the tax regime of the employment. When tax is collected as an advance, withholding tax is not reported.",
+          "After correcting the data, recalculate the payroll run.",
+          "Send a corrective submission. Attributes the protocol marked as filled in incorrectly must be left out of the affected forms entirely, not even as zero."
+        ],
+        "jmhz_protocol_employment_not_found_at_cssz": [
+          "On the employment card, check the ID PPV in the identifiers assigned by ČSSZ. It must match the registration acceptance protocol or the ČSSZ ePortal.",
+          "If the employment is not registered at ČSSZ, file the employee registration (REGZEC). If it has been filed, check that ČSSZ accepted it and wait until the registration propagates.",
+          "Then send a corrective submission with the GUID of the regular submission."
+        ],
+        "jmhz_protocol_person_not_found_at_cssz": [
+          "On the employment card, check the IK MPSV (OIČ) in the identifiers assigned by ČSSZ. It must match the registration acceptance protocol or the ČSSZ ePortal.",
+          "If the employee is not registered at ČSSZ, file the employee registration (REGZEC). If it has been filed, check that ČSSZ accepted it and wait until the registration propagates.",
+          "Then send a corrective submission with the GUID of the regular submission."
+        ]
+      }
+    },
     "jmhz_gate": {
       "unlabelled": "Finding without a description. Run the report test again; if it stays, contact support.",
       "remediation": {
         "employment_terms": "Open employment terms",
         "employment_profile": "Open ČSSZ evidence",
         "employment_identity": "Complete ČSSZ identifiers",
+        "registration": "Open employment registration",
         "employee_identity": "Open personal data",
         "statutory_evidence": "Open statutory evidence",
         "dependants": "Open dependants",
@@ -11071,6 +11132,7 @@
         "employment_terms": "Correct the value in the employment terms on the employee card. A value frozen in the payroll run takes effect only after the run is recalculated; then prepare the report again.",
         "employment_profile": "On the employment card, in the ČSSZ evidence section, fill in the answer and prepare the report again.",
         "employment_identity": "On the employment card, copy the OIČ and ID PPV from the ČSSZ protocol, or file the employee registration first.",
+        "registration": "On the employment card, in the Registration section, file or complete the employee registration (REGZEC) and prepare the report again once it is accepted.",
         "employee_identity": "On the employee card, complete the personal data (name, date of birth, birth number) and prepare the report again.",
         "statutory_evidence": "On the employee card, in the statutory evidence, complete the taxpayer declaration or discounts and recalculate the run.",
         "dependants": "On the employee card, under dependants, complete the child or claim data and recalculate the run.",
@@ -11557,6 +11619,16 @@
         "jmhz_protocol_correlation_mismatch": "The processing protocol belongs to a different submission than the one it was loaded for. Load the protocol that belongs to this submission.",
         "jmhz_protocol_correlation_missing": "The verified protocol does not state a CorrelationID, so it cannot be safely assigned to this submission.",
         "jmhz_protocol_correlation_unknown": "The submission has no stored CorrelationID, so a protocol cannot be safely assigned to it.",
+        "jmhz_protocol_correction_guid_invalid": "Error 219: the corrective submission carries a wrong GUID. It was usually sent with a new GUID instead of the GUID of the partially accepted regular submission.",
+        "jmhz_protocol_correction_form_unpaired": "Error 238: the corrective submission contains an employee form whose IK MPSV and ID PPV pair ČSSZ could not find in the previous submission. Forms that were rejected or missing before are sent in the corrective submission with a new part GUID and type regular.",
+        "jmhz_protocol_employment_not_found_at_cssz": "Control 262: ČSSZ found no insurance relationship with the stated ID PPV. The employment is not registered at ČSSZ, the registration has not propagated yet, or the ID PPV was copied incorrectly.",
+        "jmhz_protocol_person_not_found_at_cssz": "Control 263: ČSSZ found no insurance relationship with the stated IK MPSV (OIČ). The employee is not registered at ČSSZ, the registration has not propagated yet, or the IK MPSV was copied incorrectly.",
+        "jmhz_protocol_regular_submission_duplicate": "Error 326: only one regular submission may exist for a reporting period. ČSSZ will not accept another regular submission; changes are sent as a corrective submission with the GUID of the regular one.",
+        "jmhz_protocol_tax_advance_with_withholding": "Error 245: the employee has no taxpayer declaration and the income is subject to withholding tax, but the report fills in advance tax attributes.",
+        "jmhz_protocol_tax_nonresident_with_declaration": "Error 243: a tax non-resident with a signed declaration may claim only the basic taxpayer relief, not other reliefs, the child tax benefit or the special tax rate.",
+        "jmhz_protocol_tax_reliefs_without_declaration": "Error 244: the employee has no taxpayer declaration, but the report fills in tax relief or child tax benefit attributes.",
+        "jmhz_protocol_tax_withholding_with_advance": "Error 325: tax is collected as an advance, but the report fills in withholding tax attributes.",
+        "jmhz_protocol_tax_withholding_with_declaration": "Error 242: the employee has a signed taxpayer declaration, but the report applies withholding tax at the special rate.",
         "jmhz_protocol_digest_algorithm_unknown": "The signed timestamp in the protocol does not state a digest algorithm, or it is undocumented. Contact support.",
         "jmhz_protocol_digest_mismatch": "The digest signed by CSSZ does not match the protocol content; the protocol was modified after signing. Contact support.",
         "jmhz_protocol_employment_identifier_mismatch": "The employment identifier (ID PPV) in the CSSZ protocol does not match the records. Check the identifiers on the employment card.",

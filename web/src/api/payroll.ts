@@ -4211,6 +4211,7 @@ export type PayrollJmhzRemediationKind =
   | 'employment_terms'
   | 'employment_profile'
   | 'employment_identity'
+  | 'registration'
   | 'employee_identity'
   | 'statutory_evidence'
   | 'dependants'
@@ -7454,8 +7455,39 @@ export interface PayrollJmhzProtocolControl {
   attribute_ids: string[]
 }
 
+/** Kód nápravy chyby z protokolu ČSSZ (`JmhzProtocolRemediationCatalog::CODES`). */
+export type PayrollJmhzProtocolRemediationCode =
+  | 'jmhz_protocol_correction_guid_invalid'
+  | 'jmhz_protocol_correction_form_unpaired'
+  | 'jmhz_protocol_tax_withholding_with_declaration'
+  | 'jmhz_protocol_tax_nonresident_with_declaration'
+  | 'jmhz_protocol_tax_reliefs_without_declaration'
+  | 'jmhz_protocol_tax_advance_with_withholding'
+  | 'jmhz_protocol_employment_not_found_at_cssz'
+  | 'jmhz_protocol_person_not_found_at_cssz'
+  | 'jmhz_protocol_tax_withholding_with_advance'
+  | 'jmhz_protocol_regular_submission_duplicate'
+
+/** Odkud je postup nápravy doložený (`JmhzProtocolRemediationCatalog::SOURCES`). */
+export type PayrollJmhzProtocolRemediationSource =
+  | 'cssz_faq_2026_06_09'
+  | 'cssz_control_catalog_1_4_2_10'
+
+/** Co s chybou z protokolu udělat a kde v aplikaci. */
+export interface PayrollJmhzProtocolRemediation {
+  code: PayrollJmhzProtocolRemediationCode
+  kind: PayrollJmhzRemediationKind
+  field: string | null
+  source: PayrollJmhzProtocolRemediationSource
+  /** Atributy, které nesmí mít žádnou hodnotu, ani nulu. */
+  empty_attribute_ids: string[]
+}
+
 export interface PayrollJmhzProtocolError {
-  /** Číselný kód z protokolu (DIS = ID kontroly + 20000, cJMHZ = + 40000). */
+  /**
+   * Číselný kód z protokolu (DIS = ID kontroly + 20000, cJMHZ = + 40000,
+   * případně kód post DIS validace evidence ČSSZ, např. 103901608).
+   */
   code: number
   message: string
   origin: 'dis' | 'cjmhz' | 'platform'
@@ -7468,6 +7500,8 @@ export interface PayrollJmhzProtocolError {
    * Taková chyba se ukazuje syrová, nikdy se neskrývá.
    */
   control: PayrollJmhzProtocolControl | null
+  /** Doložený postup nápravy; `null` u chyby, ke které ho neznáme. */
+  remediation?: PayrollJmhzProtocolRemediation | null
   /**
    * Kontrola 22 ve variantě „shodné R nebo S už existuje": nejde o zamítnutí,
    * originál podání je u ČSSZ.
