@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 use MyInvoice\Service\Report\EpoEnvelope;
 
 /**
@@ -103,7 +104,7 @@ final readonly class JmhzScenario1XmlDryRunService
             JmhzSubmissionEnvelope::create(
                 $this->guids->next(),
                 $this->formGuids($document),
-                gmdate('Y-m-d\TH:i:s\Z'),
+                PayrollSubmissionCalendar::filledAt(),
                 self::PRODUCT_NAME,
                 EpoEnvelope::appVersion() ?? '0',
             ),

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
+
 /**
  * Metadata, která normalizovaný dokument nést nesmí, protože nevznikají
  * z mzdové revize: GUIDy podání a formulářů, čas vyplnění a pořadí balíku.
@@ -214,7 +216,9 @@ final readonly class JmhzSubmissionEnvelope
     /**
      * `datumVyplneni` je `xs:dateTime` a musí být shodné napříč dílčími balíky
      * téhož hlášení, zato unikátní mezi hlášeními. Přijímá se proto jen přesný
-     * kanonický UTC tvar, ne cokoli, co `DateTimeImmutable` spolkne.
+     * kanonický tvar, ne cokoli, co `DateTimeImmutable` spolkne: český čas
+     * s offsetem (tvar, který vyrábí {@see PayrollSubmissionCalendar::filledAt()},
+     * aby první znaky nesly český den) nebo UTC s příponou `Z`.
      */
     private static function filledAt(string $value): string
     {
@@ -223,15 +227,24 @@ final readonly class JmhzSubmissionEnvelope
             $value,
             new \DateTimeZone('UTC'),
         );
-        if (!$parsed instanceof \DateTimeImmutable
-            || $parsed->format('Y-m-d\TH:i:s\Z') !== $value
+        if ($parsed instanceof \DateTimeImmutable
+            && $parsed->format('Y-m-d\TH:i:s\Z') === $value
         ) {
-            throw new JmhzXmlException(
-                'jmhz_envelope_filled_at_invalid',
-                'Datum a čas vyplnění musí být v kanonickém tvaru RRRR-MM-DDTHH:MM:SSZ.',
-            );
+            return $value;
+        }
+        $offset = \DateTimeImmutable::createFromFormat(
+            'Y-m-d\TH:i:sP',
+            $value,
+        );
+        if ($offset instanceof \DateTimeImmutable
+            && $offset->format('Y-m-d\TH:i:sP') === $value
+        ) {
+            return $value;
         }
 
-        return $value;
+        throw new JmhzXmlException(
+            'jmhz_envelope_filled_at_invalid',
+            'Datum a čas vyplnění musí být v kanonickém tvaru RRRR-MM-DDTHH:MM:SS+HH:MM nebo RRRR-MM-DDTHH:MM:SSZ.',
+        );
     }
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use Psr\Clock\ClockInterface;
 
@@ -193,9 +194,7 @@ final readonly class JmhzRejectedSubmissionRefreezeService
         foreach ($renewedForms as $old => $new) {
             $xml = $replace($xml, 'idFormulare', $old, $new);
         }
-        $filledAt = \DateTimeImmutable::createFromInterface($this->clock->now())
-            ->setTimezone(new \DateTimeZone('UTC'))
-            ->format('Y-m-d\TH:i:s\Z');
+        $filledAt = PayrollSubmissionCalendar::filledAt($this->clock->now());
         $count = 0;
         $xml = (string) preg_replace(
             '~(<(?:[A-Za-z_][\w.-]*:)?datumVyplneni>)[^<]*(</(?:[A-Za-z_][\w.-]*:)?datumVyplneni>)~',

@@ -11,6 +11,7 @@ use MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository;
 use MyInvoice\Service\Payroll\PayrollEmploymentTermsBody;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollPersonProfileValidator;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 
 /**
  * Zápis opravené hodnoty z formuláře REGZEC A1 ZPĚT do kmenových dat.
@@ -851,7 +852,7 @@ final class PayrollRegistrationA1MasterDataWriter
      */
     private function assertNotFuture(string $effectiveOn): void
     {
-        if ($effectiveOn <= date('Y-m-d')) {
+        if ($effectiveOn <= PayrollSubmissionCalendar::today()) {
             return;
         }
         throw new \DomainException(

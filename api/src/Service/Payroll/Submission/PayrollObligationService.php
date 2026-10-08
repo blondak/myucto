@@ -528,9 +528,7 @@ final class PayrollObligationService
                 'Datum splatnosti povinnosti není platné.',
             );
         }
-        $today = \DateTimeImmutable::createFromInterface($this->clock->now())
-            ->setTimezone(new \DateTimeZone('Europe/Prague'))
-            ->setTime(0, 0);
+        $today = PayrollSubmissionCalendar::now($this->clock->now())->setTime(0, 0);
 
         return $dueDate < $today;
     }

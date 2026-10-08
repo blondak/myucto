@@ -11,6 +11,7 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEldpEvidenceBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 use Psr\Clock\ClockInterface;
 
 /**
@@ -2431,7 +2432,7 @@ final class EldpAnnualStatementBuilder
          * i výchozího data (konec posledního zúčtovaného měsíce), když se list
          * připravuje před jeho koncem.
          */
-        $today = $this->clock?->now()->setTimezone(new \DateTimeZone('Europe/Prague'))->format('Y-m-d');
+        $today = $this->clock === null ? null : PayrollSubmissionCalendar::today($this->clock->now());
         if ($today !== null && $preparedOn > $today) {
             throw new EldpValidationException(
                 'eldp_prepared_on_future',

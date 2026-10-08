@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\HealthInsurance;
 
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
+
 final readonly class HealthInsurerChannel
 {
     /**
@@ -44,10 +46,7 @@ final readonly class HealthInsurerChannel
         ?string $onDate = null,
     ): array
     {
-        $onDate ??= (new \DateTimeImmutable(
-            'now',
-            new \DateTimeZone('Europe/Prague'),
-        ))->format('Y-m-d');
+        $onDate ??= PayrollSubmissionCalendar::today();
         $format = $this->isdsAttachmentFormatOn($onDate);
 
         return [

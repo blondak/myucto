@@ -10,6 +10,7 @@ use MyInvoice\Repository\Payroll\EldpManualCompletionRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionConflictException;
 use MyInvoice\Service\Document\DocumentStorage;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 
 final class EldpManualCompletionService
 {
@@ -53,8 +54,7 @@ final class EldpManualCompletionService
         if ($date === false || $date->format('Y-m-d') !== $confirmedOn) {
             throw new EldpManualCompletionException('eldp_manual_date_invalid', 'Datum potvrzení musí mít formát YYYY-MM-DD.');
         }
-        $today = new \DateTimeImmutable('today', new \DateTimeZone('Europe/Prague'));
-        if ($date > $today) {
+        if ($confirmedOn > PayrollSubmissionCalendar::today()) {
             throw new EldpManualCompletionException('eldp_manual_date_future', 'Datum potvrzení nesmí být v budoucnosti.');
         }
         $idempotencyKey = trim($idempotencyKey);

@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Submission\Ozuspoj;
 use MyInvoice\Repository\Payroll\PayrollDiscountIntentRepository;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountAgeCondition;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 use MyInvoice\Service\Payroll\Submission\Sickness\CsszWorkplaceCatalog;
 use Psr\Clock\ClockInterface;
 
@@ -781,8 +782,6 @@ final readonly class OzuspojIntentService
 
     private function today(): string
     {
-        return \DateTimeImmutable::createFromInterface($this->clock->now())
-            ->setTimezone(new \DateTimeZone('Europe/Prague'))
-            ->format('Y-m-d');
+        return PayrollSubmissionCalendar::today($this->clock->now());
     }
 }

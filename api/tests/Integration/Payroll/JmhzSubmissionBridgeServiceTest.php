@@ -239,6 +239,32 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         self::assertSame('ready', $result['status']);
     }
 
+    /**
+     * Čas vyplnění nese český den: půl hodiny po půlnoci (letní čas) je v UTC
+     * ještě předchozí den, ale `datumVyplneni` musí začínat dnem českým.
+     */
+    public function testFilledAtCarriesCzechDayShortlyAfterMidnight(): void
+    {
+        $obligationId = $this->registerObligation();
+        $result = $this->bridge(now: '2026-08-06 00:30:00 Europe/Prague')->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            $obligationId,
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+
+        $xml = $this->submissions->artifactBytes(
+            $this->supplierId,
+            $result['artifact_id'],
+        );
+
+        self::assertStringContainsString(
+            '<datumVyplneni>2026-08-06T00:30:00+02:00</datumVyplneni>',
+            $xml,
+        );
+    }
+
     public function testFreezesReadySubmissionOnVrepChannel(): void
     {
         $obligationId = $this->registerObligation();

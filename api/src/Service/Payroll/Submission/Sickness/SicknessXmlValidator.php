@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission\Sickness;
 
 use DOMDocument;
 use MyInvoice\Service\Payroll\Cssz\CsszSchemaCatalog;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 
 /**
  * Validace datových vět NEMPRI25 a HZUPN20 proti PŘIPNUTÉMU XSD a proti těm
@@ -960,7 +961,7 @@ final readonly class SicknessXmlValidator
 
     private function notInFuture(?string $date): void
     {
-        $today = (new \DateTimeImmutable('today', new \DateTimeZone('Europe/Prague')))->format('Y-m-d');
+        $today = PayrollSubmissionCalendar::today();
         if ($date !== null && $date > $today) {
             $this->invalid(
                 'nempri_date_in_future',

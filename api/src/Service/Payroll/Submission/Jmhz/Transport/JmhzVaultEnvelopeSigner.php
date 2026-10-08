@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz\Transport;
 
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Epo\EpoPkcs7Signer;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 use MyInvoice\Service\Signing\PersonalCertificateVaultService;
 
 /**
@@ -95,10 +96,7 @@ final readonly class JmhzVaultEnvelopeSigner implements JmhzEnvelopeSignerInterf
     /** @param array<string,mixed> $resolved */
     private function assertUsable(array $resolved): void
     {
-        $today = $this->today ?? (new \DateTimeImmutable(
-            'now',
-            new \DateTimeZone('Europe/Prague'),
-        ))->format('Y-m-d');
+        $today = $this->today ?? PayrollSubmissionCalendar::today();
 
         $validTo = $resolved['certificate_valid_to'] ?? null;
         if (is_string($validTo) && $validTo !== '' && strcmp(substr($validTo, 0, 10), $today) < 0) {

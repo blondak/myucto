@@ -106,9 +106,7 @@ final class PayrollDeadlineAssessmentService
             );
         }
 
-        $today = \DateTimeImmutable::createFromInterface($this->clock->now())
-            ->setTimezone(new \DateTimeZone('Europe/Prague'))
-            ->setTime(0, 0);
+        $today = PayrollSubmissionCalendar::now($this->clock->now())->setTime(0, 0);
         $daysToDue = (int) $today->diff($due)->format('%r%a');
 
         if ($obligationStatus === 'cancelled'
