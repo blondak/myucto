@@ -13,9 +13,9 @@ namespace MyInvoice\Service\Signing\Xml;
  * - element `Signature` z jmenného prostoru `http://www.w3.org/2000/09/xmldsig#`
  *   je POSLEDNÍM prvkem kořene (`xs:any` na konci sekvence `Invoice` v XSD)
  *   a nese atribut `Id`;
- * - `Reference URI=""` (celý dokument) s transformacemi Enveloped Signature
- *   a XPath `not(ancestor-or-self::dsig:Signature)` — ta podle kap. 5.2 dovolí
- *   příjemci připojit další podpis, aniž by rozbil tenhle;
+ * - `Reference URI=""` (celý dokument) s povinnou transformací Enveloped Signature;
+ *   doporučenou XPath `not(ancestor-or-self::dsig:Signature)` (kap. 5.2, dovolí
+ *   příjemci připojit další podpis) lze zapnout parametrem `$xpathFilter`;
  *
  *   ⚠️ Prefix `dsig` se deklaruje na elementu `XPath`, NE na `Signature` jako
  *   v příkladu standardu. Ověřeno proti .NET `SignedXml`: deklaraci z `Signature`
@@ -25,8 +25,9 @@ namespace MyInvoice\Service\Signing\Xml;
  *
  *   ⚠️ .NET Framework (od MS16-035) transformaci XPath ve výchozím nastavení
  *   nepovoluje — ověřovatel na .NET bez úpravy politiky odmítne každý podpis
- *   s XPath, i formálně bezvadný. Proto jde filtr vypnout (`$xpathFilter`);
- *   samotná transformace Enveloped Signature je ve standardu povinná a stačí;
+ *   s XPath, i formálně bezvadný. Proto je výchozí podpis BEZ filtru: samotná
+ *   transformace Enveloped Signature je ve standardu povinná, stačí a ověří ji
+ *   každý ověřovatel (příjemci typicky POHODA a další programy na Windows);
  * - kanonizace Canonical XML 1.0 (inkluzivní, bez komentářů), otisk SHA-256,
  *   podpis RSA-SHA256 (identifikátory dle RFC 4051, jak kap. 5.1 bod 5 žádá);
  * - `KeyInfo/X509Data/X509Certificate` s certifikátem podepisujícího a případným
@@ -46,7 +47,7 @@ final class XmlDsigEnvelopedSigner
     public const XPATH = 'http://www.w3.org/TR/1999/REC-xpath-19991116';
     public const XPATH_FIRST_SIGNATURE = 'not(ancestor-or-self::dsig:Signature)';
 
-    public function __construct(private readonly bool $xpathFilter = true) {}
+    public function __construct(private readonly bool $xpathFilter = false) {}
 
     /**
      * @param array{cert:string,pkey:string|\OpenSSLAsymmetricKey,extracerts?:list<string>} $credential

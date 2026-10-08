@@ -23,9 +23,9 @@ declare(strict_types=1);
  *   php api/bin/isdoc-signed-sample.php --invoice=123 --pfx=C:\cesta\cert.p12 [--out=C:\tmp\isdoc-test]
  *   php api/bin/isdoc-signed-sample.php --invoice=123          # s existující konfigurací podpisů
  *
- * `--no-xpath` podepíše bez doporučené transformace XPath (jen povinná Enveloped
- * Signature) — pro porovnání s ověřovateli, které XPath nepovolují (.NET Framework).
- * Soubory se pak jmenují `…-bez-xpath`.
+ * `--xpath` podepíše navíc s doporučenou transformací XPath (výchozí je jen povinná Enveloped
+ * Signature) — pro porovnání s ověřovateli, které XPath povolují.
+ * Soubory se pak jmenují `…-xpath`.
  */
 
 if (PHP_SAPI !== 'cli') exit("CLI only.\n");
@@ -43,7 +43,7 @@ use MyInvoice\Service\Signing\Xml\XmlDsigEnvelopedSigner;
 $invoiceId = 0;
 $pfxPath = null;
 $profileOption = null;
-$xpathFilter = true;
+$xpathFilter = false;
 $outDir = PHP_OS_FAMILY === 'Windows' ? 'C:\\tmp\\isdoc-test' : sys_get_temp_dir() . '/isdoc-test';
 foreach (array_slice($argv, 1) as $arg) {
     if (str_starts_with($arg, '--invoice=')) {
@@ -52,8 +52,8 @@ foreach (array_slice($argv, 1) as $arg) {
         $pfxPath = substr($arg, 6);
     } elseif (str_starts_with($arg, '--profile=')) {
         $profileOption = (int) substr($arg, 10);
-    } elseif ($arg === '--no-xpath') {
-        $xpathFilter = false;
+    } elseif ($arg === '--xpath') {
+        $xpathFilter = true;
     } elseif (str_starts_with($arg, '--out=')) {
         $outDir = substr($arg, 6);
     } else {
@@ -67,8 +67,8 @@ if ($invoiceId <= 0) {
 }
 
 $c = Bootstrap::buildContainer();
-if (!$xpathFilter) {
-    $c->set(XmlDsigEnvelopedSigner::class, new XmlDsigEnvelopedSigner(xpathFilter: false));
+if ($xpathFilter) {
+    $c->set(XmlDsigEnvelopedSigner::class, new XmlDsigEnvelopedSigner(xpathFilter: true));
 }
 $db = $c->get(Connection::class);
 $pdo = $db->pdo();
@@ -139,7 +139,7 @@ try {
     if (!is_dir($outDir) && !mkdir($outDir, 0755, true) && !is_dir($outDir)) {
         throw new RuntimeException("Adresář {$outDir} nelze vytvořit.");
     }
-    $base = 'Faktura-' . preg_replace('/[^A-Za-z0-9_-]/', '_', (string) $invoice['varsymbol']) . ($xpathFilter ? '' : '-bez-xpath');
+    $base = 'Faktura-' . preg_replace('/[^A-Za-z0-9_-]/', '_', (string) $invoice['varsymbol']) . ($xpathFilter ? '-xpath' : '');
     file_put_contents($outDir . DIRECTORY_SEPARATOR . $base . '.pdf', $pdf);
     if (is_string($isdoc)) {
         file_put_contents($outDir . DIRECTORY_SEPARATOR . $base . '.isdoc', $isdoc);

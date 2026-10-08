@@ -30,7 +30,7 @@ final class XmlDsigEnvelopedSignerTest extends TestCase
     public function testSignedIsdocVerifiesIndependentlyAndStaysSchemaValid(): void
     {
         $credential = IsdocSignatureVerifier::syntheticPfx();
-        $signed = (new XmlDsigEnvelopedSigner())->sign($this->isdoc(), $credential);
+        $signed = (new XmlDsigEnvelopedSigner(xpathFilter: true))->sign($this->isdoc(), $credential);
 
         $certificate = IsdocSignatureVerifier::verify($signed);
         self::assertSame(
@@ -47,9 +47,10 @@ final class XmlDsigEnvelopedSignerTest extends TestCase
         $this->assertSchemaValid($signed);
     }
 
-    public function testSignatureWithoutXpathFilterVerifies(): void
+    public function testDefaultSignatureHasNoXpathFilterAndVerifies(): void
     {
-        $signed = (new XmlDsigEnvelopedSigner(xpathFilter: false))->sign($this->isdoc(), IsdocSignatureVerifier::syntheticPfx());
+        // Výchozí podpis je bez XPath: ověří ho i .NET bez úpravy politiky (MS16-035).
+        $signed = (new XmlDsigEnvelopedSigner())->sign($this->isdoc(), IsdocSignatureVerifier::syntheticPfx());
 
         IsdocSignatureVerifier::verify($signed);
         self::assertStringNotContainsString('REC-xpath-19991116', $signed);

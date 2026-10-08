@@ -289,9 +289,10 @@ je element `<Signature … Id="Signature-1">` s vaším certifikátem v `X509Cer
 z PDF hláška o chybějícím podpisu neobjeví. Jestli POHODA podpisu důvěřuje, závisí na tom, zda jde o kvalifikovaný
 certifikát vydaný důvěryhodnou autoritou (například PostSignum, I.CA, eIdentity).
 
-Podpis odpovídá standardu ISDOC 6.0.2, kapitole 5 „Digitální podpisy": XML Signature s transformací Enveloped
-Signature a filtrem XPath `not(ancestor-or-self::dsig:Signature)` (příjemce může připojit vlastní podpis),
-kanonizace Canonical XML 1.0, otisk SHA-256 a podpis RSA-SHA256. Podepsat lze certifikátem s klíčem RSA, což jsou
+Podpis odpovídá standardu ISDOC 6.0.2, kapitole 5 „Digitální podpisy": XML Signature s povinnou transformací
+Enveloped Signature, kanonizace Canonical XML 1.0, otisk SHA-256 a podpis RSA-SHA256. Doporučený filtr XPath
+aplikace nepřidává, protože ho řada ověřovačů na Windows ve výchozím nastavení odmítá a podpis by se
+příjemci (například v POHODĚ) ukázal jako neplatný. Podepsat lze certifikátem s klíčem RSA, což jsou
 běžné kvalifikované certifikáty českých autorit.
 
 ## 99.10 Krok za krokem: ověřit podepsaný PDF
