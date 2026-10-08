@@ -68,6 +68,14 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
           return !auth.isClientRole && auth.canWrite('utilities.import') ? true : { path: '/' }
         },
       },
+      {
+        path: 'imports/myucto', name: 'imports-myucto',
+        component: () => import('@/pages/imports/MyuctoMigration.vue'), meta: { requiresSupplier: true },
+        beforeEnter: () => {
+          const auth = useAuthStore()
+          return !auth.isClientRole && auth.canWrite('utilities.import') ? true : { path: '/' }
+        },
+      },
       // Průvodce „Přechod z Money S3" — převod celé účetní agendy ze zálohy Money.
       // Bez requiresDoubleEntry: firmu v daňové evidenci převod sám přepne.
       {
