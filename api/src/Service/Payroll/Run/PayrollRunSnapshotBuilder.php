@@ -443,8 +443,13 @@ final class PayrollRunSnapshotBuilder
                             . 'a pak obnovte podklady běhu.',
                             (string) $row['full_name'],
                         )
+                        // Trvající vztah bez příjmu (typicky dohoda, na které
+                        // se v měsíci nepracovalo) se hlásí nulovým formulářem
+                        // JMHZ; vznikne z výslovně zadané nuly, ne z mlčení.
                         : sprintf(
-                            '%s: pracovní vztah nemá v období žádnou schválenou mzdovou složku.',
+                            '%s: pracovní vztah nemá v období žádnou schválenou mzdovou složku. '
+                            . 'Pokud vztah trvá a příjem v měsíci opravdu nevznikl, zadejte u základní '
+                            . 'složky 0 Kč — za vztah se podá nulové hlášení JMHZ.',
                             (string) $row['full_name'],
                         ),
                     $pendingRecurring > 0

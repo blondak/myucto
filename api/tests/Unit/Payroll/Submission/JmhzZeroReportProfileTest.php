@@ -139,4 +139,21 @@ final class JmhzZeroReportProfileTest extends TestCase
             '19999',
         );
     }
+
+    /**
+     * Měsíc bez příjmu je jen ten, kde je celý vektor výdělků i osvobozený
+     * příjem nula. Nezjištěná částka (null) nulou není.
+     */
+    public function testMonthWithoutIncomeNeedsEveryAmountToBeZero(): void
+    {
+        self::assertTrue(JmhzZeroReportProfile::isMonthWithoutIncome([]));
+        self::assertTrue(JmhzZeroReportProfile::isMonthWithoutIncome(['10328' => 0, '10329' => 0]));
+        self::assertFalse(JmhzZeroReportProfile::isMonthWithoutIncome(['10328' => 0, '10342' => 120_000]));
+        self::assertFalse(JmhzZeroReportProfile::isMonthWithoutIncome(['10328' => null]));
+        self::assertFalse(JmhzZeroReportProfile::isMonthWithoutIncome(['10328' => 0], 50_000));
+        self::assertSame(
+            JmhzZeroReportProfile::RULE_ZERO,
+            JmhzZeroReportProfile::rule(JmhzZeroReportProfile::SITUATION_REGULAR_WITHOUT_WORK, '10345'),
+        );
+    }
 }
