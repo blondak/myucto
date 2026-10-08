@@ -284,7 +284,7 @@ async function copySetup() {
       <p class="text-xs text-neutral-500 mt-2">
         <i18n-t keypath="cron_jobs.setup_hint" tag="span">
           <template #link>
-            <a href="/manual?ch=05_Po_instalaci#55-cron-skripty" target="_blank" rel="noopener" class="text-primary-600 hover:underline">{{ t('cron_jobs.setup_link') }}</a>
+            <a href="/manual?ch=05_Po_instalaci#55-krok-za-krokem-naplanovani-uloh-cron" target="_blank" rel="noopener" class="text-primary-600 hover:underline">{{ t('cron_jobs.setup_link') }}</a>
           </template>
         </i18n-t>
       </p>

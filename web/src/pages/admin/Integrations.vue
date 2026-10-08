@@ -1311,7 +1311,7 @@ onMounted(() => {
           <strong>{{ t('automation.ai.sent_data_title') }}</strong>
           <p class="mt-1 text-xs leading-relaxed">{{ t('automation.ai.sent_data_body') }}</p>
           <p class="mt-1 text-xs leading-relaxed">{{ t('automation.ai.never_sent_body') }}</p>
-          <a href="/manual?ch=53_Automat#5311-ai-navrhy-uctovani" target="_blank" rel="noopener" class="mt-2 inline-block text-xs font-medium text-primary-700 underline">{{ t('automation.ai.manual_link') }}</a>
+          <a href="/manual?ch=53_Automat#53119-ai-navrhy-uctovani" target="_blank" rel="noopener" class="mt-2 inline-block text-xs font-medium text-primary-700 underline">{{ t('automation.ai.manual_link') }}</a>
         </div>
 
         <p v-if="aiAssist.dpa_exempt" class="mt-4 text-xs text-neutral-600">{{ t('automation.ai.dpa_exempt_local') }}</p>
