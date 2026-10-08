@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
+use MyInvoice\Service\Bank\CzechBankCodeRegistry;
 use MyInvoice\Service\Payroll\Cssz\CsszSchemaCatalog;
 use MyInvoice\Service\Payroll\Submission\Sickness\CsszWorkplaceCatalog;
 use MyInvoice\Service\Payroll\Submission\Sickness\HzupnXmlPayload;
@@ -488,6 +489,47 @@ final class NempriMatrixAndValidationTest extends TestCase
         $this->validator->validateNempri($payload, $this->serializer->serialize($payload));
     }
 
+    /**
+     * NEMPRI25-platebniSpojeni.ucetCZ.bankaKod-3: kód banky z číselníku
+     * C_KODBANKY (registr ČNB). Čtyři číslice projdou XSD, kód zaniklé banky
+     * (eBanka 2400, Equa bank 6100) ani neexistující kód ČSSZ nepřijme.
+     */
+    public function testCzechAccountBankCodeMustComeFromCnbRegistry(): void
+    {
+        foreach (['2400', '6100', '9999'] as $code) {
+            $this->expectRejected('nempri_bank_code_unknown', $this->payload(
+                SicknessBenefitKind::Nem,
+                null,
+                ['paymentConnection' => new NempriPaymentConnection(
+                    NempriPaymentConnection::KIND_ACCOUNT_CZ,
+                    accountNumber: '1000000005',
+                    bankCode: $code,
+                )],
+            ));
+        }
+        foreach (['0100', '0800', '6363', '3030'] as $code) {
+            $payload = $this->payload(SicknessBenefitKind::Nem, null, ['paymentConnection' => new NempriPaymentConnection(
+                NempriPaymentConnection::KIND_ACCOUNT_CZ,
+                accountNumber: '1000000005',
+                bankCode: $code,
+            )]);
+            $this->validator->validateNempri($payload, $this->serializer->serialize($payload));
+        }
+        self::assertSame('Partners Banka, a.s.', CzechBankCodeRegistry::name('6363'));
+    }
+
+    /** Registr kódů bank je beze změny převzatý soubor ČNB a parser ho čte celý. */
+    public function testBankCodeRegistryParsesCnbFile(): void
+    {
+        $codes = CzechBankCodeRegistry::codes();
+        self::assertGreaterThanOrEqual(40, count($codes));
+        self::assertSame('KOMBCZPP', $codes['0100']['bic']);
+        self::assertNull($codes['2100']['bic']);
+        self::assertFalse(CzechBankCodeRegistry::isValid('100'));
+        $this->expectException(\RuntimeException::class);
+        CzechBankCodeRegistry::parse("<html>chyba</html>\r\n");
+    }
+
     // ---- NX-04: potvrzení zaměstnavatele ----------------------------------
 
     public function testEmployerConfirmationConditionalElements(): void
@@ -827,7 +869,7 @@ final class NempriMatrixAndValidationTest extends TestCase
 
     public function testDecisionNumberPerBenefitKind(): void
     {
-        $partial = new NempriBenefitApplication(fromDate: '2026-09-01', person: new NempriPerson('Dítě', 'Testovací', null, '2026-08-20'));
+        $partial = new NempriBenefitApplication(fromDate: '2026-09-01');
         $this->expectRejected('nempri_decision_number_missing', $this->payload(SicknessBenefitKind::Ppm, $partial, ['decisionNumber' => null]));
         $this->expectRejected('nempri_decision_number_forbidden', $this->payload(SicknessBenefitKind::Vpm, null, ['decisionNumber' => 'A1234567']));
         $this->expectRejected('nempri_decision_number_format_invalid', $this->payload(

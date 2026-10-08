@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Sickness;
 
 use DOMDocument;
+use MyInvoice\Service\Bank\CzechBankCodeRegistry;
 use MyInvoice\Service\Payroll\Cssz\CsszSchemaCatalog;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 
@@ -459,6 +460,16 @@ final readonly class SicknessXmlValidator
                     'U převzetí dítěte do péče musí žádost uvést převzaté dítě.',
                 );
             }
+        } elseif ($kind === SicknessBenefitKind::Ppm && $application->person !== null) {
+            // Postupy zaměstnavatelů (Elektronizace dávek NP, bod 2) a Všeobecné
+            // zásady NEMPRI: při běžném nástupu na PPM se vyplňuje jen den
+            // nástupu, identifikace dítěte patří jen k převzetí dítěte do péče.
+            $this->invalid(
+                'nempri_maternity_child_without_care_reason',
+                'Při běžném nástupu na peněžitou pomoc v mateřství se dítě neuvádí. Údaje '
+                . 'o dítěti patří jen k převzetí dítěte do péče: vyplňte důvod převzetí, '
+                . 'nebo dítě u případu smažte.',
+            );
         }
         if ($application->childOrder !== null
             && ($application->childOrder < 1 || $application->childOrder > 10)
@@ -1035,6 +1046,19 @@ final readonly class SicknessXmlValidator
                 'Způsob výplaty mzdy se nedá zapsat do věty: účet musí být platný český '
                 . 'účet nebo IBAN, adresa musí mít obec, číslo popisné a PSČ. '
                 . 'Opravte ho ve výplatním profilu zaměstnance.',
+            );
+        }
+        // C_KODBANKY (DV NEMPRI25, chyba DIS 06): XSD hlídá jen čtyři číslice,
+        // kód mimo registr ČNB odmítne až územní správa. Registr je aktuální
+        // kopie, ze které ČSSZ číselník přebírá ({@see CzechBankCodeRegistry}).
+        if ($connection->kind === NempriPaymentConnection::KIND_ACCOUNT_CZ
+            && !CzechBankCodeRegistry::isValid((string) $connection->bankCode)
+        ) {
+            $this->invalid(
+                'nempri_bank_code_unknown',
+                'Kód banky ' . (string) $connection->bankCode . ' výplatního účtu není v aktuálním '
+                . 'číselníku kódů platebního styku ČNB (C_KODBANKY), ČSSZ by oznámení odmítla. '
+                . 'Opravte účet ve výplatním profilu zaměstnance.',
             );
         }
     }

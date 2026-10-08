@@ -10756,6 +10756,7 @@
         "predecessor": "podal předchozí program"
       },
       "documents": {
+        "nempri_transfer": "NEMPRI ke dni převedení",
         "nempri": "NEMPRI",
         "hzupn": "HZUPN"
       },
@@ -10769,6 +10770,13 @@
         "edit": "Upravit",
         "save": "Uložit",
         "cancel": "Zrušit úpravy",
+        "previewNempriTransfer": "Náhled NEMPRI ke dni převedení",
+        "prepareNempriTransfer": "Připravit NEMPRI ke dni převedení",
+        "dispatchNempriTransfer": "Odeslat NEMPRI ke dni převedení datovou schránkou",
+        "recordAcceptedNempriTransfer": "Zapsat přijetí NEMPRI ke dni převedení",
+        "recordRejectedNempriTransfer": "Zapsat odmítnutí NEMPRI ke dni převedení",
+        "recordPredecessorNempriTransfer": "NEMPRI ke dni převedení podal předchozí program",
+        "reopenPredecessorNempriTransfer": "Předchozí program NEMPRI ke dni převedení nepodal",
         "previewNempri": "Náhled NEMPRI",
         "prepareNempri": "Připravit NEMPRI",
         "previewHzupn": "Náhled HZUPN",
@@ -10807,6 +10815,7 @@
       },
       "dispatch": {
         "title": {
+          "nempri_transfer": "NEMPRI ke dni převedení — odeslání datovou schránkou",
           "nempri": "NEMPRI — odeslání datovou schránkou",
           "hzupn": "HZUPN — odeslání datovou schránkou"
         },
@@ -10848,6 +10857,7 @@
         "applicationTo": "Žádá o dávku do",
         "child": "Dítě",
         "caredPerson": "Ošetřovaná osoba",
+        "maternityChildHint": "Při běžném nástupu na peněžitou pomoc v mateřství se dítě neuvádí, oznámení nese jen den nástupu. Dítě a důvod převzetí vyplňte jen při převzetí dítěte do péče.",
         "caredPersonHint": "Vyberte vyživovanou osobu z karty zaměstnance — rodné číslo se doplní samo. Není-li v evidenci, zadejte jméno, příjmení a datum narození.",
         "caredFirstName": "Jméno",
         "caredLastName": "Příjmení",
@@ -10895,7 +10905,7 @@
         "transferredOtherWork": "Převedena na jinou práci",
         "transferredOn": "Den převedení",
         "transferReason": "Důvod převedení",
-        "transferReasonHint": "Byla-li zaměstnankyně převedena kvůli těhotenství, mateřství nebo kojení, může se rozhodné období určit ke dni převedení, je-li to pro ni výhodnější (§ 19 odst. 6 zákona č. 187/2006 Sb.). Aplikace pošle jedno oznámení s výhodnějším obdobím. Druhé oznámení s rozhodným obdobím ke dni převedení, které ČSSZ vyžaduje současně, zatím nesestaví: podejte ho přes ePortál ČSSZ.",
+        "transferReasonHint": "Byla-li zaměstnankyně převedena kvůli těhotenství, mateřství nebo kojení, může se rozhodné období určit ke dni převedení, je-li to pro ni výhodnější (§ 19 odst. 6 zákona č. 187/2006 Sb.). Leží-li den převedení v dřívějším měsíci, než vznikla sociální událost, nese případ dvě oznámení NEMPRI: první s rozhodným obdobím ke dni vzniku události a druhé ke dni převedení. Obě se podávají současně a se stejnou lhůtou, výhodnější období vybere ČSSZ.",
         "transferReasons": {
           "pregnancy": "Těhotenství",
           "maternity": "Mateřství",
@@ -11789,6 +11799,7 @@
       }
     },
     "server_codes": {
+      "nempri_transfer_not_required": "Druhé oznámení NEMPRI ke dni převedení se u tohoto případu nepodává: zaměstnankyně nebyla převedena z důvodu těhotenství, mateřství nebo kojení v dřívějším měsíci, než vznikla sociální událost. Zkontrolujte převedení a jeho důvod u případu.",
       "nempri_decision_number_missing": "Chybí číslo rozhodnutí (u eNeschopenky a eOČR číslo z rozhodnutí lékaře). ČSSZ podle něj oznámení páruje s rozhodnutím. Doplňte ho v případu dávky.",
       "nempri_relationship_code_invalid": "Vztah ošetřované osoby není kód z číselníku ČSSZ pro tento druh dávky. Vyberte ho v případu dávky ze seznamu.",
       "nempri_relationship_code_not_in_kind": "Vztah ošetřované osoby se vyplňuje jen u ošetřovného a dlouhodobého ošetřovného.",
@@ -11797,6 +11808,7 @@
       "nempri_maternity_care_reason_invalid": "Důvod převzetí dítěte do péče musí být kód z číselníku CIS_DUVPREVZETI. Vyberte ho ze seznamu.",
       "nempri_maternity_care_reason_not_in_kind": "Důvod převzetí dítěte do péče se vyplňuje jen u peněžité pomoci v mateřství.",
       "nempri_maternity_care_reason_with_decision_number": "S důvodem převzetí dítěte do péče nesmí podání nést číslo rozhodnutí. Smažte ho v případu dávky.",
+      "nempri_maternity_child_without_care_reason": "Při běžném nástupu na peněžitou pomoc v mateřství se dítě neuvádí. Vyplňte důvod převzetí dítěte do péče, nebo dítě u případu smažte.",
       "nempri_maternity_care_child_missing": "U převzetí dítěte do péče musí žádost uvést převzaté dítě.",
       "sickness_event_after_employment": "Sociální událost vznikla po skončení zaměstnání a tento druh dávky ochrannou lhůtu nemá. Zkontrolujte den vzniku události nebo skončení vztahu.",
       "sickness_event_outside_protection_period": "Sociální událost vznikla po uplynutí ochranné lhůty po skončení zaměstnání (§ 15 zák. č. 187/2006 Sb.). Nárok z tohoto vztahu nevznikl.",
@@ -11824,6 +11836,7 @@
       "nempri_decisive_payroll_source_invalid": "Zmrazená mzdová revize neodpovídá svému otisku, takže z ní nejde sestavit rozhodné období. Kontaktujte podporu.",
       "nempri_payment_connection_partner_settlement": "Mzda se vyplácí přes partnera, takže MyÚčto nezná účet ani adresu pro výplatu dávky, které NEMPRI vyžaduje. Opravte způsob výplaty ve výplatním profilu osoby, nebo oznámení podejte mimo aplikaci.",
       "nempri_payment_address_invalid": "Adresa pro výplatu dávky musí mít obec, číslo popisné a PSČ. Opravte ji na kartě osoby.",
+      "nempri_bank_code_unknown": "Kód banky výplatního účtu není v aktuálním číselníku kódů bank ČNB, takže by ČSSZ oznámení NEMPRI odmítla. Opravte účet na kartě osoby.",
       "nempri_payment_connection_invalid": "Výplatní účet zaměstnance není platný český účet ani IBAN, takže ho nelze zapsat do NEMPRI. Opravte ho na kartě osoby.",
       "nempri_payment_connection_missing": "Zaměstnanec nemá ve výplatním profilu účet, na který se mu vyplácí mzda. Bez něj si ČSSZ způsob výplaty vyžádá výzvou a dávka se zdrží. Doplňte účet na kartě osoby.",
       "nempri_periods_invalid": "Dny péče musí být seznam období od–do.",

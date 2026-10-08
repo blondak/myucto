@@ -290,6 +290,7 @@ final readonly class SicknessCaseFromAbsenceService
         }
         if ($case['status'] !== SicknessCaseStatus::Draft->value
             || $case['nempri_submission_id'] !== null
+            || ($case['nempri_transfer_submission_id'] ?? null) !== null
             || $case['hzupn_submission_id'] !== null
         ) {
             return $this->kept($case, $kind);

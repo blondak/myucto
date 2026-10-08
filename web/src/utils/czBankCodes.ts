@@ -3,8 +3,9 @@
 // v setupu (Setup.vue) i ve správě bankovních účtů (BankAccounts.vue).
 //
 // Zdroj: registr kódů platebního styku ČNB. Seznam pokrývá aktivní i běžné
-// historické kódy; u zaniklých/převzatých bank je v závorce poznámka. Doplňuj
-// podle aktuálního registru ČNB.
+// historické kódy; u zaniklých/převzatých bank je v závorce poznámka. Platné
+// kódy drží backend v api/resources/ciselniky/kody_bank_CR.csv (registr ČNB,
+// aktualizace cmd/download-bank-codes); že jsou tu všechny, hlídá vitest.
 
 export const CZ_BANK_CODES: Record<string, string> = {
   '0100': 'Komerční banka',
@@ -16,7 +17,7 @@ export const CZ_BANK_CODES: Record<string, string> = {
   '2020': 'MUFG Bank (Europe)',
   '2060': 'Citfin, spořitelní družstvo',
   '2070': 'Trinity Bank',
-  '2100': 'Hypoteční banka',
+  '2100': 'ČSOB Hypoteční banka',
   '2200': 'Peněžní dům, spořitelní družstvo',
   '2220': 'Artesa, spořitelní družstvo',
   '2250': 'Banka CREDITAS',
@@ -37,12 +38,14 @@ export const CZ_BANK_CODES: Record<string, string> = {
   '6200': 'COMMERZBANK',
   '6210': 'mBank',
   '6300': 'BNP Paribas Fortis',
+  '6363': 'Partners Banka',
+  '6600': 'Banking Circle',
   '6700': 'Všeobecná úverová banka (VÚB)',
   '6800': 'Sberbank CZ (zaniklá)',
   '7910': 'Deutsche Bank',
   '7950': 'Raiffeisen stavební spořitelna',
   '7960': 'ČSOB Stavební spořitelna',
-  '7970': 'Wüstenrot stavební spořitelna (zaniklá)',
+  '7970': 'MONETA Stavební Spořitelna',
   '7990': 'Modrá pyramida stavební spořitelna',
   '8030': 'Volksbank Raiffeisenbank',
   '8040': 'Oberbank AG',
@@ -62,7 +65,10 @@ export const CZ_BANK_CODES: Record<string, string> = {
   '8280': 'B-Efficient',
   '8293': 'Mesa Money',
   '8299': 'BESTPAY',
-  '8500': 'Aircash',
+  '8500': 'Multitude Bank',
+  '8610': 'Devizová burza',
+  '8620': 'Comgate',
+  '8660': 'PAYMONT',
 }
 
 /**

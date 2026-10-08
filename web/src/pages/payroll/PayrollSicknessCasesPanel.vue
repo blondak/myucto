@@ -306,6 +306,7 @@ const PERSON_CARD_ERRORS = [
   'nempri_payment_connection_missing',
   'nempri_payment_connection_required',
   'nempri_payment_connection_invalid',
+  'nempri_bank_code_unknown',
   'nempri_payment_connection_partner_settlement',
   'nempri_payment_address_invalid',
   'nempri_birth_number_missing',
@@ -662,11 +663,37 @@ function dispatchKey(
   return `${item.id}:${document}`
 }
 
+/** Přípona klíčů akcí podle tiskopisu (`prepareNempriTransfer` …). */
+const DOCUMENT_SUFFIX: Record<PayrollSicknessDocumentKind, string> = {
+  nempri: 'Nempri',
+  nempri_transfer: 'NempriTransfer',
+  hzupn: 'Hzupn',
+}
+
 function submissionId(
   item: PayrollSicknessCase,
   document: PayrollSicknessDocumentKind,
 ): number | null {
-  return document === 'nempri' ? item.nempri_submission_id : item.hzupn_submission_id
+  if (document === 'nempri') return item.nempri_submission_id
+  if (document === 'nempri_transfer') return item.nempri_transfer_submission_id ?? null
+  return item.hzupn_submission_id
+}
+
+/** Den doručení a důvod odmítnutí jednoho tiskopisu. */
+function documentReceipt(
+  item: PayrollSicknessCase,
+  document: PayrollSicknessDocumentKind,
+): { acceptedOn: string | null, reason: string | null } {
+  if (document === 'nempri') return { acceptedOn: item.nempri_accepted_on, reason: item.nempri_rejection_reason }
+  if (document === 'nempri_transfer') {
+    return { acceptedOn: item.nempri_transfer_accepted_on ?? null, reason: item.nempri_transfer_rejection_reason ?? null }
+  }
+  return { acceptedOn: item.hzupn_accepted_on, reason: item.hzupn_rejection_reason }
+}
+
+/** Nese případ druhé oznámení NEMPRI ke dni převedení (§ 19 odst. 6)? */
+function hasTransferNotice(item: PayrollSicknessCase): boolean {
+  return (item.nempri_transfer_status ?? null) !== null
 }
 
 /** Je podání připravené a zároveň ještě nezařazené do fronty? */
@@ -691,7 +718,7 @@ async function dispatch(
   if (!canWrite.value || dispatchingKey.value !== null) return
   const confirmed = await confirmProductionSend(
     environment.value,
-    t('payroll.production_send.sickness', { document: document.toUpperCase() }),
+    t('payroll.production_send.sickness', { document: t(`payroll.sicknessCases.documents.${document}`) }),
   )
   if (!confirmed || dispatchingKey.value !== null) return
   dispatchingKey.value = key
@@ -782,16 +809,24 @@ async function recordReceipt(
   }
 }
 
-/** Podání, která případ nese: NEMPRI vždy, HZUPN jen u nemocenského. */
+/**
+ * Podání, která případ nese: NEMPRI vždy, druhé oznámení ke dni převedení jen
+ * u převedené zaměstnankyně, HZUPN jen u nemocenského.
+ */
 function documentsFor(item: PayrollSicknessCase): PayrollSicknessDocumentKind[] {
-  return HZUPN_KINDS.includes(item.benefit_kind) ? ['nempri', 'hzupn'] : ['nempri']
+  const documents: PayrollSicknessDocumentKind[] = ['nempri']
+  if (hasTransferNotice(item)) documents.push('nempri_transfer')
+  if (HZUPN_KINDS.includes(item.benefit_kind)) documents.push('hzupn')
+  return documents
 }
 
 function documentStatus(
   item: PayrollSicknessCase,
   document: PayrollSicknessDocumentKind,
 ): PayrollSicknessDocumentStatus {
-  return (document === 'nempri' ? item.nempri_status : item.hzupn_status) ?? 'pending'
+  if (document === 'nempri') return item.nempri_status ?? 'pending'
+  if (document === 'nempri_transfer') return item.nempri_transfer_status ?? 'pending'
+  return item.hzupn_status ?? 'pending'
 }
 
 function documentSettled(item: PayrollSicknessCase, document: PayrollSicknessDocumentKind): boolean {
@@ -804,11 +839,11 @@ function documentStatusText(item: PayrollSicknessCase, document: PayrollSickness
   const status = documentStatus(item, document)
   const label = t(`payroll.sicknessCases.documents.${document}`)
   if (status === 'accepted') {
-    const date = document === 'nempri' ? item.nempri_accepted_on : item.hzupn_accepted_on
+    const date = documentReceipt(item, document).acceptedOn
     return `${label}: ${t('payroll.sicknessCases.documentStatuses.accepted', { date: date ?? '' })}`
   }
   if (status === 'rejected') {
-    const reason = document === 'nempri' ? item.nempri_rejection_reason : item.hzupn_rejection_reason
+    const reason = documentReceipt(item, document).reason
     return `${label}: ${t('payroll.sicknessCases.documentStatuses.rejected', { reason: reason ?? '' })}`
   }
   if (status === 'pending' && submissionId(item, document) !== null) {
@@ -841,7 +876,7 @@ function prepareDisabledReason(item: PayrollSicknessCase, document: PayrollSickn
 /** Zápis výsledku jednoho podání z protokolu (přijetí, odmítnutí, předchozí program). */
 function receiptActions(item: PayrollSicknessCase, document: PayrollSicknessDocumentKind): ActionItem[] {
   const key = receiptKey(item, document)
-  const suffix = document === 'nempri' ? 'Nempri' : 'Hzupn'
+  const suffix = DOCUMENT_SUFFIX[document]
   const status = documentStatus(item, document)
   const open = item.status !== 'cancelled'
   return [
@@ -910,7 +945,7 @@ function dispatchAction(
 
   return {
     key: `dispatch-${document}`,
-    label: t(`payroll.sicknessCases.actions.dispatch${document === 'nempri' ? 'Nempri' : 'Hzupn'}`),
+    label: t(`payroll.sicknessCases.actions.dispatch${DOCUMENT_SUFFIX[document]}`),
     icon: 'send',
     variant: 'primary',
     show: ready !== null && ready.outbox_id === null,
@@ -964,6 +999,27 @@ function actionsFor(item: PayrollSicknessCase): ActionItem[] {
       run: () => void prepare(item, 'nempri'),
     },
     dispatchAction(item, 'nempri'),
+    // Druhé oznámení ke dni převedení (§ 19 odst. 6, Všeobecné zásady NEMPRI):
+    // podává se současně s prvním a jen u převedené zaměstnankyně.
+    {
+      key: 'preview-nempri_transfer',
+      label: t('payroll.sicknessCases.actions.previewNempriTransfer'),
+      icon: 'eye',
+      show: hasTransferNotice(item) && documentStatus(item, 'nempri_transfer') !== 'predecessor',
+      loading: busyId.value === item.id,
+      run: () => void preview(item, 'nempri_transfer'),
+    },
+    {
+      key: 'prepare-nempri_transfer',
+      label: t('payroll.sicknessCases.actions.prepareNempriTransfer'),
+      icon: 'check',
+      show: hasTransferNotice(item) && documentStatus(item, 'nempri_transfer') !== 'predecessor',
+      disabled: !canWrite.value || !canPrepare(item, 'nempri_transfer'),
+      disabledReason: prepareDisabledReason(item, 'nempri_transfer'),
+      loading: busyId.value === item.id,
+      run: () => void prepare(item, 'nempri_transfer'),
+    },
+    dispatchAction(item, 'nempri_transfer'),
     {
       key: 'preview-hzupn',
       label: t('payroll.sicknessCases.actions.previewHzupn'),
@@ -1428,6 +1484,9 @@ onMounted(() => void load())
             </div>
             <p class="mt-1 text-xs text-neutral-500">
               {{ t('payroll.sicknessCases.form.caredPersonHint') }}
+            </p>
+            <p v-if="draftKind === 'PPM'" class="mt-1 text-xs text-neutral-500" data-test="sickness-case-maternity-child-hint">
+              {{ t('payroll.sicknessCases.form.maternityChildHint') }}
             </p>
             <div v-if="!draft.cared_dependant_id" class="mt-2 grid gap-3 md:grid-cols-3" data-test="sickness-case-cared-manual">
               <label class="block text-sm">
@@ -1903,7 +1962,7 @@ onMounted(() => void load())
           a odešlete ze své schránky. Žádné „odešlete ho jinde" bez adresy.
         -->
         <div
-          v-for="document in (['nempri', 'hzupn'] as PayrollSicknessDocumentKind[])"
+          v-for="document in documentsFor(item)"
           :key="document"
         >
           <div

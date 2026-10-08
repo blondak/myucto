@@ -413,11 +413,13 @@ final class NempriDecisivePeriodResolverTest extends TestCase
     }
 
     /**
-     * NRO-06 (§ 19 odst. 6): převedení 10. 3. 2026 kvůli těhotenství, nemoc
-     * 2. 7. 2026. Před převedením vydělávala víc, takže výhodnější je období
-     * ke dni převedení 3/2025–2/2026.
+     * NRO-06 (§ 19 odst. 6, Všeobecné zásady NEMPRI): převedení 10. 3. 2026
+     * kvůli těhotenství, nemoc 2. 7. 2026. Výhodnější období nevybírá
+     * zaměstnavatel: první oznámení nese období k rozhodnému dni, druhé
+     * (NempriTransferNotice) tentýž výpočet ke dni převedení. Dřív výpočet
+     * vrátil jen výhodnější z obou a druhé oznámení se nesestavilo.
      */
-    public function testTransferredEmployeeGetsTheMoreFavourablePeriod(): void
+    public function testTransferNoticeUsesTheTransferDayAsDecisiveDay(): void
     {
         $months = [];
         for ($cursor = new \DateTimeImmutable('2025-03-01'); $cursor <= new \DateTimeImmutable('2026-06-01'); $cursor = $cursor->modify('+1 month')) {
@@ -426,26 +428,14 @@ final class NempriDecisivePeriodResolverTest extends TestCase
         }
         $sources = NempriDecisiveSources::fromArrays([], [], $months);
 
-        $result = $this->resolver->resolve('2026-07-02', '2019-01-01', '2026-01', $sources, null, '2026-03-10');
+        $primary = $this->resolver->resolve('2026-07-02', '2019-01-01', '2026-01', $sources, null);
+        self::assertSame('2025-07-01', $primary->from);
+        self::assertSame('2026-06-30', $primary->to);
 
-        self::assertSame('2025-03-01', $result->from);
-        self::assertSame('2026-02-28', $result->to);
-
-        // Méně výhodné období ke dni převedení se nepoužije.
-        $higherLater = [];
-        foreach ($months as $period => $month) {
-            $higherLater[$period] = ['income_minor' => $period >= '2026-03' ? 6_000_000 : 2_000_000, 'excluded_days' => 0];
-        }
-        $result = $this->resolver->resolve(
-            '2026-07-02',
-            '2019-01-01',
-            '2026-01',
-            NempriDecisiveSources::fromArrays([], [], $higherLater),
-            null,
-            '2026-03-10',
-        );
-        self::assertSame('2025-07-01', $result->from);
-        self::assertSame('2026-06-30', $result->to);
+        $transfer = $this->resolver->resolve('2026-03-10', '2019-01-01', '2026-01', $sources, null);
+        self::assertSame('2025-03-01', $transfer->from);
+        self::assertSame('2026-02-28', $transfer->to);
+        self::assertSame(48_000_000, $transfer->incomeMinor());
     }
 
     /**

@@ -16,6 +16,7 @@ use MyInvoice\Service\Payroll\Submission\Sickness\NempriXmlPayload;
 use MyInvoice\Service\Payroll\Submission\Sickness\NempriXmlSerializer;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessBenefitKind;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessException;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessPayloadFactory;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessXmlValidator;
 use PHPUnit\Framework\TestCase;
 
@@ -178,8 +179,6 @@ final class NempriBenefitApplicationXmlTest extends TestCase
     {
         $ppm = $this->payload(SicknessBenefitKind::Ppm, new NempriBenefitApplication(
             fromDate: '2026-09-01',
-            person: new NempriPerson('Dítě', 'Testovací', null, '2026-08-20'),
-            childOrder: 1,
         ), ['decisionNumber' => '1234567M', 'unpaidLeave' => false, 'unpaidLeaveFrom' => null, 'unpaidLeaveTo' => null]);
         $this->validator->validateNempri($ppm, $this->serializer->serialize($ppm));
 
@@ -197,6 +196,41 @@ final class NempriBenefitApplicationXmlTest extends TestCase
 
         self::assertStringContainsString('<dloVznik>true</dloVznik>', $xml);
         self::assertStringContainsString('<kodVztah>3</kodVztah>', $xml);
+    }
+
+    /**
+     * NEMPRI25-ppm.zadost.duvodPece-4: při běžném nástupu na PPM se vyplňuje
+     * jen den nástupu; dítě a důvod péče patří jen k převzetí dítěte do péče
+     * (Postupy zaměstnavatelů, bod 2; Všeobecné zásady NEMPRI). Dítě bez
+     * důvodu převzetí validátor odmítne a továrna payloadu ho do věty nedá.
+     */
+    public function testStandardMaternityStartCarriesNoChild(): void
+    {
+        $this->expectRejected(
+            'nempri_maternity_child_without_care_reason',
+            $this->payload(SicknessBenefitKind::Ppm, new NempriBenefitApplication(
+                fromDate: '2026-09-01',
+                person: new NempriPerson('Dítě', 'Testovací', null, '2026-08-20'),
+                childOrder: 1,
+            ), ['decisionNumber' => '1234567M', 'unpaidLeave' => false, 'unpaidLeaveFrom' => null, 'unpaidLeaveTo' => null]),
+        );
+
+        $factory = new SicknessPayloadFactory();
+        $child = new NempriPerson('Dítě', 'Testovací', null, '2026-08-20');
+        $standard = $factory->application(['application_from' => '2026-09-01'], $child, SicknessBenefitKind::Ppm);
+        self::assertNull($standard->person);
+        $taken = $factory->application(
+            ['application_from' => '2026-09-01', 'maternity_care_reason' => '1'],
+            $child,
+            SicknessBenefitKind::Ppm,
+        );
+        self::assertSame($child, $taken->person);
+
+        $ppm = $this->payload(SicknessBenefitKind::Ppm, $standard, ['decisionNumber' => '1234567M', 'unpaidLeave' => false, 'unpaidLeaveFrom' => null, 'unpaidLeaveTo' => null]);
+        $xml = $this->serializer->serialize($ppm);
+        $this->validator->validateNempri($ppm, $xml);
+        self::assertStringNotContainsString('<deti>', $xml);
+        self::assertStringNotContainsString('<duvodPece>', $xml);
     }
 
     /**

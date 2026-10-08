@@ -107,6 +107,15 @@ final class SicknessImportPlanner
         return implode('; ', $parts);
     }
 
+    private static function actionLabel(SicknessImportRecord $record, string $kindLabel): string
+    {
+        return match ($record->document) {
+            SicknessDocumentKind::Hzupn => 'Hlášení při ukončení pracovní neschopnosti (HZUPN)',
+            SicknessDocumentKind::NempriTransfer => 'Oznámení o žádosti o dávku s rozhodným obdobím ke dni převedení (NEMPRI) - ' . $kindLabel,
+            SicknessDocumentKind::Nempri => 'Oznámení o žádosti o dávku (NEMPRI) - ' . $kindLabel,
+        };
+    }
+
     /** @return list<string> */
     private static function references(?string $existing): array
     {
@@ -138,9 +147,7 @@ final class SicknessImportPlanner
             'sequence' => $record->sequence,
             'document_type' => $record->documentType,
             'action_code' => 0,
-            'action_label' => $record->isHzupn()
-                ? 'Hlášení při ukončení pracovní neschopnosti (HZUPN)'
-                : 'Oznámení o žádosti o dávku (NEMPRI) - ' . $kindLabel,
+            'action_label' => self::actionLabel($record, $kindLabel),
             'prepared_on' => $record->issuedOn,
             'effective_on' => $record->incapacityFrom ?? $record->returnedOn ?? $record->eventMonthStart(),
             'person' => [
@@ -259,6 +266,13 @@ final class SicknessImportPlanner
         if ($found['blocker'] !== null) {
             return $this->finish($plan, $found['blocker']);
         }
+        $eventFrom = $found['case'] !== null ? (string) $found['case']['incapacity_from'] : $found['event_from'];
+        if ($eventFrom !== null) {
+            $record = $record->classifiedForEvent($eventFrom);
+            $plan['_record'] = $record;
+            $plan['action_label'] = self::actionLabel($record, $kindLabel);
+            $plan['benefit']['document'] = $record->document->agendaCode();
+        }
         if ($found['case'] !== null) {
             return $this->planExisting($plan, $record, $found['case'], $receivedOn, $key);
         }
@@ -280,7 +294,7 @@ final class SicknessImportPlanner
         $plan['benefit']['case_source'] = (string) ($case['source'] ?? 'myucto');
         $plan['benefit']['incapacity_from'] = (string) $case['incapacity_from'];
         $plan['benefit']['incapacity_to'] = $case['incapacity_to'] === null ? null : (string) $case['incapacity_to'];
-        $label = $document->agendaCode();
+        $label = $document->shortLabel();
 
         if (self::hasReference($case['external_reference'] ?? null, $document, $key)) {
             $plan['warnings'][] = "{$label} z tohoto souboru už v případu je, import ho nezapisuje podruhé.";
@@ -305,6 +319,17 @@ final class SicknessImportPlanner
             } elseif ($existing !== $record->decisionNumber) {
                 $plan['warnings'][] = "Číslo rozhodnutí v případu ({$existing}) se liší od podání ({$record->decisionNumber}). Případ se nemění.";
             }
+        }
+        // Převedení na jinou práci (den bez důvodu, ten věta nenese) se do
+        // případu doplní, jen když ho případ ještě nemá: druhé oznámení ke dni
+        // převedení bez něj v evidenci nedává smysl.
+        $transferredOn = $record->caseFields['transferred_on'] ?? null;
+        if (!$record->isHzupn() && $unsettled && is_string($transferredOn)
+            && (int) ($case['transferred_other_work'] ?? 0) !== 1
+        ) {
+            $fields['transferred_other_work'] = 1;
+            $fields['transferred_on'] = $transferredOn;
+            $this->change($plan, 'transferred_on', 'Den převedení na jinou práci', null, $transferredOn);
         }
         if ($record->isHzupn() && $unsettled) {
             foreach (self::HZUPN_COLUMNS as $column => $label2) {
@@ -467,8 +492,12 @@ final class SicknessImportPlanner
         $this->change($plan, $document->statusColumn(), 'Stav ' . $document->agendaCode(), null, 'vyřízeno předchozím programem');
         $plan['warnings'][] = 'Případ vznikne jako převzatý z předchozího programu; ' . $document->agendaCode()
             . ' se v něm vede jako podané předchozím programem a MyÚčto ho znovu nepodává.';
-        if ($document === SicknessDocumentKind::Nempri && $kind === SicknessBenefitKind::Nem) {
+        if ($document->isNempri() && $kind === SicknessBenefitKind::Nem) {
             $plan['warnings'][] = 'HZUPN k návratu do práce zůstává otevřené a hlídač lhůt ho dál drží.';
+        }
+        if ($document === SicknessDocumentKind::NempriTransfer) {
+            $plan['warnings'][] = 'Případ vznikne jen z oznámení ke dni převedení. První oznámení NEMPRI k němu zůstane '
+                . 'čekat; podal-li ho předchozí program, nahrajte i jeho soubor.';
         }
         if ($document === SicknessDocumentKind::Hzupn) {
             $plan['warnings'][] = 'Případ vznikne jen z HZUPN. NEMPRI k němu zůstane čekat; podal-li ho předchozí program, '
@@ -566,6 +595,12 @@ final class SicknessImportPlanner
             return $found;
         }
 
+        if (!$record->eventMonthKnown()) {
+            return ['blocker' => 'Oznámení s rozhodným obdobím ke dni převedení nenese den vzniku události a jeho '
+                . 'rozhodné období patří k převedení, ne k události. K případu se přiřadí jen podle čísla '
+                . 'rozhodnutí: nahrajte nejdřív první oznámení NEMPRI k téže události, nebo případ založte '
+                . 'ručně, a import zopakujte.'] + $none;
+        }
         $monthStart = $record->eventMonthStart();
         $monthEnd = $record->eventMonthEnd();
         if ($monthStart === null || $monthEnd === null) {

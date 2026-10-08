@@ -10756,6 +10756,7 @@
         "predecessor": "filed by the previous program"
       },
       "documents": {
+        "nempri_transfer": "NEMPRI as of the transfer date",
         "nempri": "NEMPRI",
         "hzupn": "HZUPN"
       },
@@ -10769,6 +10770,13 @@
         "edit": "Edit",
         "save": "Save",
         "cancel": "Discard changes",
+        "previewNempriTransfer": "Preview NEMPRI as of the transfer date",
+        "prepareNempriTransfer": "Prepare NEMPRI as of the transfer date",
+        "dispatchNempriTransfer": "Send NEMPRI as of the transfer date via data box",
+        "recordAcceptedNempriTransfer": "Record acceptance of NEMPRI as of the transfer date",
+        "recordRejectedNempriTransfer": "Record rejection of NEMPRI as of the transfer date",
+        "recordPredecessorNempriTransfer": "NEMPRI as of the transfer date filed by the previous program",
+        "reopenPredecessorNempriTransfer": "NEMPRI as of the transfer date not filed by the previous program",
         "previewNempri": "Preview NEMPRI",
         "prepareNempri": "Prepare NEMPRI",
         "previewHzupn": "Preview HZUPN",
@@ -10807,6 +10815,7 @@
       },
       "dispatch": {
         "title": {
+          "nempri_transfer": "NEMPRI as of the transfer date — sending via data box",
           "nempri": "NEMPRI — sending via data box",
           "hzupn": "HZUPN — sending via data box"
         },
@@ -10848,6 +10857,7 @@
         "applicationTo": "Claims the benefit until",
         "child": "Child",
         "caredPerson": "Cared-for person",
+        "maternityChildHint": "A regular start of maternity benefit carries no child, the notice only gives the start date. Fill in the child and the reason only when the child was taken into care.",
         "caredPersonHint": "Pick a dependant from the employee's card — the birth number is filled in automatically. If the person is not on record, enter the first name, last name and date of birth.",
         "caredFirstName": "First name",
         "caredLastName": "Last name",
@@ -10895,7 +10905,7 @@
         "transferredOtherWork": "Transferred to other work",
         "transferredOn": "Transfer date",
         "transferReason": "Reason for the transfer",
-        "transferReasonHint": "If the employee was transferred because of pregnancy, maternity or breastfeeding, the decisive period may be set to the transfer date when that is more favourable (section 19(6) of Act No. 187/2006 Coll.). The application sends one notice with the more favourable period. It does not yet build the second notice with the decisive period as of the transfer date, which ČSSZ requires at the same time: file it through the ČSSZ ePortal.",
+        "transferReasonHint": "If the employee was transferred because of pregnancy, maternity or breastfeeding, the decisive period may be set to the transfer date when that is more favourable (section 19(6) of Act No. 187/2006 Coll.). When the transfer date falls in an earlier month than the social event, the case carries two NEMPRI notices: the first with the decisive period as of the event and the second as of the transfer date. Both are filed at the same time with the same deadline, ČSSZ picks the more favourable period.",
         "transferReasons": {
           "pregnancy": "Pregnancy",
           "maternity": "Maternity",
@@ -11789,6 +11799,7 @@
       }
     },
     "server_codes": {
+      "nempri_transfer_not_required": "The second NEMPRI notice as of the transfer date is not filed for this case: the employee was not transferred because of pregnancy, maternity or breastfeeding in an earlier month than the social event. Check the transfer and its reason in the case.",
       "nempri_decision_number_missing": "The decision number is missing (for an e-sick-note or eOČR, the number from the doctor's decision). ČSSZ uses it to match the notice to the decision. Fill it in on the benefit case.",
       "nempri_relationship_code_invalid": "The relationship to the cared-for person is not a ČSSZ code-list value for this benefit type. Select it from the list on the benefit case.",
       "nempri_relationship_code_not_in_kind": "The relationship to the cared-for person is only filled in for care benefit and long-term care benefit.",
@@ -11797,6 +11808,7 @@
       "nempri_maternity_care_reason_invalid": "The reason for taking the child into care must be a value from the CIS_DUVPREVZETI code list. Select it from the list.",
       "nempri_maternity_care_reason_not_in_kind": "The reason for taking the child into care is only filled in for maternity benefit.",
       "nempri_maternity_care_reason_with_decision_number": "With a reason for taking the child into care the submission must not carry a decision number. Remove it on the benefit case.",
+      "nempri_maternity_child_without_care_reason": "A regular start of maternity benefit carries no child. Fill in the reason for taking the child into care, or remove the child from the case.",
       "nempri_maternity_care_child_missing": "When the child was taken into care, the application must name that child.",
       "sickness_event_after_employment": "The insured event began after the employment ended and this benefit type has no protection period. Check the event start date or the employment end date.",
       "sickness_event_outside_protection_period": "The insured event began after the protection period following the end of employment (section 15 of Act No. 187/2006 Coll.). No entitlement arose from this employment.",
@@ -11824,6 +11836,7 @@
       "nempri_decisive_payroll_source_invalid": "A frozen payroll revision does not match its fingerprint, so the decisive period cannot be built from it. Contact support.",
       "nempri_payment_connection_partner_settlement": "The wage is paid through a partner, so MyÚčto does not know the account or address for paying the benefit, which NEMPRI requires. Correct the payout method in the person's payout profile, or submit the notification outside the application.",
       "nempri_payment_address_invalid": "The address for paying the benefit needs a municipality, a house number and a postal code. Correct it on the person card.",
+      "nempri_bank_code_unknown": "The bank code of the payout account is not in the current Czech National Bank code list, so ČSSZ would reject the NEMPRI notice. Correct the account on the person card.",
       "nempri_payment_connection_invalid": "The employee's payout account is neither a valid Czech account nor an IBAN, so it cannot be written to NEMPRI. Correct it on the person card.",
       "nempri_payment_connection_missing": "The employee's payout profile has no account the wage is paid to. Without it ČSSZ will request the payment method and the benefit will be delayed. Add the account on the person card.",
       "nempri_periods_invalid": "Care days must be a list of from–to periods.",

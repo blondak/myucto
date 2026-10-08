@@ -46,6 +46,37 @@ final class SicknessDocumentXmlReaderTest extends TestCase
     }
 
     /**
+     * Druhé oznámení s rozhodným obdobím ke dni převedení (Všeobecné zásady
+     * NEMPRI, § 19 odst. 6) se pozná podle období končícího měsícem před
+     * převedením. Neurčuje měsíc události; když se podle případu ukáže, že
+     * převedení leží v měsíci události, je to první oznámení.
+     */
+    public function testTransferNoticeIsRecognisedByItsDecisivePeriod(): void
+    {
+        $read = static fn (string $roTo, string $probable = '30000'): SicknessImportRecord => (new SicknessDocumentXmlReader())->read(
+            SicknessImportXmlFixtures::nempri25('NEM', self::BIRTH_NUMBER, [
+                'decision' => 'A1234567',
+                'transferredOn' => '2026-02-10',
+                'roFrom' => '2025-02-01',
+                'roTo' => $roTo,
+                'probable' => $probable,
+            ]),
+        )['records'][0];
+
+        $transfer = $read('2026-01-31');
+        self::assertSame(SicknessDocumentKind::NempriTransfer, $transfer->document);
+        self::assertFalse($transfer->eventMonthKnown());
+        self::assertSame('2026-02-10', $transfer->caseFields['transferred_on']);
+        self::assertSame(SicknessDocumentKind::NempriTransfer, $transfer->classifiedForEvent('2026-04-07')->document);
+        self::assertSame(SicknessDocumentKind::Nempri, $transfer->classifiedForEvent('2026-02-20')->document);
+
+        self::assertSame(SicknessDocumentKind::NempriTransfer, $read('2026-02-09')->document);
+        $primary = $read('2026-03-31');
+        self::assertSame(SicknessDocumentKind::Nempri, $primary->document);
+        self::assertTrue($primary->eventMonthKnown());
+    }
+
+    /**
      * HZUPN konec neschopnosti nenese, odvozuje se ze dne před návratem do práce.
      * Po víkendu je odvozená neděle jen horní mez: neschopnost skončila nejpozději
      * v neděli, nejdřív v pátek.

@@ -63,6 +63,60 @@ final readonly class SicknessImportRecord
     }
 
     /**
+     * Druhé oznámení ke dni převedení se ve větě pozná jen podle rozhodného
+     * období. U nemocenského věta den vzniku nenese, takže převedení ve
+     * stejném měsíci jako událost (obě období stejná) se rozliší až podle
+     * případu: pak jde o první oznámení.
+     */
+    public function classifiedForEvent(string $eventFrom): self
+    {
+        $transferredOn = $this->caseFields['transferred_on'] ?? null;
+        if ($this->document !== SicknessDocumentKind::NempriTransfer
+            || !is_string($transferredOn)
+            || substr($transferredOn, 0, 7) < substr($eventFrom, 0, 7)
+        ) {
+            return $this;
+        }
+
+        return new self(
+            $this->documentType,
+            $this->position,
+            $this->sequence,
+            SicknessDocumentKind::Nempri,
+            $this->kind,
+            $this->firstName,
+            $this->lastName,
+            $this->birthNumber,
+            $this->birthDate,
+            $this->employerVariableSymbol,
+            $this->employerBusinessId,
+            $this->employmentFrom,
+            $this->employmentTo,
+            $this->decisionNumber,
+            $this->osszCode,
+            $this->incapacityFrom,
+            $this->incapacityTo,
+            $this->decisiveTo,
+            $this->issuedOn,
+            $this->returnedOn,
+            $this->caseFields,
+            $this->workDays,
+            $this->notes,
+            $this->personReport,
+            $this->incapacityToDerived,
+        );
+    }
+
+    /**
+     * Dá se z rozhodného období odvodit měsíc události? U druhého oznámení ke
+     * dni převedení ne: nese období k převedení, ne k události.
+     */
+    public function eventMonthKnown(): bool
+    {
+        return $this->document !== SicknessDocumentKind::NempriTransfer;
+    }
+
+    /**
      * První den, ve kterém může ve skutečnosti ležet poslední den neschopnosti.
      *
      * HZUPN nese jen datum návratu do práce, takže poslední den neschopnosti je
