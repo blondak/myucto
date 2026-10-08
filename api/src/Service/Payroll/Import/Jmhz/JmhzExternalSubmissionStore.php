@@ -455,6 +455,99 @@ final class JmhzExternalSubmissionStore
     }
 
     /**
+     * Účinný formulář měsíčního hlášení předchozího programu pro každý spárovaný
+     * pracovní vztah a měsíc roku: z podání, která stále platí ({@see inForceSql()}),
+     * v pořadí odeslání. Pozdější řádný nebo opravný formulář vztahu přepíše dřívější,
+     * stornovací formulář (`S`) ho zruší. Formulář, jehož obsah nejde přečíst, se
+     * vynechá - neznámý obsah se s ničím porovnávat nesmí.
+     *
+     * Obsah se čte podle zdroje: nahrané XML nese formulář tak, jak ho přečetl
+     * {@see JmhzReportReader}, PAMICA atributy datového slovníku, které se skládají
+     * zpátky toutéž čtečkou ({@see JmhzAttributeDocument}). Obojí tak dá týž
+     * {@see JmhzReportForm}.
+     *
+     * @return list<array{submission_id:int,submission_type:?string,submitted_at:?string,period:string,
+     *   employee_id:?int,employment_id:int,form:JmhzReportForm}>
+     */
+    public function effectiveMonthlyForms(int $supplierId, string $environment, int $year): array
+    {
+        if (!$this->db->hasTable('payroll_external_jmhz_submission_forms')) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT f.id, f.position, f.form_type, f.employee_id, f.employment_id, f.payload_ciphertext,
+                    s.id AS submission_id, s.source, s.period, s.submission_type, s.submission_guid,
+                    s.filled_at, s.submitted_at
+               FROM payroll_external_jmhz_submissions s
+               JOIN payroll_external_jmhz_submission_forms f
+                 ON f.supplier_id = s.supplier_id AND f.submission_id = s.id
+              WHERE s.supplier_id = ? AND s.environment = ? AND s.document_kind = 'monthly'
+                AND s.period BETWEEN ? AND ? AND s.status = 'sent'
+                AND (s.submission_type IS NULL OR s.submission_type <> 'S')
+                AND f.employment_id IS NOT NULL
+                " . self::inForceSql('s', $this->db->hasTable('payroll_imported_jmhz_protocols')) . "
+              ORDER BY s.period, COALESCE(s.submitted_at, s.filled_at), s.id, f.position"
+        );
+        $stmt->execute([$supplierId, $environment, sprintf('%04d-01', $year), sprintf('%04d-12', $year)]);
+        $reader = new JmhzReportReader();
+        $out = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $key = $row['period'] . '|' . $row['employment_id'];
+            if ($row['form_type'] === 'S') {
+                unset($out[$key]);
+                continue;
+            }
+            $form = $this->monthlyForm($supplierId, $row, $reader);
+            if ($form === null) {
+                unset($out[$key]);
+                continue;
+            }
+            $out[$key] = [
+                'submission_id' => (int) $row['submission_id'],
+                'submission_type' => $row['submission_type'],
+                'submitted_at' => $row['submitted_at'] ?? $row['filled_at'],
+                'period' => (string) $row['period'],
+                'employee_id' => $row['employee_id'] === null ? null : (int) $row['employee_id'],
+                'employment_id' => (int) $row['employment_id'],
+                'form' => $form,
+            ];
+        }
+
+        return array_values($out);
+    }
+
+    /** @param array<string,mixed> $row */
+    private function monthlyForm(int $supplierId, array $row, JmhzReportReader $reader): ?JmhzReportForm
+    {
+        try {
+            $payload = json_decode($this->sensitive->reveal((string) $row['payload_ciphertext'], PayrollSensitiveField::EXTERNAL_JMHZ_PAYLOAD,
+                $supplierId, (int) $row['id'], PayrollRevealPurpose::SUBMISSION_CSSZ_REGISTRATION), true);
+            if (!is_array($payload)) {
+                return null;
+            }
+            if ($row['source'] === self::SOURCE_PAMICA) {
+                if (is_string($payload['error'] ?? null) || !is_array($payload['attributes'] ?? null) || $payload['attributes'] === []) {
+                    return null;
+                }
+                $period = (string) $row['period'];
+                $document = JmhzAttributeDocument::form([
+                    'guid' => $row['submission_guid'] ?? '00000000-0000-0000-0000-000000000000',
+                    'type' => $row['submission_type'] ?? 'R',
+                    'year' => (int) substr($period, 0, 4),
+                    'month' => (int) substr($period, 5, 2),
+                    'filled_at' => str_replace(' ', 'T', (string) ($row['filled_at'] ?? $period . '-01 00:00:00')),
+                ], $payload['attributes']);
+
+                return $reader->formFromDocument($document, (int) $row['position']);
+            }
+
+            return new JmhzReportForm(...$payload);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
      * Odebere převzaté podání z historie (i s formuláři) - když záznam neodpovídá
      * skutečnosti (hlášení ve skutečnosti neodešlo, nahrané omylem). Vrací, jestli
      * v téhle firmě a prostředí nějaké bylo.

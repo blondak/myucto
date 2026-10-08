@@ -6,6 +6,7 @@ export type {
   TakeoverCheck,
   TakeoverEstimatedStart,
   TakeoverGap,
+  TakeoverJmhzFormDifference,
   TakeoverLayerDifference,
   TakeoverLayerMetric,
   TakeoverLayerOneSided,
