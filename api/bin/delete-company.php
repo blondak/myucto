@@ -120,9 +120,10 @@ function companyTables(PDO $pdo, string $schema): array
 
 /**
  * Zbytek, který se navzájem drží v cyklu vazeb (řádek firmy odkazuje na svou výchozí
- * měnu, měna na firmu). Smaže se s vypnutou kontrolou cizích klíčů jen tehdy, když na
- * mazané tabulky neodkazuje nic jiného než ony samy, a po smazání se ověří, že žádný
- * jiný řádek databáze neodkazuje na smazaný řádek; jinak výjimka a celá transakce zpět.
+ * měnu, měna na firmu). Tabulky firmy se smažou s vypnutou kontrolou cizích klíčů,
+ * řádek firmy až po jejím zapnutí - vazby cizích tabulek na firmu (uživatel s firmou
+ * jako výchozí, `SET NULL`) tak databáze odpojí sama. Nakonec se ověří, že žádný jiný
+ * řádek databáze neodkazuje na smazaný řádek; jinak výjimka a celá transakce zpět.
  *
  * @param list<string> $tables
  * @param array<string,string> $errors
@@ -149,11 +150,14 @@ function deleteCycle(PDO $pdo, string $schema, array $tables, Closure $where, ar
     $deleted = 0;
     $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
     try {
-        foreach ($tables as $table) {
+        foreach (array_diff($tables, ['supplier']) as $table) {
             $deleted += (int) $pdo->exec("DELETE FROM `{$table}` WHERE {$where($table)}");
         }
     } finally {
         $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
+    }
+    if (in_array('supplier', $tables, true)) {
+        $deleted += (int) $pdo->exec("DELETE FROM `supplier` WHERE {$where('supplier')}");
     }
     if ($orphans() !== $before) {
         throw new RuntimeException('Na řádky firmy odkazují jiná data, smazání nejde dokončit: ' . implode(' | ', $errors));
