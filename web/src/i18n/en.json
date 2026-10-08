@@ -11505,6 +11505,7 @@
         "jmhz_protocol_reverify_channel_unsupported": "Only a protocol retrieved from the VREP gateway can be re-verified. This protocol was received through a different channel.",
         "jmhz_protocol_reverify_not_found": "No protocol was found for this submission, so it cannot be re-verified.",
         "jmhz_protocol_reverify_unavailable": "The submission platform is currently unavailable, the protocol cannot be re-verified. Try again shortly.",
+        "jmhz_protocol_shape_undocumented": "The shape of the ČSSZ protocol for this kind of submission is not documented yet. The protocol is stored with the submission; record the processing result from it manually.",
         "jmhz_protocol_signature_detached": "The protocol's signature does not contain an embedded digest; only an attached signature is supported. Contact support.",
         "jmhz_protocol_signature_invalid": "The CSSZ protocol signature is not valid, the signature content does not match the signed data. Contact support.",
         "jmhz_protocol_signature_missing": "The CSSZ protocol does not contain a signed timestamp or its value. Contact support.",

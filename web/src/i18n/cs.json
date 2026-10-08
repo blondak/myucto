@@ -11505,6 +11505,7 @@
         "jmhz_protocol_reverify_channel_unsupported": "Znovu ověřit lze jen protokol dotažený z brány VREP. Tento protokol byl získán jiným kanálem.",
         "jmhz_protocol_reverify_not_found": "Protokol k tomuto podání nebyl nalezen, znovu ho ověřit nelze.",
         "jmhz_protocol_reverify_unavailable": "Platforma podání není momentálně k dispozici, protokol nelze znovu ověřit. Zkuste to za chvíli.",
+        "jmhz_protocol_shape_undocumented": "Tvar protokolu ČSSZ k tomuto druhu podání zatím není doložený. Protokol je uložený u podání; výsledek zpracování zapište podle něj ručně.",
         "jmhz_protocol_signature_detached": "Podpis protokolu neobsahuje vložený otisk; podporovaný je jen vložený (attached) podpis. Obraťte se na podporu.",
         "jmhz_protocol_signature_invalid": "Podpis protokolu ČSSZ neplatí, obsah podpisu neodpovídá podepsaným datům. Obraťte se na podporu.",
         "jmhz_protocol_signature_missing": "Protokol ČSSZ neobsahuje podepsanou časovou značku nebo její hodnotu. Obraťte se na podporu.",

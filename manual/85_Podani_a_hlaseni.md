@@ -893,7 +893,13 @@ Vyberte **Test** nebo **Produkci** ještě před přípravou a pak stiskněte
 doložitelný pokus; aplikace jej sama neopakuje ani se sama neptá na stav.
 
 Po převzetí bránou klikněte ručně na **Zjistit výsledek**. Potvrzení o převzetí
-není přijetí registrace — rozhoduje až protokol ČSSZ. Až je protokol načtený,
+není přijetí registrace — rozhoduje až protokol ČSSZ. Protokol se k podání uloží
+a podle výsledku formuláře se podání vede jako přijaté, částečně přijaté nebo
+odmítnuté; u odmítnutí je u podání kód a text chyby od ČSSZ. Uvádí-li protokol
+k přijaté přihlášce A1 OIČ a ID PPV, aplikace je zapíše do identifikátorů osoby
+a pracovního vztahu s doloženým původem „protokol ČSSZ". Protokol, ve kterém
+čísla zatím chybí (ČSSZ je přiděluje dodatečně), přijetí potvrdí, ale čísla
+nezapíše. Až je protokol načtený,
 stiskněte **Uzavřít**, aby se dokončila transakce u brány. Neuzavírejte přenos
 během čekání na protokol, jinak by nebylo možné výsledek bezpečně načíst.
 Testovací a produkční pokusy jsou oddělené; pracovní vztah není přihlášený,
