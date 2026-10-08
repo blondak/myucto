@@ -39,7 +39,7 @@ final class PayrollObstacleCompensationFlowTest extends TestCase
     protected function setUp(): void
     {
         $this->bootPayrollFullFlow();
-        $this->officeId = $this->createOffice('JMHZ', 'Syntetická registrace JMHZ', '9990001234');
+        $this->officeId = $this->createOffice('JMHZ', 'Syntetická registrace JMHZ', '1100001237');
         $this->configureSocialInsuranceOutput($this->officeId);
         $this->configureHealthInsuranceOutput();
         $this->baseComponentId = $this->createComponent('MZDA_MESICNI_PREKAZKY', 'base_wage', 'regular');

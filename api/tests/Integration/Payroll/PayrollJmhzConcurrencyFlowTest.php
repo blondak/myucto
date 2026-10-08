@@ -40,7 +40,7 @@ final class PayrollJmhzConcurrencyFlowTest extends TestCase
     protected function setUp(): void
     {
         $this->bootPayrollFullFlow();
-        $this->officeId = $this->createOffice('SOUB', 'Syntetická registrace souběhu', '9990004321');
+        $this->officeId = $this->createOffice('SOUB', 'Syntetická registrace souběhu', '1100004322');
         $this->configureSocialInsuranceOutput($this->officeId);
         $this->configureHealthInsuranceOutput();
         $this->baseComponentId = $this->createComponent('MZDA_SOUBEH_FLOW', 'base_wage', 'regular');

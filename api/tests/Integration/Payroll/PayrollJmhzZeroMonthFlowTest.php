@@ -39,7 +39,7 @@ final class PayrollJmhzZeroMonthFlowTest extends TestCase
     protected function setUp(): void
     {
         $this->bootPayrollFullFlow();
-        $this->officeId = $this->createOffice('JMHZ0', 'Syntetická registrace JMHZ', '9990004321');
+        $this->officeId = $this->createOffice('JMHZ0', 'Syntetická registrace JMHZ', '1100004322');
         $this->configureSocialInsuranceOutput($this->officeId);
         $this->configureHealthInsuranceOutput();
         $this->baseComponentId = $this->createComponent('MZDA_NULA_FLOW', 'base_wage', 'regular');

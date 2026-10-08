@@ -183,7 +183,7 @@ trait PayrollFullFlowTrait
     private function createOffice(
         string $code = 'FLOW',
         string $name = 'Syntetická účtárna',
-        string $variableSymbol = '1234567890',
+        string $variableSymbol = '1101234563',
     ): int
     {
         $this->db->pdo()->prepare(

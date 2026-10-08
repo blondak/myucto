@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Service\Codebook\HealthInsurers;
 use MyInvoice\Service\Payroll\Posting\PayrollPostingAccountPolicy;
+use MyInvoice\Service\Payroll\Submission\CsszEmployerVariableSymbol;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollCsszDistrictCodebook;
 
 final class PayrollEmployerSettingsValidator
@@ -211,6 +212,42 @@ final class PayrollEmployerSettingsValidator
         }
 
         return $offices;
+    }
+
+    /**
+     * Testovací VS, který se uložením MĚNÍ nebo zakládá, musí projít stejnou
+     * kontrolou ČSSZ jako při podání (v testovacím prostředí jde do registrací
+     * i JMHZ místo ostrého). Hodnotu beze změny nechává být: existující
+     * instalace mají zástupné symboly a uložení jiného pole účtárny kvůli nim
+     * selhat nesmí.
+     *
+     * @param list<array{code:string,test_social_security_variable_symbol:?string}> $offices
+     * @param list<array<string,mixed>> $storedOffices
+     */
+    public function assertChangedTestVariableSymbols(array $offices, array $storedOffices): void
+    {
+        $stored = [];
+        foreach ($storedOffices as $office) {
+            $stored[strtoupper((string) ($office['code'] ?? ''))] =
+                trim((string) ($office['test_social_security_variable_symbol'] ?? ''));
+        }
+        foreach ($offices as $office) {
+            $symbol = $office['test_social_security_variable_symbol'];
+            if ($symbol === null || ($stored[$office['code']] ?? null) === $symbol) {
+                continue;
+            }
+            $reason = CsszEmployerVariableSymbol::invalidReason($symbol);
+            if ($reason !== null) {
+                throw new PayrollOfficeVariableSymbolInvalidException(
+                    $office['code'],
+                    'test_social_security_variable_symbol',
+                    $reason,
+                    "Testovací VS ČSSZ účtárny {$office['code']} ({$symbol}) není platný: "
+                        . "{$reason}. ČSSZ by podání odmítla. Opište symbol přesně "
+                        . 'z oznámení ČSSZ.',
+                );
+            }
+        }
     }
 
     /** @return array<string,string> */

@@ -386,6 +386,7 @@ final class JmhzBlockerCatalog
         'jmhz_mapping_not_allowed' => 'components',
         'jmhz_negative_or_deferred_income_unsupported' => 'components',
         'jmhz_obligation_missing' => 'runs',
+        'jmhz_office_variable_symbol_invalid' => 'office',
         'jmhz_office_variable_symbol_mismatch' => 'office',
         'jmhz_office_variable_symbol_missing' => 'office',
         'jmhz_ordinary_evidence_catalog_mismatch' => 'support',

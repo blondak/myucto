@@ -150,6 +150,36 @@ const registrationForm = reactive({
   social_security_variable_symbol: '',
   source_reference: '',
 })
+/*
+ * Kontrolní číslici a kód okresu VS ČSSZ ověřuje server stejným pravidlem jako
+ * příprava podání; chyba se ukazuje u pole, ne jen v toastu.
+ */
+const registrationVsServerError = ref<string | null>(null)
+const testVsServerErrors = ref<Record<string, string>>({})
+
+type CsszVariableSymbolError = { office_code?: string, reason?: string }
+
+function csszVariableSymbolError(error: unknown): CsszVariableSymbolError | null {
+  if (!isAxiosError<{ error?: { code?: string } & CsszVariableSymbolError }>(error)) return null
+  const body = error.response?.data?.error
+  return body?.code === 'payroll_office_variable_symbol_invalid' ? body : null
+}
+
+function csszVariableSymbolMessage(details: CsszVariableSymbolError): string {
+  return t('payroll.employer.validation.cssz_variable_symbol_invalid', { reason: details.reason ?? '' })
+}
+
+function testVsServerError(office: FormOffice): string | null {
+  return testVsServerErrors.value[office.code.trim().toUpperCase()] ?? null
+}
+
+function clearTestVsServerError(office: FormOffice): void {
+  const code = office.code.trim().toUpperCase()
+  if (code in testVsServerErrors.value) {
+    const { [code]: _removed, ...rest } = testVsServerErrors.value
+    testVsServerErrors.value = rest
+  }
+}
 
 const canWrite = computed(() => auth.canWrite('payroll.settings'))
 const canWriteSubmissions = computed(() => auth.canWrite('payroll.submissions'))
@@ -289,10 +319,18 @@ async function save() {
     })
     settings.value = value
     fillForm(value)
+    testVsServerErrors.value = {}
     toast.success(t('payroll.employer.saved'))
   } catch (error: unknown) {
+    const vsError = csszVariableSymbolError(error)
     if (isAxiosError(error) && error.response?.status === 409) {
       conflict.value = true
+    } else if (vsError?.office_code) {
+      testVsServerErrors.value = {
+        ...testVsServerErrors.value,
+        [vsError.office_code]: csszVariableSymbolMessage(vsError),
+      }
+      toast.error(t('payroll.employer.save_failed'))
     } else {
       const message = isAxiosError<{ error?: { message?: string } }>(error)
         ? error.response?.data?.error?.message
@@ -349,6 +387,7 @@ async function openRegistration(office: PayrollOffice) {
     ?? new Date().toISOString().slice(0, 10)
   registrationForm.social_security_variable_symbol = ''
   registrationForm.source_reference = ''
+  registrationVsServerError.value = null
   try {
     registrationHistory.value = await payrollApi.officeRegistrations(office.id)
   } catch {
@@ -375,6 +414,7 @@ const registrationVsValid = computed(() =>
 async function saveRegistration() {
   if (!registrationOffice.value || !registrationVsValid.value) return
   registrationSaving.value = true
+  registrationVsServerError.value = null
   try {
     const saved = await payrollApi.createOfficeRegistration(registrationOffice.value.id, {
       effective_from: registrationForm.effective_from,
@@ -384,6 +424,11 @@ async function saveRegistration() {
     registrationHistory.value = [saved, ...registrationHistory.value]
     toast.success(t('payroll.employer.registration_saved'))
   } catch (error: unknown) {
+    const vsError = csszVariableSymbolError(error)
+    if (vsError !== null) {
+      registrationVsServerError.value = csszVariableSymbolMessage(vsError)
+      return
+    }
     const message = isAxiosError<{ error?: { message?: string } }>(error)
       ? error.response?.data?.error?.message : null
     toast.error(message || t('payroll.employer.registration_save_failed'))
@@ -823,8 +868,9 @@ onMounted(async () => {
                   <span v-else class="text-xs text-neutral-500">{{ t('payroll.employer.registration_after_office_save') }}</span>
                 </td>
                 <td class="px-3 py-3 align-top">
-                  <input v-model="office.test_social_security_variable_symbol" data-office-test-vs type="text" inputmode="numeric" maxlength="10" :disabled="!canWrite" class="h-9 w-36 rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
-                  <span class="mt-1 block max-w-40 text-xs text-neutral-500">{{ t('payroll.employer.office_test_social_security_variable_symbol_hint') }}</span>
+                  <input v-model="office.test_social_security_variable_symbol" data-office-test-vs type="text" inputmode="numeric" maxlength="10" :disabled="!canWrite" :aria-invalid="testVsServerError(office) !== null" class="h-9 w-36 rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500" @input="clearTestVsServerError(office)">
+                  <span v-if="testVsServerError(office)" class="mt-1 block max-w-40 text-xs text-danger-600" data-office-test-vs-error>{{ testVsServerError(office) }}</span>
+                  <span v-else class="mt-1 block max-w-40 text-xs text-neutral-500">{{ t('payroll.employer.office_test_social_security_variable_symbol_hint') }}</span>
                 </td>
                 <td class="px-3 py-3 align-top">
                   <label class="inline-flex min-h-9 cursor-pointer items-center gap-2">
@@ -873,8 +919,9 @@ onMounted(async () => {
               </label>
               <label class="block">
                 <span class="mb-1 block text-xs text-neutral-500">{{ t('payroll.employer.office_test_social_security_variable_symbol') }}</span>
-                <input v-model="office.test_social_security_variable_symbol" type="text" inputmode="numeric" maxlength="10" :disabled="!canWrite" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
-                <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.employer.office_test_social_security_variable_symbol_hint') }}</span>
+                <input v-model="office.test_social_security_variable_symbol" type="text" inputmode="numeric" maxlength="10" :disabled="!canWrite" :aria-invalid="testVsServerError(office) !== null" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500" @input="clearTestVsServerError(office)">
+                <span v-if="testVsServerError(office)" class="mt-1 block text-xs text-danger-600">{{ testVsServerError(office) }}</span>
+                <span v-else class="mt-1 block text-xs text-neutral-500">{{ t('payroll.employer.office_test_social_security_variable_symbol_hint') }}</span>
               </label>
               <label class="inline-flex min-h-10 cursor-pointer items-center gap-2">
                 <input v-model="office.is_active" type="checkbox" :disabled="!canWrite" class="h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500" @change="updateOfficeActivity(index)">
@@ -1061,12 +1108,17 @@ onMounted(async () => {
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.office_social_security_variable_symbol') }}<RequiredMark /></span>
-          <input v-model="registrationForm.social_security_variable_symbol" data-registration-vs type="text" inputmode="numeric" maxlength="10" :aria-invalid="!registrationVsValid" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm">
+          <input v-model="registrationForm.social_security_variable_symbol" data-registration-vs type="text" inputmode="numeric" maxlength="10" :aria-invalid="!registrationVsValid || registrationVsServerError !== null" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm" @input="registrationVsServerError = null">
           <span
             v-if="!registrationVsValid"
             class="mt-1 block text-xs text-danger-600"
             data-registration-vs-error
           >{{ t('payroll.employer.validation.registration_variable_symbol') }}</span>
+          <span
+            v-else-if="registrationVsServerError"
+            class="mt-1 block text-xs text-danger-600"
+            data-registration-vs-server-error
+          >{{ registrationVsServerError }}</span>
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.registration_source_reference') }}</span>

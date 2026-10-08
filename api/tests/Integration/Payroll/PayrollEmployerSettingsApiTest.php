@@ -228,17 +228,17 @@ final class PayrollEmployerSettingsApiTest extends TestCase
 
         $withTestVs = $this->payload('MAIN', 'Mzdová účtárna');
         $withTestVs['row_version'] = 1;
-        $withTestVs['offices'][0]['test_social_security_variable_symbol'] = '9988776655';
+        $withTestVs['offices'][0]['test_social_security_variable_symbol'] = '1112223332';
         $updated = $this->put($this->supplierId, $withTestVs);
         self::assertSame(200, $updated->getStatusCode());
         $office = $this->json($updated)['settings']['offices'][0];
-        self::assertSame('9988776655', $office['test_social_security_variable_symbol']);
+        self::assertSame('1112223332', $office['test_social_security_variable_symbol']);
 
         $stored = $this->db->pdo()->prepare(
             'SELECT test_social_security_variable_symbol FROM payroll_offices WHERE supplier_id = ? AND code = ?'
         );
         $stored->execute([$this->supplierId, 'MAIN']);
-        self::assertSame('9988776655', $stored->fetchColumn());
+        self::assertSame('1112223332', $stored->fetchColumn());
     }
 
     public function testEffectiveOfficeRegistrationAcceptsEvidencedPastAndIsSessionTenantScoped(): void
@@ -251,7 +251,7 @@ final class PayrollEmployerSettingsApiTest extends TestCase
         $officeId = (int) $this->json($created)['settings']['offices'][0]['id'];
         $body = [
             'effective_from' => '2026-01-01',
-            'social_security_variable_symbol' => '0012345678',
+            'social_security_variable_symbol' => '1101234563',
             'source_reference' => 'synthetic:cssz-confirmation',
         ];
 
@@ -298,14 +298,14 @@ final class PayrollEmployerSettingsApiTest extends TestCase
         $withoutSource = $this->registrationAction->create(
             $this->request('POST', $this->supplierId)->withParsedBody([
                 'effective_from' => '2026-01-01',
-                'social_security_variable_symbol' => '0012345678',
+                'social_security_variable_symbol' => '1101234563',
             ]),
             new Response(),
             ['officeId' => (string) $officeId],
         );
         self::assertSame(201, $withoutSource->getStatusCode());
         self::assertSame(
-            '0012345678',
+            '1101234563',
             $this->json($withoutSource)['registration']['social_security_variable_symbol'],
         );
         self::assertSame('', $this->json($withoutSource)['registration']['source_reference']);
@@ -321,6 +321,83 @@ final class PayrollEmployerSettingsApiTest extends TestCase
         );
         self::assertSame(422, $withoutSymbol->getStatusCode());
         self::assertSame('validation_failed', $this->json($withoutSymbol)['error']['code']);
+    }
+
+    /**
+     * Kontrolní číslici a kód okresu VS ČSSZ dřív hlídala až příprava podání.
+     * Uložení nového nebo změněného testovacího VS ji musí hlídat taky, ale
+     * zástupný symbol, který už v databázi je, nesmí zablokovat uložení jiného
+     * pole účtárny.
+     */
+    public function testChangedTestVariableSymbolMustPassCsszCheck(): void
+    {
+        $created = $this->put($this->supplierId, $this->payload('MAIN', 'Mzdová účtárna'));
+        self::assertSame(200, $created->getStatusCode());
+
+        $invalid = $this->payload('MAIN', 'Mzdová účtárna');
+        $invalid['row_version'] = 1;
+        $invalid['offices'][0]['test_social_security_variable_symbol'] = '1112223334';
+        $rejected = $this->put($this->supplierId, $invalid);
+        self::assertSame(422, $rejected->getStatusCode());
+        $error = $this->json($rejected)['error'];
+        self::assertSame('payroll_office_variable_symbol_invalid', $error['code']);
+        self::assertSame('MAIN', $error['office_code']);
+        self::assertSame('test_social_security_variable_symbol', $error['field']);
+        self::assertStringContainsString('kontrolní číslice', $error['message']);
+
+        $valid = $invalid;
+        $valid['offices'][0]['test_social_security_variable_symbol'] = '1112223332';
+        self::assertSame(200, $this->put($this->supplierId, $valid)->getStatusCode());
+
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_offices SET test_social_security_variable_symbol = ? WHERE supplier_id = ? AND code = ?'
+        )->execute(['1112223334', $this->supplierId, 'MAIN']);
+        $renamed = $this->payload('MAIN', 'Přejmenovaná účtárna');
+        $renamed['row_version'] = 2;
+        $renamed['offices'][0]['test_social_security_variable_symbol'] = '1112223334';
+        $kept = $this->put($this->supplierId, $renamed);
+        self::assertSame(200, $kept->getStatusCode());
+        self::assertSame('Přejmenovaná účtárna', $this->json($kept)['settings']['offices'][0]['name']);
+    }
+
+    public function testNewOfficeRegistrationVariableSymbolMustPassCsszCheck(): void
+    {
+        if (!$this->db->hasTable('payroll_office_registration_versions')) {
+            self::markTestSkipped('Migrace 1595 neproběhla.');
+        }
+        $created = $this->put($this->supplierId, $this->payload('MAIN', 'Mzdová účtárna'));
+        self::assertSame(200, $created->getStatusCode());
+        $officeId = (int) $this->json($created)['settings']['offices'][0]['id'];
+        $register = fn (string $date, string $symbol): Response => $this->registrationAction->create(
+            $this->request('POST', $this->supplierId)->withParsedBody([
+                'effective_from' => $date,
+                'social_security_variable_symbol' => $symbol,
+            ]),
+            new Response(),
+            ['officeId' => (string) $officeId],
+        );
+
+        // Zástupný symbol starší instalace, uložený dřív, než kontrola existovala.
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_office_registration_versions
+                (supplier_id, office_id, effective_from, social_security_variable_symbol, source_reference)
+             VALUES (?, ?, "2025-01-01", "1101234564", "synthetic:placeholder")'
+        )->execute([$this->supplierId, $officeId]);
+
+        $typo = $register('2026-01-01', '1101234560');
+        self::assertSame(422, $typo->getStatusCode());
+        $error = $this->json($typo)['error'];
+        self::assertSame('payroll_office_variable_symbol_invalid', $error['code']);
+        self::assertSame('social_security_variable_symbol', $error['field']);
+        self::assertStringContainsString('kontrolní číslice', $error['message']);
+
+        $foreignDistrict = $register('2026-01-01', '0012345674');
+        self::assertSame(422, $foreignDistrict->getStatusCode());
+        self::assertStringContainsString('okresní správy', $this->json($foreignDistrict)['error']['message']);
+
+        // Nová verze se stejným VS jako dosud nic nemění, kontrola ji nesmí blokovat.
+        self::assertSame(201, $register('2026-01-01', '1101234564')->getStatusCode());
+        self::assertSame(201, $register('2026-02-01', '1101234563')->getStatusCode());
     }
 
     public function testCompositeForeignKeyRejectsOfficeFromAnotherTenant(): void

@@ -15,6 +15,7 @@ use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollEmployerLegacyIdentifierCarryOver;
 use MyInvoice\Service\Payroll\PayrollEmployerSettingsValidator;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\PayrollOfficeVariableSymbolInvalidException;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -78,7 +79,17 @@ final class PayrollEmployerSettingsAction
         $supplierId = $this->currentSupplierId($request);
         try {
             $normalized = $this->validator->validate($supplierId, $body);
+            $this->validator->assertChangedTestVariableSymbols(
+                $normalized['offices'],
+                $this->settings->get($supplierId)['offices'],
+            );
             $settings = $this->settings->save($supplierId, $normalized, (int) $version);
+        } catch (PayrollOfficeVariableSymbolInvalidException $e) {
+            return Json::error($response, 'payroll_office_variable_symbol_invalid', $e->getMessage(), 422, [
+                'office_code' => $e->officeCode,
+                'field' => $e->field,
+                'reason' => $e->reason,
+            ]);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (PayrollEmployerSettingsConflictException $e) {
