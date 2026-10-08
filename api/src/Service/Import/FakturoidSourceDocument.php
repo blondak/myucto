@@ -1,0 +1,207 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Import;
+
+/**
+ * Jak číst částky dokladu z Fakturoid API v3 a jak je porovnat s tím, co z nich
+ * spočítá náš kalkulátor. Sdílí ho import ({@see FakturoidImportService}), jeho
+ * zkouška nanečisto i oprava už převzatých dokladů
+ * (`api/bin/fix-fakturoid-imported-amounts.php`), aby všechny tři cesty četly
+ * zdroj stejně.
+ *
+ * Výpočet DPH tu NENÍ. Režim cen se převádí na `prices_include_vat` dokladu a DPH
+ * spočítá {@see \MyInvoice\Service\Invoice\InvoiceMath}, rekapitulace přijatého
+ * dokladu se převádí na jeho `vat_overrides` (§ 73 ZDPH), stejně jako u ručně
+ * zadaného dokladu.
+ *
+ * Doklad bez DPH (neplátce, sazba 0 nebo chybějící) se chová přesně jako před
+ * opravou #128: `prices_include_vat` zůstává 0, protože bez sazby cena s DPH nic
+ * neznamená, a rekapitulace se nulovou sazbou nepřepisuje.
+ */
+final class FakturoidSourceDocument
+{
+    /** Rozdíl, který ještě považujeme za haléřové zaokrouhlení. */
+    private const EPSILON = 0.005;
+
+    /**
+     * Největší rozdíl základu či daně jedné sazby, který se srovná rekapitulací.
+     * Větší rozdíl není zaokrouhlení, ale nesoulad položek (sleva, chybějící řádek)
+     * a ten se nepřepisuje, jen se doklad označí ke kontrole.
+     */
+    private const MAX_ALIGNABLE = 1.0;
+
+    /**
+     * Fakturoid `vat_price_mode`: `without_vat` (ceny položek bez DPH, výchozí)
+     * nebo `from_total_with_vat` (ceny položek včetně DPH, #128).
+     *
+     * @param array<string,mixed> $doc
+     */
+    public static function pricesIncludeVat(array $doc): bool
+    {
+        if ((string) ($doc['vat_price_mode'] ?? '') !== 'from_total_with_vat') {
+            return false;
+        }
+        foreach (($doc['lines'] ?? []) as $line) {
+            if (is_array($line) && self::lineRate($line) > 0.0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** @param array<string,mixed> $line */
+    public static function lineRate(array $line): float
+    {
+        return (float) ($line['vat_rate'] ?? 0);
+    }
+
+    /**
+     * Jednotková cena v režimu dokladu: bez DPH, nebo s DPH u `from_total_with_vat`.
+     * Do položky se ukládá tak, jak je, režim nese hlavička (`prices_include_vat`).
+     *
+     * @param array<string,mixed> $line
+     */
+    public static function lineUnitPrice(array $line): float
+    {
+        return (float) ($line['unit_price'] ?? 0);
+    }
+
+    /**
+     * Zdrojová rekapitulace DPH (`vat_rates_summary`). Hlavičkové `subtotal` může
+     * obsahovat zaokrouhlení, proto se porovnává s rekapitulací. Prázdná nebo
+     * chybějící rekapitulace = není s čím porovnat.
+     *
+     * @param array<string,mixed> $doc
+     * @return list<array{rate: float, base: float, vat: float}>
+     */
+    public static function vatSummary(array $doc): array
+    {
+        $out = [];
+        foreach (($doc['vat_rates_summary'] ?? []) as $row) {
+            if (!is_array($row) || !isset($row['base']) || !is_numeric($row['base'])) {
+                continue;
+            }
+            $key = number_format((float) ($row['vat_rate'] ?? 0), 2, '.', '');
+            $out[$key] ??= ['rate' => (float) $key, 'base' => 0.0, 'vat' => 0.0];
+            $out[$key]['base'] = round($out[$key]['base'] + (float) $row['base'], 2);
+            $out[$key]['vat'] = round($out[$key]['vat'] + (float) ($row['vat'] ?? 0), 2);
+        }
+        return array_values($out);
+    }
+
+    /**
+     * Zaokrouhlení celkové částky dokladu (`rounding_adjustment`). Jen haléřové
+     * vyrovnání pod 1 jednotku měny, větší hodnota není zaokrouhlení.
+     *
+     * @param array<string,mixed> $doc
+     */
+    public static function roundingAdjustment(array $doc): float
+    {
+        $value = $doc['rounding_adjustment'] ?? null;
+        if (!is_numeric($value)) {
+            return 0.0;
+        }
+        $value = round((float) $value, 2);
+        return abs($value) < 1.0 ? $value : 0.0;
+    }
+
+    /**
+     * Rozdíly mezi vypočtenou rekapitulací a zdrojem, po sazbách. U přenesené daňové
+     * povinnosti se porovnává jen základ: daň na dokladu dodavatele není.
+     *
+     * @param list<array{rate: float|int, base: float|int, vat: float|int}> $computed vat_breakdown z InvoiceMath
+     * @param list<array{rate: float, base: float, vat: float}> $source
+     * @return list<array{rate: float, base: float, vat: float, source_base: float, source_vat: float}>
+     */
+    public static function differences(array $computed, array $source, bool $reverseCharge = false): array
+    {
+        if ($source === []) {
+            return [];
+        }
+        $calc = [];
+        foreach ($computed as $row) {
+            $key = number_format((float) $row['rate'], 2, '.', '');
+            $calc[$key] ??= ['base' => 0.0, 'vat' => 0.0];
+            $calc[$key]['base'] += (float) $row['base'];
+            $calc[$key]['vat'] += (float) $row['vat'];
+        }
+        $src = [];
+        foreach ($source as $row) {
+            $src[number_format($row['rate'], 2, '.', '')] = $row;
+        }
+
+        $diffs = [];
+        foreach (array_unique([...array_keys($calc), ...array_keys($src)]) as $key) {
+            $key = (string) $key;
+            $base = round($calc[$key]['base'] ?? 0.0, 2);
+            $vat = round($calc[$key]['vat'] ?? 0.0, 2);
+            $sBase = round($src[$key]['base'] ?? 0.0, 2);
+            $sVat = round($src[$key]['vat'] ?? 0.0, 2);
+            $vatDiffers = !$reverseCharge && abs($vat - $sVat) > self::EPSILON;
+            if (abs($base - $sBase) > self::EPSILON || $vatDiffers) {
+                $diffs[] = ['rate' => (float) $key, 'base' => $base, 'vat' => $vat, 'source_base' => $sBase, 'source_vat' => $sVat];
+            }
+        }
+        return $diffs;
+    }
+
+    /**
+     * Rekapitulace pro `purchase_invoices.vat_overrides`, která srovná přijatý doklad
+     * na zdroj. Null, když rozdíl věrně převzít nejde (sazba na jedné straně chybí,
+     * rozdíl je větší než zaokrouhlení, nebo jde o nulovou sazbu, kde rozdíl
+     * základu není zaokrouhlení DPH). Prázdný seznam = není co srovnávat.
+     *
+     * @param list<array{rate: float, base: float, vat: float, source_base: float, source_vat: float}> $diffs
+     * @param list<array{rate: float|int, base: float|int, vat: float|int}> $computed
+     * @return list<array{rate: float, base: float, vat: float}>|null
+     */
+    public static function alignableOverrides(array $diffs, array $computed): ?array
+    {
+        if ($diffs === []) {
+            return [];
+        }
+        $rates = [];
+        foreach ($computed as $row) {
+            $rates[number_format((float) $row['rate'], 2, '.', '')] = true;
+        }
+        $out = [];
+        foreach ($diffs as $d) {
+            $key = number_format($d['rate'], 2, '.', '');
+            if ($d['rate'] <= 0.0 || !isset($rates[$key])
+                || abs($d['base'] - $d['source_base']) > self::MAX_ALIGNABLE
+                || abs($d['vat'] - $d['source_vat']) > self::MAX_ALIGNABLE) {
+                return null;
+            }
+            $out[] = ['rate' => $d['rate'], 'base' => $d['source_base'], 'vat' => $d['source_vat']];
+        }
+        return $out;
+    }
+
+    /**
+     * Lidská věta o rozdílech pro log, přehled úlohy i varování na dokladu.
+     *
+     * @param list<array{rate: float, base: float, vat: float, source_base: float, source_vat: float}> $diffs
+     */
+    public static function describe(array $diffs): string
+    {
+        $parts = [];
+        foreach ($diffs as $d) {
+            $parts[] = sprintf(
+                'sazba %s %%: základ %s / DPH %s, ve Fakturoidu %s / %s',
+                self::num($d['rate']),
+                self::num($d['base']),
+                self::num($d['vat']),
+                self::num($d['source_base']),
+                self::num($d['source_vat']),
+            );
+        }
+        return 'Částky se liší od Fakturoidu (' . implode('; ', $parts) . ').';
+    }
+
+    private static function num(float $value): string
+    {
+        return number_format($value, 2, ',', ' ');
+    }
+}

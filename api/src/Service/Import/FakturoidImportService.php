@@ -13,6 +13,7 @@ use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Currency\ExchangeRateApplier;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
+use MyInvoice\Service\Invoice\InvoiceMath;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
 use MyInvoice\Service\Invoice\TimeBilling;
@@ -40,6 +41,16 @@ use Psr\Log\LoggerInterface;
  * Platební stav (#121): doklady se zakládají jako draft, ale `status` z Fakturoidu
  * 'paid'/'cancelled' se promítne hned při importu (paid_at = `paid_on`) — viz
  * ImportedPaymentStateMapper. Ostatní stavy zůstávají draft (review flow).
+ *
+ * Částky (#128, #131): režim cen dokladu se přenáší do `prices_include_vat`, přijatý
+ * doklad dostává zdrojovou rekapitulaci DPH (`vat_overrides`) a zaokrouhlení. Po
+ * přepočtu se výsledek porovná se zdrojem ({@see FakturoidSourceDocument}) a rozdíl,
+ * který nejde věrně převzít, se nahlásí ke kontrole.
+ *
+ * Výsledek úlohy (#129, #130): počty per agenda a přehled nepřenesených dokladů jdou
+ * do `import_jobs.report`; úloha s odmítnutým nebo ke kontrole označeným dokladem
+ * končí `completed_with_warnings`. Zkouška nanečisto prochází stejné kontroly
+ * (sazby, přepočet, shoda se zdrojem) jako ostrý import, jen nic nezapíše.
  */
 final class FakturoidImportService
 {
@@ -81,6 +92,17 @@ final class FakturoidImportService
      */
     private ?int $lastCreatedClientId = null;
 
+    /** Vrátil `createExpense()` už existující doklad (dedup), ne nově založený? */
+    private bool $lastExpenseExisted = false;
+
+    /** Výstup úlohy pro `import_jobs.report` — viz {@see initReport()}. */
+    private array $report = [];
+
+    /** @var array<int,true> Fakturoid ID subjektů, které by zkouška nanečisto založila. */
+    private array $dryRunSubjects = [];
+
+    private const MAX_REPORTED_PROBLEMS = 500;
+
     public function run(int $jobId): void
     {
         $job = $this->loadJob($jobId);
@@ -99,6 +121,7 @@ final class FakturoidImportService
             if ($incremental && $bookmarkSince !== null) $msg .= ', incremental od ' . $bookmarkSince;
             if ($downloadAttachments) $msg .= ', s přílohami';
             $this->jobs->appendLog($jobId, $msg . '.');
+            $this->initReport($dryRun);
 
             if (!empty($params['include_clients']) || ($params['include_clients'] ?? null) === null) {
                 $this->importSubjects($jobId, $supplierId, $userId, $dryRun, $bookmarkSince);
@@ -112,19 +135,106 @@ final class FakturoidImportService
                 $this->importExpenses($jobId, $supplierId, $userId, $dryRun, $bookmarkSince, $downloadAttachments);
             }
 
-            $this->jobs->appendLog($jobId, 'Fakturoid import dokončen.');
-            $this->jobs->markCompleted($jobId);
-            $this->db->pdo()->prepare(
-                'UPDATE supplier SET fakturoid_last_imported_at = NOW() WHERE id = ?'
-            )->execute([$supplierId]);
+            $totals = $this->storeReport($jobId);
+            if ($totals['failed'] > 0 || $totals['review'] > 0) {
+                $this->jobs->appendLog($jobId, sprintf(
+                    'Fakturoid import dokončen s chybami: nepřeneseno %d, ke kontrole %d. Přehled je ve výsledku úlohy.',
+                    $totals['failed'],
+                    $totals['review'],
+                ));
+                $this->jobs->markCompletedWithWarnings($jobId);
+            } else {
+                $this->jobs->appendLog($jobId, 'Fakturoid import dokončen.');
+                $this->jobs->markCompleted($jobId);
+            }
+            // Zkouška nanečisto nic nezapsala, záložka inkrementálního importu se proto
+            // posouvat nesmí.
+            if (!$dryRun) {
+                $this->db->pdo()->prepare(
+                    'UPDATE supplier SET fakturoid_last_imported_at = NOW() WHERE id = ?'
+                )->execute([$supplierId]);
+            }
         } catch (CancelledException $e) {
+            $this->storeReport($jobId);
             $this->jobs->appendLog($jobId, 'Fakturoid import zrušen uživatelem.');
             $this->jobs->markCancelled($jobId);
         } catch (\Throwable $e) {
             $this->logger->error('Fakturoid import failed', ['job_id' => $jobId, 'error' => $e->getMessage()]);
+            $this->storeReport($jobId);
             $this->jobs->appendLog($jobId, 'FAIL: ' . $e->getMessage());
             $this->jobs->markFailed($jobId, $e->getMessage());
         }
+    }
+
+    private function initReport(bool $dryRun): void
+    {
+        $this->report = ['dry_run' => $dryRun, 'agendas' => [], 'problems' => [], 'problems_omitted' => 0];
+        $this->dryRunSubjects = [];
+    }
+
+    /** @param array<string,int> $counts */
+    private function reportAgenda(string $agenda, array $counts): void
+    {
+        $this->report['agendas'][$agenda] = $counts + ['processed' => 0, 'created' => 0, 'skipped' => 0, 'failed' => 0, 'review' => 0];
+    }
+
+    /**
+     * Nepřenesený (`error`) nebo ke kontrole označený (`review`) doklad. `hint` je
+     * klíč návodu v UI: `vat_rate` sazba DPH, `subject` chybějící subjekt,
+     * `amounts` rozdíl částek proti Fakturoidu, `generic` ostatní.
+     *
+     * @param array<string,mixed> $doc
+     */
+    private function reportProblem(string $agenda, array $doc, string $severity, string $reason, string $hint, ?int $localId = null): void
+    {
+        if (count($this->report['problems']) >= self::MAX_REPORTED_PROBLEMS) {
+            $this->report['problems_omitted']++;
+            return;
+        }
+        $number = (string) (($doc['number'] ?? '') ?: ($doc['original_number'] ?? '') ?: ($doc['name'] ?? ''));
+        $this->report['problems'][] = [
+            'agenda' => $agenda,
+            'fakturoid_id' => (int) ($doc['id'] ?? 0),
+            'number' => $number !== '' ? $number : null,
+            'local_id' => $localId,
+            'severity' => $severity,
+            'reason' => $reason,
+            'hint' => $hint,
+        ];
+    }
+
+    /**
+     * Zapíše report a souhrnné počty úlohy. Jednotlivé agendy si počítadla v řádku
+     * úlohy průběžně přepisují, po doběhnutí tam proto patří jejich součet.
+     *
+     * @return array{created:int, skipped:int, failed:int, review:int}
+     */
+    private function storeReport(int $jobId): array
+    {
+        $totals = ['created' => 0, 'skipped' => 0, 'failed' => 0, 'review' => 0];
+        if ($this->report === []) {
+            return $totals;
+        }
+        foreach ($this->report['agendas'] as $agenda => $counts) {
+            if ($agenda === 'subjects') {
+                $totals['failed'] += $counts['failed'];
+                continue;
+            }
+            foreach (array_keys($totals) as $k) {
+                $totals[$k] += (int) ($counts[$k] ?? 0);
+            }
+        }
+        try {
+            $this->jobs->setReport($jobId, $this->report);
+            $this->jobs->updateProgress($jobId, [
+                'created_count' => $totals['created'],
+                'skipped_count' => $totals['skipped'],
+                'failed_count'  => $totals['failed'],
+            ]);
+        } catch (\Throwable $e) {
+            $this->logger->warning('Fakturoid import: výsledek úlohy se nepodařilo uložit', ['job_id' => $jobId, 'error' => $e->getMessage()]);
+        }
+        return $totals;
     }
 
     private function loadJob(int $jobId): array
@@ -150,7 +260,7 @@ final class FakturoidImportService
         $this->jobs->appendLog($jobId, 'Stahuji subjekty z Fakturoid…');
 
         $query = $bookmarkSince !== null ? ['updated_since' => $bookmarkSince] : [];
-        $created = 0; $linked = 0; $skipped = 0; $processed = 0;
+        $created = 0; $linked = 0; $skipped = 0; $failed = 0; $processed = 0;
 
         foreach ($this->fakturoid->getAll($supplierId, 'subjects.json', $query) as $subj) {
             $processed++;
@@ -168,7 +278,11 @@ final class FakturoidImportService
             $stmt->execute([$supplierId, $fakturoidId]);
             if ($stmt->fetchColumn() !== false) { $skipped++; continue; }
 
-            if ($dryRun) { $created++; continue; }
+            if ($dryRun) {
+                $this->dryRunSubjects[$fakturoidId] = true;
+                $created++;
+                continue;
+            }
 
             try {
                 // Type: "customer" | "supplier" | "both"
@@ -204,11 +318,16 @@ final class FakturoidImportService
                 )->execute([$fakturoidId, $clientId]);
                 $created++;
             } catch (\Throwable $e) {
+                $failed++;
                 $this->jobs->appendLog($jobId, "Subject {$fakturoidId}: " . $e->getMessage());
+                $this->reportProblem('subjects', $subj, 'error', $e->getMessage(), 'generic');
             }
         }
         $this->jobs->updateProgress($jobId, ['processed' => $processed, 'created_count' => $created, 'skipped_count' => $skipped]);
         $this->jobs->appendLog($jobId, "Subjekty: vytvořeno {$created}, napojeno na existující kartu {$linked}, přeskočeno {$skipped} (z {$processed}).");
+        $this->reportAgenda('subjects', [
+            'processed' => $processed, 'created' => $created, 'linked' => $linked, 'skipped' => $skipped, 'failed' => $failed,
+        ]);
     }
 
     private function importInvoices(int $jobId, int $supplierId, int $userId, bool $dryRun, ?string $bookmarkSince, bool $downloadAttachments = false): void
@@ -225,7 +344,7 @@ final class FakturoidImportService
         }
 
         $query = $bookmarkSince !== null ? ['updated_since' => $bookmarkSince] : [];
-        $created = 0; $skipped = 0; $failed = 0; $processed = 0;
+        $created = 0; $skipped = 0; $failed = 0; $review = 0; $processed = 0;
         // Klienti dotčení nově založenými fakturami — cache seznamu klientů se přepočte
         // dávkově až na konci celého importu, ne po každém dokladu.
         $touchedClientIds = [];
@@ -246,23 +365,40 @@ final class FakturoidImportService
             $stmt->execute([$supplierId, $fakturoidId]);
             if ($stmt->fetchColumn() !== false) { $skipped++; continue; }
 
-            if ($dryRun) { $created++; continue; }
-
             try {
-                $invoiceId = $this->createIssued($inv, $supplierId, $userId);
-                $this->db->pdo()->prepare('UPDATE invoices SET fakturoid_id = ? WHERE id = ?')->execute([$fakturoidId, $invoiceId]);
-                $this->invCalc->recompute($invoiceId);
-                ImportedPaidInvoicePayment::record($this->db->pdo(), $invoiceId);
-                if ($downloadAttachments) {
-                    $this->archiveIssuedPdf($supplierId, $invoiceId, $fakturoidId, $inv);
-                }
-                if ($this->lastCreatedClientId !== null) {
-                    $touchedClientIds[$this->lastCreatedClientId] = true;
+                if ($dryRun) {
+                    $diffs = $this->dryRunIssued($inv, $supplierId);
+                    $invoiceId = null;
+                } else {
+                    $invoiceId = $this->createIssued($inv, $supplierId, $userId);
+                    $this->db->pdo()->prepare('UPDATE invoices SET fakturoid_id = ? WHERE id = ?')->execute([$fakturoidId, $invoiceId]);
+                    $computed = $this->invCalc->recompute($invoiceId);
+                    ImportedPaidInvoicePayment::record($this->db->pdo(), $invoiceId);
+                    if ($downloadAttachments) {
+                        $this->archiveIssuedPdf($supplierId, $invoiceId, $fakturoidId, $inv);
+                    }
+                    if ($this->lastCreatedClientId !== null) {
+                        $touchedClientIds[$this->lastCreatedClientId] = true;
+                    }
+                    $diffs = FakturoidSourceDocument::differences(
+                        $computed['vat_breakdown'],
+                        FakturoidSourceDocument::vatSummary($inv),
+                        !empty($inv['transferred_tax_liability']),
+                    );
                 }
                 $created++;
+                // Vydaný doklad ruční rekapitulaci DPH nemá (daň určuje vystavovatel
+                // výpočtem z položek), takže rozdíl proti Fakturoidu jen nahlásí.
+                if ($diffs !== []) {
+                    $review++;
+                    $reason = FakturoidSourceDocument::describe($diffs);
+                    $this->jobs->appendLog($jobId, "Faktura {$fakturoidId}: {$reason} Doklad zkontrolujte.");
+                    $this->reportProblem('issued', $inv, 'review', $reason, 'amounts', $invoiceId);
+                }
             } catch (\Throwable $e) {
                 $failed++;
                 $this->jobs->appendLog($jobId, "Faktura {$fakturoidId}: " . $e->getMessage());
+                $this->reportProblem('issued', $inv, 'error', $e->getMessage(), FakturoidDocumentRejected::hintOf($e));
             }
             // Fakturoid sync nemá report jako file import — varování o nejednoznačném
             // místě plnění by jinak nebylo vidět nikde.
@@ -272,7 +408,10 @@ final class FakturoidImportService
             $this->ossWarnings = [];
         }
         $this->jobs->updateProgress($jobId, ['processed' => $processed, 'created_count' => $created, 'skipped_count' => $skipped, 'failed_count' => $failed]);
-        $this->jobs->appendLog($jobId, "Vydané faktury: vytvořeno {$created}, přeskočeno {$skipped}, chyby {$failed} (z {$processed}).");
+        $this->jobs->appendLog($jobId, "Vydané faktury: vytvořeno {$created}, přeskočeno {$skipped}, chyby {$failed}, ke kontrole {$review} (z {$processed})." . ($dryRun ? ' (dry-run)' : ''));
+        $this->reportAgenda('issued', [
+            'processed' => $processed, 'created' => $created, 'skipped' => $skipped, 'failed' => $failed, 'review' => $review,
+        ]);
 
         // Cache seznamu klientů je jen cache — selhání přepočtu nesmí shodit dokončený
         // import, jen se zaloguje do úlohy (jinak by cache tiše zůstala stará).
@@ -290,17 +429,11 @@ final class FakturoidImportService
         $subjId = (int) ($i['subject_id'] ?? 0);
         $clientId = $this->resolveClient($subjId, $supplierId);
         if ($clientId === null) {
-            throw new \RuntimeException("Klient (subject_id {$subjId}) nenalezen — naimportuj subjekty.");
+            throw new FakturoidDocumentRejected('subject', "Klient (subject_id {$subjId}) nenalezen — naimportuj subjekty.");
         }
         $this->lastCreatedClientId = $clientId;
 
-        // Fakturoid kind: "invoice" | "proforma" | "correction" | …
-        $kind = (string) ($i['document_type'] ?? $i['kind'] ?? 'invoice');
-        $invoiceType = match ($kind) {
-            'proforma'   => 'proforma',
-            'correction' => 'credit_note',
-            default      => 'invoice',
-        };
+        $invoiceType = self::issuedType($i);
 
         $payload = [
             'invoice_type'   => $invoiceType,
@@ -310,6 +443,9 @@ final class FakturoidImportService
             'due_date'       => (string) ($i['due_on'] ?? $i['issued_on'] ?? date('Y-m-d')),
             'currency_id'    => $this->resolveCurrencyId((string) ($i['currency'] ?? 'CZK'), $supplierId, isActive: true),
             'reverse_charge' => !empty($i['transferred_tax_liability']),
+            // #128: režim cen dokladu. Bez sazby DPH zůstává 0 jako dřív, viz
+            // FakturoidSourceDocument::pricesIncludeVat().
+            'prices_include_vat' => FakturoidSourceDocument::pricesIncludeVat($i),
             'language'       => 'cs',
             // Číslo dokladu z `number`, VS z `variable_symbol` zvlášť (#249) — daňový doklad
             // k proformě nese VS proformy a pod ním by se doklad uložil s cizím číslem.
@@ -320,21 +456,7 @@ final class FakturoidImportService
             (string) $payload['varsymbol'],
             isset($i['variable_symbol']) ? (string) $i['variable_symbol'] : null,
         );
-        $lines = [];
-        foreach (($i['lines'] ?? []) as $idx => $line) {
-            $lines[] = [
-                'description'            => (string) ($line['name'] ?? ''),
-                'quantity'               => (float) ($line['quantity'] ?? 1),
-                'duration_minutes'       => TimeBilling::inferDurationMinutes(
-                    $line['quantity'] ?? 1,
-                    $line['unit_name'] ?? 'ks',
-                ),
-                'unit'                   => (string) ($line['unit_name'] ?? 'ks'),
-                'unit_price_without_vat' => (float) ($line['unit_price'] ?? 0),
-                'vat_rate'               => (float) ($line['vat_rate'] ?? 0),
-                'order_index'            => $idx,
-            ];
-        }
+        $lines = self::issuedLines($i);
 
         // Sazba i OSS přes SDÍLENÝ plánovač. Fakturoid si dřív sazbu pároval vlastním
         // hledáním přes celou tabulku `vat_rates` (bez země, bez platnosti k datu,
@@ -342,14 +464,7 @@ final class FakturoidImportService
         // změnila na českou. Na VYDANÉ straně žádný takový fallback být nesmí: dosazená
         // sazba mění odvedenou daň, takže nenalezená sazba shodí doklad s hláškou.
         // Plánuje se PŘED createDraft(), ať po odmítnutí nezůstane prázdná faktura.
-        $items = $this->planner->planIssuedItems(
-            $supplierId,
-            $clientId,
-            (string) ($payload['tax_date'] ?? '') ?: (string) $payload['issue_date'],
-            !empty($payload['reverse_charge']),
-            $lines,
-            $this->ossWarnings,
-        );
+        $items = $this->planIssued($supplierId, $clientId, $i, $lines);
 
         $invoiceId = $this->invoices->createDraft($payload, $userId);
 
@@ -384,6 +499,120 @@ final class FakturoidImportService
             (string) ($payload['tax_date'] ?? '') ?: (string) $payload['issue_date'],
         );
         return $invoiceId;
+    }
+
+    /** @param array<string,mixed> $i */
+    private static function issuedType(array $i): string
+    {
+        // Fakturoid kind: "invoice" | "proforma" | "correction" | …
+        return match ((string) ($i['document_type'] ?? $i['kind'] ?? 'invoice')) {
+            'proforma'   => 'proforma',
+            'correction' => 'credit_note',
+            default      => 'invoice',
+        };
+    }
+
+    /**
+     * Rozhodné datum pro sazby: DUZP, u proformy (bez DUZP) datum vystavení.
+     *
+     * @param array<string,mixed> $i
+     */
+    private static function issuedTaxDate(array $i): string
+    {
+        if (self::issuedType($i) === 'proforma') {
+            return (string) ($i['issued_on'] ?? date('Y-m-d'));
+        }
+        return (string) ($i['taxable_fulfillment_due'] ?? $i['issued_on'] ?? date('Y-m-d'));
+    }
+
+    /**
+     * Položky vydaného dokladu v režimu cen dokladu (bez DPH, nebo s DPH u #128).
+     *
+     * @param array<string,mixed> $i
+     * @return list<array<string,mixed>>
+     */
+    private static function issuedLines(array $i): array
+    {
+        $lines = [];
+        foreach (($i['lines'] ?? []) as $idx => $line) {
+            $lines[] = [
+                'description'            => (string) ($line['name'] ?? ''),
+                'quantity'               => (float) ($line['quantity'] ?? 1),
+                'duration_minutes'       => TimeBilling::inferDurationMinutes(
+                    $line['quantity'] ?? 1,
+                    $line['unit_name'] ?? 'ks',
+                ),
+                'unit'                   => (string) ($line['unit_name'] ?? 'ks'),
+                'unit_price_without_vat' => FakturoidSourceDocument::lineUnitPrice($line),
+                'vat_rate'               => FakturoidSourceDocument::lineRate($line),
+                'order_index'            => $idx,
+            ];
+        }
+        return $lines;
+    }
+
+    /**
+     * Sazby položek přes sdílený plánovač. Odmítnutý řádek odmítne doklad s návodem
+     * k sazbě DPH (#129), nepodporovaná sazba se nikdy nenahrazuje jinou.
+     *
+     * @param array<string,mixed> $i
+     * @param list<array<string,mixed>> $lines
+     * @return list<array<string,mixed>>
+     */
+    private function planIssued(int $supplierId, int $clientId, array $i, array $lines): array
+    {
+        try {
+            return $this->planner->planIssuedItems(
+                $supplierId,
+                $clientId,
+                self::issuedTaxDate($i),
+                !empty($i['transferred_tax_liability']),
+                $lines,
+                $this->ossWarnings,
+            );
+        } catch (\RuntimeException $e) {
+            throw new FakturoidDocumentRejected('vat_rate', $e->getMessage(), $e);
+        }
+    }
+
+    /**
+     * Zkouška nanečisto vydaného dokladu: tytéž předpoklady jako ostrý import
+     * (subjekt, sazby, přepočet) a porovnání se zdrojem, bez zápisu (#130).
+     *
+     * Klient, kterého by založila tatáž zkouška, ještě v databázi není. Sazby se pak
+     * ověří tuzemsky, OSS plánování bez karty klienta udělat nejde.
+     *
+     * @param array<string,mixed> $i
+     * @return list<array{rate: float, base: float, vat: float, source_base: float, source_vat: float}>
+     */
+    private function dryRunIssued(array $i, int $supplierId): array
+    {
+        $subjId = (int) ($i['subject_id'] ?? 0);
+        $clientId = $this->resolveClient($subjId, $supplierId);
+        $lines = self::issuedLines($i);
+        $reverseCharge = !empty($i['transferred_tax_liability']);
+        if ($clientId !== null) {
+            $items = $this->planIssued($supplierId, $clientId, $i, $lines);
+            $this->ossWarnings = [];
+        } elseif (isset($this->dryRunSubjects[$subjId])) {
+            $items = [];
+            foreach ($lines as $idx => $line) {
+                $match = $this->planner->resolveDomesticRate($supplierId, (float) $line['vat_rate'], self::issuedTaxDate($i));
+                if (!$match->found()) {
+                    throw new FakturoidDocumentRejected('vat_rate', sprintf('Položka č. %d: %s', $idx + 1, $match->message));
+                }
+                $items[] = $line + ['vat_rate_snapshot' => (float) $match->ratePercent];
+            }
+        } else {
+            throw new FakturoidDocumentRejected('subject', "Klient (subject_id {$subjId}) nenalezen — naimportuj subjekty.");
+        }
+
+        $computed = InvoiceMath::compute($items, $reverseCharge, FakturoidSourceDocument::pricesIncludeVat($i));
+        return FakturoidSourceDocument::differences(
+            $computed['vat_breakdown'],
+            FakturoidSourceDocument::vatSummary($i),
+            $reverseCharge,
+        );
     }
 
     /**
@@ -451,7 +680,7 @@ final class FakturoidImportService
         $this->jobs->appendLog($jobId, 'Stahuji přijaté (expenses) z Fakturoid…');
 
         $query = $bookmarkSince !== null ? ['updated_since' => $bookmarkSince] : [];
-        $created = 0; $skipped = 0; $failed = 0; $processed = 0;
+        $created = 0; $skipped = 0; $failed = 0; $review = 0; $processed = 0;
 
         foreach ($this->fakturoid->getAll($supplierId, 'expenses.json', $query) as $exp) {
             $processed++;
@@ -469,45 +698,132 @@ final class FakturoidImportService
             $stmt->execute([$supplierId, $fakturoidId]);
             if ($stmt->fetchColumn() !== false) { $skipped++; continue; }
 
-            if ($dryRun) { $created++; continue; }
-
             try {
-                $purchaseId = $this->createExpense($exp, $supplierId, $userId);
-                $this->db->pdo()->prepare('UPDATE purchase_invoices SET fakturoid_id = ? WHERE id = ?')->execute([$fakturoidId, $purchaseId]);
-                $this->purCalc->recompute($purchaseId);
-                if ($downloadAttachments) {
-                    $this->archiveExpensePdf($supplierId, $purchaseId, $exp);
+                if ($dryRun) {
+                    $diffs = $this->dryRunExpense($exp, $supplierId);
+                    $purchaseId = null;
+                } else {
+                    $purchaseId = $this->createExpense($exp, $supplierId, $userId);
+                    $this->db->pdo()->prepare('UPDATE purchase_invoices SET fakturoid_id = ? WHERE id = ?')->execute([$fakturoidId, $purchaseId]);
+                    $computed = $this->purCalc->recompute($purchaseId);
+                    // Doklad vrácený dedup guardem už v systému byl a mohl ho někdo
+                    // upravit — zdrojové částky se na něj nepřenášejí.
+                    $diffs = $this->lastExpenseExisted ? [] : $this->alignExpenseToSource($purchaseId, $supplierId, $exp, $computed);
+                    if ($downloadAttachments) {
+                        $this->archiveExpensePdf($supplierId, $purchaseId, $exp);
+                    }
                 }
                 $created++;
+                if ($diffs !== []) {
+                    $review++;
+                    $reason = FakturoidSourceDocument::describe($diffs);
+                    $this->jobs->appendLog($jobId, "Expense {$fakturoidId}: {$reason} Doklad zkontrolujte.");
+                    $this->reportProblem('received', $exp, 'review', $reason, 'amounts', $purchaseId);
+                }
             } catch (\Throwable $e) {
                 $failed++;
                 $this->jobs->appendLog($jobId, "Expense {$fakturoidId}: " . $e->getMessage());
+                $this->reportProblem('received', $exp, 'error', $e->getMessage(), FakturoidDocumentRejected::hintOf($e));
             }
         }
         $this->jobs->updateProgress($jobId, ['processed' => $processed, 'created_count' => $created, 'skipped_count' => $skipped, 'failed_count' => $failed]);
-        $this->jobs->appendLog($jobId, "Přijaté faktury: vytvořeno {$created}, přeskočeno {$skipped}, chyby {$failed} (z {$processed}).");
+        $this->jobs->appendLog($jobId, "Přijaté faktury: vytvořeno {$created}, přeskočeno {$skipped}, chyby {$failed}, ke kontrole {$review} (z {$processed})." . ($dryRun ? ' (dry-run)' : ''));
+        $this->reportAgenda('received', [
+            'processed' => $processed, 'created' => $created, 'skipped' => $skipped, 'failed' => $failed, 'review' => $review,
+        ]);
     }
 
-    private function createExpense(array $e, int $supplierId, int $userId): int
+    /**
+     * Srovná čerstvě převzatý přijatý doklad na zdroj (#131): rozdíl rekapitulace DPH
+     * do haléřového zaokrouhlení převezme jako `vat_overrides` (ruční rekapitulace dle
+     * dokladu, § 73 ZDPH, kterou zná i editor), zaokrouhlení celkové částky jako
+     * `rounding`. Rozdíl, který věrně převzít nejde, se nepřepisuje, doklad dostane
+     * varování ke kontrole a vrátí se volajícímu do přehledu úlohy.
+     *
+     * @param array<string,mixed> $e
+     * @param array{vat_breakdown: list<array<string,mixed>>} $computed
+     * @return list<array{rate: float, base: float, vat: float, source_base: float, source_vat: float}>
+     */
+    private function alignExpenseToSource(int $purchaseId, int $supplierId, array $e, array $computed): array
+    {
+        $reverseCharge = !empty($e['transferred_tax_liability']);
+        $summary = FakturoidSourceDocument::vatSummary($e);
+        $diffs = FakturoidSourceDocument::differences($computed['vat_breakdown'], $summary, $reverseCharge);
+        if ($diffs !== [] && !$reverseCharge) {
+            $overrides = FakturoidSourceDocument::alignableOverrides($diffs, $computed['vat_breakdown']);
+            if ($overrides !== null) {
+                $this->purchaseRepo->setVatOverrides($purchaseId, $supplierId, $overrides);
+                $computed = $this->purCalc->recompute($purchaseId);
+                $diffs = FakturoidSourceDocument::differences($computed['vat_breakdown'], $summary, $reverseCharge);
+            }
+        }
+
+        $rounding = FakturoidSourceDocument::roundingAdjustment($e);
+        if ($rounding !== 0.0) {
+            $this->purchaseRepo->setRounding($purchaseId, $supplierId, $rounding);
+        }
+
+        if ($diffs !== []) {
+            $this->purchaseRepo->appendExtractionWarning(
+                $purchaseId,
+                $supplierId,
+                'Import z Fakturoidu: ' . FakturoidSourceDocument::describe($diffs) . ' Doklad zkontrolujte proti originálu.',
+            );
+        }
+        return $diffs;
+    }
+
+    /**
+     * Zkouška nanečisto přijatého dokladu: sazby, přepočet a srovnání se zdrojem
+     * stejně jako ostrý import, bez zápisu (#130). Rozdíl, který by ostrý import
+     * srovnal rekapitulací, se nehlásí.
+     *
+     * @param array<string,mixed> $e
+     * @return list<array{rate: float, base: float, vat: float, source_base: float, source_vat: float}>
+     */
+    private function dryRunExpense(array $e, int $supplierId): array
     {
         $subjId = (int) ($e['subject_id'] ?? 0);
-        $vendorId = $this->resolveClient($subjId, $supplierId);
-        if ($vendorId === null) {
-            throw new \RuntimeException("Dodavatel (subject_id {$subjId}) nenalezen — naimportuj subjekty.");
+        if ($this->resolveClient($subjId, $supplierId) === null && !isset($this->dryRunSubjects[$subjId])) {
+            throw new FakturoidDocumentRejected('subject', "Dodavatel (subject_id {$subjId}) nenalezen — naimportuj subjekty.");
         }
-        $this->clients->markAsVendor($vendorId);
+        $taxDate = (string) ($e['taxable_fulfillment_due'] ?? $e['issued_on'] ?? date('Y-m-d'));
+        [$planned, $rates] = $this->expenseItems($e, $supplierId, $taxDate);
+        $items = [];
+        foreach ($planned as $idx => $item) {
+            $items[] = $item + ['vat_rate_snapshot' => $rates[$idx]];
+        }
+        $reverseCharge = !empty($e['transferred_tax_liability']);
+        $computed = InvoiceMath::compute($items, $reverseCharge, FakturoidSourceDocument::pricesIncludeVat($e));
+        $summary = FakturoidSourceDocument::vatSummary($e);
+        $diffs = FakturoidSourceDocument::differences($computed['vat_breakdown'], $summary, $reverseCharge);
+        if ($diffs !== [] && !$reverseCharge) {
+            $overrides = FakturoidSourceDocument::alignableOverrides($diffs, $computed['vat_breakdown']);
+            if ($overrides !== null) {
+                $computed = InvoiceMath::compute($items, $reverseCharge, FakturoidSourceDocument::pricesIncludeVat($e), $overrides);
+                $diffs = FakturoidSourceDocument::differences($computed['vat_breakdown'], $summary, $reverseCharge);
+            }
+        }
+        return $diffs;
+    }
 
-        $issueDate = (string) ($e['issued_on'] ?? date('Y-m-d'));
-        $taxDate   = (string) ($e['taxable_fulfillment_due'] ?? $issueDate);
-        $dueDate   = (string) ($e['due_on'] ?? $issueDate);
-
+    /**
+     * Položky přijatého dokladu se sazbou napárovanou sdíleným resolverem, vedle nich
+     * procenta napárovaných sazeb (pro přepočet zkoušky nanečisto).
+     *
+     * @param array<string,mixed> $e
+     * @return array{0: list<array<string,mixed>>, 1: list<float>}
+     */
+    private function expenseItems(array $e, int $supplierId, string $taxDate): array
+    {
         // Přijatá strana OSS nemá (OSS je režim pro plnění, které POSKYTUJEME), ale sazbu
         // páruje týmž resolverem — filtr na zemi, platnost k datu a `is_reverse_charge`
         // se jí týká stejně: nula mohla dřív trefit reverse-charge sazbu, protože obě
         // mají 0,00 a rozlišilo je jen pořadí řádků.
         $items = [];
+        $rates = [];
         foreach (($e['lines'] ?? []) as $idx => $line) {
-            $rate = (float) ($line['vat_rate'] ?? 0);
+            $rate = FakturoidSourceDocument::lineRate($line);
             // Nenamapovanou sazbu doklad ODMÍTNE, nefallbackuje na tuzemských 21 %.
             // Fallback tady dřív z německých 19 % udělal českou základní sazbu, takže se
             // cizí daň dostala na ř. 41 + KH B.3 jako nárok na odpočet — {@see VatRateMatch}
@@ -516,8 +832,9 @@ final class FakturoidImportService
             // Import doklad zaznamená jako chybný s touhle hláškou v logu úlohy.
             $match = $this->planner->resolveDomesticRate($supplierId, $rate, $taxDate);
             if (!$match->found()) {
-                throw new \RuntimeException(sprintf('Položka č. %d: %s', $idx + 1, $match->message));
+                throw new FakturoidDocumentRejected('vat_rate', sprintf('Položka č. %d: %s', $idx + 1, $match->message));
             }
+            $rates[] = (float) $match->ratePercent;
             $items[] = [
                 'description'            => (string) ($line['name'] ?? ''),
                 'quantity'               => (float) ($line['quantity'] ?? 1),
@@ -526,11 +843,29 @@ final class FakturoidImportService
                     $line['unit_name'] ?? 'ks',
                 ),
                 'unit'                   => (string) ($line['unit_name'] ?? 'ks'),
-                'unit_price_without_vat' => (float) ($line['unit_price'] ?? 0),
+                'unit_price_without_vat' => FakturoidSourceDocument::lineUnitPrice($line),
                 'vat_rate_id'            => $match->id,
                 'order_index'            => $idx,
             ];
         }
+        return [$items, $rates];
+    }
+
+    private function createExpense(array $e, int $supplierId, int $userId): int
+    {
+        $subjId = (int) ($e['subject_id'] ?? 0);
+        $vendorId = $this->resolveClient($subjId, $supplierId);
+        if ($vendorId === null) {
+            throw new FakturoidDocumentRejected('subject', "Dodavatel (subject_id {$subjId}) nenalezen — naimportuj subjekty.");
+        }
+        $this->clients->markAsVendor($vendorId);
+        $this->lastExpenseExisted = false;
+
+        $issueDate = (string) ($e['issued_on'] ?? date('Y-m-d'));
+        $taxDate   = (string) ($e['taxable_fulfillment_due'] ?? $issueDate);
+        $dueDate   = (string) ($e['due_on'] ?? $issueDate);
+
+        [$items] = $this->expenseItems($e, $supplierId, $taxDate);
 
         // Datum přijetí z dokladu, ne ze dne pullu (migrace 1848) — sdílené pravidlo
         // všech importních kanálů, {@see ImportedReceivedDatePolicy}.
@@ -564,6 +899,9 @@ final class FakturoidImportService
             // nikdy se nezapsal a chová se stejně jako 'import'.)
             'exchange_rate_source'  => 'import',
             'reverse_charge'        => !empty($e['transferred_tax_liability']),
+            // #128: režim cen dokladu. Bez sazby DPH zůstává 0 jako dřív, viz
+            // FakturoidSourceDocument::pricesIncludeVat().
+            'prices_include_vat'    => FakturoidSourceDocument::pricesIncludeVat($e),
             'language'              => 'cs',
             'items'                 => $items,
         ];
@@ -575,6 +913,7 @@ final class FakturoidImportService
             (string) $payload['issue_date'],
         );
         if ($existingId !== null) {
+            $this->lastExpenseExisted = true;
             return $existingId;
         }
 
