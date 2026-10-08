@@ -2907,7 +2907,7 @@ onMounted(async () => {
         <p class="font-medium">{{ gridSaveError }}</p>
         <ul v-if="gridCellErrorList.length" class="mt-2 space-y-1 text-xs">
           <li v-for="failure in gridCellErrorList" :key="failure.key">
-            {{ failure.name }} · {{ failure.date }} — {{ failure.message }}
+            {{ failure.name }} · {{ failure.date }} - {{ failure.message }}
           </li>
         </ul>
         <p v-if="gridCellErrorCount > gridCellErrorList.length" class="mt-1 text-xs">
@@ -3505,7 +3505,7 @@ onMounted(async () => {
           <p class="font-medium">{{ t('payroll.time.bulk.excluded.title', { count: bulkExclusions.length }) }}</p>
           <ul class="mt-2 space-y-1">
             <li v-for="row in bulkExclusions" :key="row.employmentId">
-              <span class="font-medium">{{ row.name }}</span> — {{ row.reason }}
+              <span class="font-medium">{{ row.name }}</span> - {{ row.reason }}
             </li>
           </ul>
         </section>

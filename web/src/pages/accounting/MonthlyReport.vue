@@ -242,7 +242,7 @@ function historyPeriodLabel(item: MonthlyReportSendHistoryItem): string {
       </div>
 
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 mb-4">
-        <h2 class="text-sm font-semibold mb-2">{{ t('monthly_report.section_income_statement') }} — {{ monthLabel }}</h2>
+        <h2 class="text-sm font-semibold mb-2">{{ t('monthly_report.section_income_statement') }} - {{ monthLabel }}</h2>
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
             <tbody class="divide-y divide-neutral-100">

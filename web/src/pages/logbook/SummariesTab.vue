@@ -78,7 +78,7 @@ function liters(n: number): string { return n.toLocaleString('cs-CZ', { maximumF
       <div class="grid gap-3 sm:grid-cols-2">
         <div v-for="v in data.vehicles" :key="v.car_id" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
           <div class="flex items-baseline justify-between gap-2 mb-3">
-            <h3 class="font-mono font-semibold text-neutral-900">{{ v.registration }}<span v-if="v.name" class="text-neutral-500 font-sans font-normal text-sm"> — {{ v.name }}</span></h3>
+            <h3 class="font-mono font-semibold text-neutral-900">{{ v.registration }}<span v-if="v.name" class="text-neutral-500 font-sans font-normal text-sm"> - {{ v.name }}</span></h3>
             <span class="text-xs text-neutral-500">{{ v.trips_count }} {{ t('logbook.summary_trips') }}</span>
           </div>
 

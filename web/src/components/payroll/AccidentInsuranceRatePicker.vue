@@ -86,7 +86,7 @@ const legal = computed(() => data.value?.schedule.legal ?? null)
 const naceLabel = computed(() => {
   const nace = data.value?.nace
   if (!nace) return null
-  return nace.name ? `${nace.display} — ${nace.name}` : nace.display
+  return nace.name ? `${nace.display} - ${nace.name}` : nace.display
 })
 
 function sameRate(a: string, b: string): boolean {

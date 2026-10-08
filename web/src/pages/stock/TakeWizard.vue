@@ -408,7 +408,7 @@ const STATUS_BADGE: Record<string, string> = {
       <template v-else-if="take">
         <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div>
-            <h1 class="text-2xl font-semibold">{{ t('stock.takes.title') }} — {{ warehouseName(take.warehouse_id) }}</h1>
+            <h1 class="text-2xl font-semibold">{{ t('stock.takes.title') }} - {{ warehouseName(take.warehouse_id) }}</h1>
             <p class="text-sm text-neutral-500 mt-0.5">{{ formatDate(take.take_date) }}</p>
           </div>
           <span class="text-xs px-2 py-0.5 rounded font-medium" :class="STATUS_BADGE[take.status]">{{ t(`stock.take_status.${take.status}`) }}</span>

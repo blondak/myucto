@@ -364,7 +364,7 @@ function bankLabel(bankCode: string | null): string | null {
 function payerDisplay(a: PayerAccount): string {
   const label = a.label || a.code
   const acc = accountDisplay(a)
-  return acc ? `${label} — ${acc}` : label
+  return acc ? `${label} - ${acc}` : label
 }
 
 // ── Inline editace účtu ───────────────────────────────────────────────
@@ -618,7 +618,7 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
     bank_code: item.payer_bank_code,
     iban: item.payer_iban,
   })
-  if (label && acc) return `${label} — ${acc}`
+  if (label && acc) return `${label} - ${acc}`
   return label || acc || '—'
 }
 </script>

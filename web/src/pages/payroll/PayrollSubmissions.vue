@@ -160,7 +160,7 @@ const officeOptions = computed(() =>
     .filter(office => office.is_active)
     .map(office => ({
       value: office.id,
-      label: `${office.code} — ${office.name}`,
+      label: `${office.code} - ${office.name}`,
       secondary: office.social_security_variable_symbol
         ? t('payroll.regzel.office_vs', { vs: office.social_security_variable_symbol })
         : t('payroll.regzel.office_vs_missing'),
@@ -172,7 +172,7 @@ const selectedOffice = computed(() =>
 
 function officeLabel(id: number): string {
   const office = settings.value?.offices.find(item => item.id === id)
-  return office ? `${office.code} — ${office.name}` : `#${id}`
+  return office ? `${office.code} - ${office.name}` : `#${id}`
 }
 
 function apiMessage(exception: unknown, fallback: string): string {

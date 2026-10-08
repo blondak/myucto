@@ -481,7 +481,7 @@ async function copySetup() {
                           {{ item.status }}
                         </span>
                         <span class="text-neutral-700">{{ item.file }}</span>
-                        <span v-if="item.reason" class="text-neutral-500"> — {{ item.reason }}</span>
+                        <span v-if="item.reason" class="text-neutral-500"> - {{ item.reason }}</span>
                       </li>
                     </ul>
                     <div v-if="isNonImportedTruncated(j.last_report)" class="mt-1 text-neutral-400">

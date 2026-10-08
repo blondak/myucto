@@ -140,7 +140,7 @@ const counterAccounts = computed(() =>
 )
 
 const counterAccountOptions = computed(() =>
-  counterAccounts.value.map(a => ({ value: a.account_code, label: `${a.account_code} — ${a.name}` })),
+  counterAccounts.value.map(a => ({ value: a.account_code, label: `${a.account_code} - ${a.name}` })),
 )
 
 // ── Předvolby „co to je" pro purpose=other ─────────────────────────────────
@@ -163,7 +163,7 @@ function pickCounterAccount(code: string) {
 /** Popisek předvolby: kontace je globální (bez i18n), proto se zobrazí i protiúčet. */
 function presetLabel(p: CashRulePreset): string {
   const name = accounts.value.find(a => a.account_code === p.counter_account_code)?.name
-  return name ? `${p.description} (${p.counter_account_code} — ${name})` : `${p.description} (${p.counter_account_code})`
+  return name ? `${p.description} (${p.counter_account_code} - ${name})` : `${p.description} (${p.counter_account_code})`
 }
 
 function ruleAccount(key: string, side: 'debit' | 'credit', fallback: string): string {

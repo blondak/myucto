@@ -212,7 +212,7 @@ const STATUS_ORDER: ChartAlignmentStatus[] = ['suggest', 'missing', 'auto', 'con
                     >
                       <option value="">{{ t('accounting.posting_rules.alignment.keep') }}</option>
                       <option v-for="c in side.candidates" :key="c.account_code" :value="c.account_code">
-                        {{ c.account_code }} — {{ c.name }}
+                        {{ c.account_code }} - {{ c.name }}
                       </option>
                     </select>
                   </td>

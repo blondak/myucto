@@ -1801,7 +1801,7 @@ onMounted(load)
           <!-- Analytiky před svou syntetikou: účtuje se na list, ne na hlavičku. -->
           <datalist :id="settlementAccountListId">
             <option v-for="a in settlementAccountOptions" :key="a.id" :value="a.account_code">
-              {{ a.account_code }} — {{ a.name }}
+              {{ a.account_code }} - {{ a.name }}
             </option>
           </datalist>
           <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.people.profile.partner_settlement_account_hint') }}</p>

@@ -174,7 +174,7 @@ const currentPage = computed(() => Math.floor(offset.value / PAGE_SIZE) + 1)
 const insurerOptions = computed(() =>
   Object.values(capability.value?.channels ?? {}).map(channel => ({
     value: channel.insurer_code,
-    label: `${channel.insurer_code} — ${channel.insurer_name ?? channel.insurer_code}`,
+    label: `${channel.insurer_code} - ${channel.insurer_name ?? channel.insurer_code}`,
   })),
 )
 
@@ -793,7 +793,7 @@ onMounted(() => {
       </h3>
       <ul class="mt-3 space-y-1 text-sm text-danger-700">
         <li v-for="row in unresolved" :key="row.employment_id">
-          <span class="font-medium">{{ row.full_name }}</span> — {{ reasonText(row.reason_code, row.reason) }}
+          <span class="font-medium">{{ row.full_name }}</span> - {{ reasonText(row.reason_code, row.reason) }}
         </li>
       </ul>
     </section>
@@ -1145,7 +1145,7 @@ onMounted(() => {
             class="rounded-lg border border-warning-500/30 bg-surface/60 p-3 text-xs text-neutral-700"
           >
             <span class="font-semibold text-neutral-900">
-              {{ channel.insurer_code }} — {{ channel.insurer_name }}
+              {{ channel.insurer_code }} - {{ channel.insurer_name }}
             </span>
             <span
               class="mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold"

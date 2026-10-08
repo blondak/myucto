@@ -2016,7 +2016,7 @@ onMounted(() => {
             >
               <span class="font-medium text-neutral-900">{{ note.label }}</span>
               <span class="text-neutral-500"> ({{ note.section }})</span>
-              <span> — {{ note.text }}</span>
+              <span> - {{ note.text }}</span>
             </li>
           </ul>
         </div>

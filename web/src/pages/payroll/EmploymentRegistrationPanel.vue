@@ -722,7 +722,7 @@ function a1CodeOptions(
 ): Array<{ value: string; label: string }> {
   const options = (list ?? []).map(option => ({
     value: option.code,
-    label: `${option.code} — ${option.label}`,
+    label: `${option.code} - ${option.label}`,
   }))
   const trimmed = current?.trim() ?? ''
   if (trimmed !== '' && !options.some(option => option.value === trimmed)) {
@@ -2554,7 +2554,7 @@ async function copyXml(): Promise<void> {
           </p>
           <ul class="mt-2 space-y-1.5 text-xs text-warning-800">
             <li v-for="gap in a1Gaps" :key="gap.field">
-              <span class="font-medium" :data-test="`registration-a1-gap-label-${gap.field}`">{{ registrationA1FieldLabel(gap.field, t) }}</span> — {{ gap.message }}
+              <span class="font-medium" :data-test="`registration-a1-gap-label-${gap.field}`">{{ registrationA1FieldLabel(gap.field, t) }}</span> - {{ gap.message }}
               <button
                 type="button"
                 class="ml-1 whitespace-nowrap rounded-full bg-warning-100 px-2 py-0.5 font-medium underline underline-offset-2 hover:bg-warning-200 hover:text-warning-900 focus:outline-none focus:ring-2 focus:ring-warning-500/40"

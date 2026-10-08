@@ -1377,6 +1377,7 @@
     "stock_takes": "Stock takes",
     "stock_warehouses": "Warehouses",
     "stock_vendor_offers": "At vendor",
+    "stock_assemblies": "Product assembly",
     "stock_reports": "Reports",
     "stock_intrastat": "Intrastat export",
     "eshop_jobs": "E-shop jobs",
@@ -2907,7 +2908,7 @@
       "calculation_warnings_hint": "You accepted these warnings by approving the run. Blocking errors are still shown.",
       "hide_warning_people": "Hide for all {count} people | Hide for this person | Hide for all {count} people",
       "hide_warning_type": "Hide this type for the company",
-      "hide_warning_done": "The warning is hidden. You can restore it in Employer settings → Hidden warnings.",
+      "hide_warning_done": "The warning is hidden. You can restore it in Payroll settings → Hidden warnings.",
       "validation_scope": {
         "blocking": "Blocking approval ({count})",
         "all": "All checks ({count})",
@@ -3300,7 +3301,7 @@
           "other": "Statutory calculation"
         },
         "structured_issues": {
-          "payroll_component_missing": "an approved payroll component is missing. Add and approve it in the monthly inputs.",
+          "payroll_component_missing": "an approved payroll component is missing. Add and approve it in the monthly inputs. If the relation continues and no income arose in the month, enter 0 CZK for the base component; a zero JMHZ report is then filed for the relation.",
           "annual_accumulator_missing": "the employee's opening or running annual totals are missing.",
           "tax_declaration_term_conflict": "the tax declaration record does not match the employment settings.",
           "employment_term_missing": "valid employment terms for the period are missing.",
@@ -6450,10 +6451,10 @@
         },
         "issues": {
           "reason_missing": "How this employment ended is missing. Choose it below — without it the A2 deregistration, the Labour Office certificate and severance pay cannot be prefilled.",
-          "average_missing": "An approved average earnings snapshot of this employment for Q{quarter} {year} is missing. Create and approve it in Absences and averages → Averages.",
-          "average_not_supported": "The average earnings for Q{quarter} {year} are for manual review only. Complete them in Absences and averages → Averages.",
+          "average_missing": "An approved average earnings snapshot of this employment for Q{quarter} {year} is missing. Create and approve it in Absence and leave → Average earning.",
+          "average_not_supported": "The average earnings for Q{quarter} {year} are for manual review only. Complete them in Absence and leave → Average earning.",
           "average_conversion_failed": "The average monthly earnings cannot be calculated: {reason}",
-          "leave_entitlement_missing": "The leave ledger of this employment has no entitlement for {year}, so the balance means nothing. Determine the entitlement in Absences and averages → Leave.",
+          "leave_entitlement_missing": "The leave ledger of this employment has no entitlement for {year}, so the balance means nothing. Determine the entitlement in Absence and leave → Leave.",
           "leave_previous_year_balance": "{minutes} h of leave remained from {year} and were not carried over. Only the balance of the termination year is paid out — carry last year's unused leave over in the leave ledger.",
           "leave_overdraft_limit": "The deduction for overdrawn leave is made in the last payroll run. Check that the payout does not fall below the protected amount (Section 148(2) Labour Code); recover the rest otherwise.",
           "leave_overdraft_death": "Overdrawn leave cannot be deducted after the employee's death — the employer's monetary claims end with death (Section 328(2) Labour Code).",
@@ -6613,7 +6614,7 @@
           "deduction_priority_missing": "A continuing deduction is missing its priority.",
           "deduction_result_not_supported": "A deduction result cannot be safely included in the certificate.",
           "average_earnings_ruleset_not_ready": "The § 313(2) average-earnings rules are not approved yet. The system therefore does not offer manual entry of a net amount.",
-          "average_earnings_snapshot_missing": "Approved average earnings for {year}/Q{quarter} are missing. Create and approve them in Absences and averages.",
+          "average_earnings_snapshot_missing": "Approved average earnings for {year}/Q{quarter} are missing. Create and approve them in Absence and leave, on the Average earning tab.",
           "average_earnings_net_conversion_not_verified": "An approved gross hourly average exists for the decisive period {year}/Q{quarter}, but the conversion to a net monthly amount under the Employment Act is not yet implemented in the application. Please issue this certificate outside the application for now.",
           "dpp_sickness_evidence_not_ready": "For a DPP without a continuing deduction, sickness-insurance participation cannot yet be evidenced safely.",
           "dpp_wage_deduction_missing": "No continuing deduction establishing the DPP certificate obligation was found.",
@@ -7195,7 +7196,7 @@
       "office_label": "Payroll office",
       "office_select": "Select an office",
       "office_empty": "The employer has no active payroll office yet — create one in payroll settings.",
-      "office_missing_warning": "This employment has no payroll office. Social insurance cannot be reported and the payroll run will stop on it. Add it through “New terms version”.",
+      "office_missing_warning": "This employment has no payroll office. Social insurance cannot be reported and the payroll run will stop on it. Select it in the Payroll office field of the employment and save.",
       "terms_basics_hint": "Fill in what actually changes. Only fields the save cannot go through without are marked with an asterisk; everything else is optional.",
       "terms_advanced_title": "More details",
       "terms_advanced_hint": "JMHZ evidence, insurance and tax regimes, rate categories and discounts. An ordinary employment needs none of it.",
@@ -7490,7 +7491,7 @@
           "action": "Import protocol from the data box",
           "importing": "Importing protocol…",
           "hint": "This overview does not know about submissions filed by other software. The processing protocol delivered by ČSSZ to your data box can be imported here as XML, so filings made outside the app show up as well. The JMHZ partial protocol (attachment JMH-DILCI-PROTOKOL-…) can be imported too; upload it under its original name, which carries the variable symbol and period. A protocol issued to another variable symbol, with an invalid ČSSZ seal or with an employment the company does not have on record is refused.",
-          "added": "The protocol was imported. Submission status: {status}.",
+          "added": "The protocol was imported. Sent tab: {status}.",
           "replaced": "This protocol had already been imported — the record was updated, no duplicate was created.",
           "failed": "The protocol could not be imported.",
           "note": "This document arrived through the data box; the app did not send it. It therefore holds no submission payload — the status cannot be polled and no transaction can be closed. The protocol itself is the result.",
@@ -7963,7 +7964,7 @@
         "jmhz_abandon_prompt": "Why is the send being discarded? Paste what the Social Security Administration replied — it stays with the attempt in the history.",
         "jmhz_abandon_failed": "The pending send could not be discarded.",
         "jmhz_dispatch_failed": "JMHZ could not be frozen or handed to the selected channel.",
-        "jmhz_dispatch_vrep_started": "VREP accepted attempt #{id} in status {status}. Follow its result and protocol on the Submission status tab.",
+        "jmhz_dispatch_vrep_started": "VREP accepted attempt #{id} in status {status}. Follow its result and protocol on the Sent tab.",
         "jmhz_dispatch_isds_queued": "The message is ready for {name}, box ID {box}. It has NOT been sent yet — send it from the outbox.",
         "jmhz_dispatch_manual": "Neither the sending gateway nor the Mobile Key is available for this company. Send the message from the outbox using your own data box, then fill in the message ID and the delivery receipt.",
         "jmhz_dispatch_mobile_key": "The sending gateway is not active, but the filing can be sent directly from the app once you confirm the session in Mobile Key.",
@@ -10556,7 +10557,7 @@
         "valid_hint": "The overview for insurer {insurer} passed validation against the pinned XSD. The filing deadline is {due}.",
         "blocked": "The record has a blocking issue",
         "blocked_hint": "The file was produced and can be downloaded, but the submission stayed a draft with an issue at the schema validation stage. The specific reason is recorded on the submission in the Health insurers tab.",
-        "status": "Submission status",
+        "status": "Sent tab",
         "period": "Period",
         "due_on": "Deadline",
         "fingerprint": "File fingerprint",
@@ -10589,7 +10590,7 @@
         "valid_hint": "The HOZ for insurer {insurer} contains {count} records and passed validation against the pinned XSD. The nearest deadline among the included obligations is {due}.",
         "blocked": "The record has a blocking issue",
         "blocked_hint": "The file was produced and can be downloaded, but stayed a draft with an issue at the schema validation stage.",
-        "status": "Submission status",
+        "status": "Sent tab",
         "changes_count": "Record count",
         "due_on": "Nearest deadline",
         "fingerprint": "File fingerprint",
@@ -11181,20 +11182,9 @@
         "cssz_control_catalog_1_4_2_10": "Source: Monthly report control catalogue 1.4.2.10"
       },
       "steps": {
-        "jmhz_protocol_correction_guid_invalid": [
-          "In Submission status, find the regular submission for the same period that ČSSZ accepted partially.",
-          "The corrective submission must carry the GUID of that regular submission, not a new GUID. Prepare the correction of the regular submission again and send it.",
-          "ČSSZ will not accept a submission with a new GUID as a correction; do not send it again."
-        ],
-        "jmhz_protocol_correction_form_unpaired": [
-          "In the protocol, find the employee (IK MPSV and ID PPV) whose form ČSSZ rejected in the previous submission or which was missing from it.",
-          "In the corrective submission carrying the GUID of the regular submission, such an employee form is sent as new: with a new part GUID and type regular.",
-          "Prepare the corrective submission again in Submission status and send it."
-        ],
-        "jmhz_protocol_regular_submission_duplicate": [
-          "ČSSZ already holds a regular submission for this period. It will neither accept nor process another regular submission.",
-          "In Submission status, open the original regular submission and send the changes as a corrective submission with its GUID."
-        ],
+        "jmhz_protocol_correction_guid_invalid": ["In Sent tab, find the regular submission for the same period that ČSSZ accepted partially.", "The corrective submission must carry the GUID of that regular submission, not a new GUID. Prepare the correction of the regular submission again and send it.", "ČSSZ will not accept a submission with a new GUID as a correction; do not send it again."],
+        "jmhz_protocol_correction_form_unpaired": ["In the protocol, find the employee (IK MPSV and ID PPV) whose form ČSSZ rejected in the previous submission or which was missing from it.", "In the corrective submission carrying the GUID of the regular submission, such an employee form is sent as new: with a new part GUID and type regular.", "Prepare the corrective submission again in Sent tab and send it."],
+        "jmhz_protocol_regular_submission_duplicate": ["ČSSZ already holds a regular submission for this period. It will neither accept nor process another regular submission.", "In Sent tab, open the original regular submission and send the changes as a corrective submission with its GUID."],
         "jmhz_protocol_tax_withholding_with_declaration": [
           "On the employee card, check the taxpayer declaration in the statutory evidence. With a signed declaration, tax is collected as an advance, not withheld at the special rate.",
           "Correct the declaration or the tax regime of the employment and recalculate the payroll run.",
@@ -11269,7 +11259,7 @@
         "statutory_evidence": "On the employee card, in the statutory evidence, complete the taxpayer declaration or discounts and recalculate the run.",
         "dependants": "On the employee card, under dependants, complete the child or claim data and recalculate the run.",
         "absences": "In Absences, correct or add the absence of the employment and recalculate the run.",
-        "averages": "In Absences and averages, create and approve the average earnings of the employment and recalculate the run.",
+        "averages": "In Absence and leave (Average earning tab), create and approve the average earnings of the employment and recalculate the run.",
         "time": "In Working time, review and approve the month of the employment and recalculate the run.",
         "runs": "Open the payroll run of the period, correct the result and approve the current revision; then prepare the report again.",
         "components": "In Payroll components, complete or confirm how the component maps to the monthly report.",
@@ -11279,8 +11269,8 @@
         "annual_settlement": "In Annual settlement, record the request or the result of the settlement.",
         "takeover": "In Imports, on the Takeover review tab, complete the missing value of the taken-over payroll.",
         "workplace": "Fill in the municipality and country of the workplace from the codebook and prepare the report again.",
-        "correction": "Open Submission status and review the regular report the correction relates to.",
-        "submission": "Open Submission status and review the frozen submission and its sending.",
+        "correction": "Open the Sent tab and review the regular report the correction relates to.",
+        "submission": "Open the Sent tab and review the frozen submission and its sending.",
         "retry": "The sources changed in the meantime or the preparation fingerprint does not match. Run the report test again; if the finding stays, contact support.",
         "manual": "The application deliberately does not process this case automatically. File the report for the affected employment manually through the ČSSZ ePortál, or defer the employment and add it later.",
         "support": "This is an internal inconsistency of the application. Contact support and attach the period and technical details."
@@ -11317,14 +11307,14 @@
           "pending": "The regular report is built without this employment. You can cancel the deferral until the report is frozen.",
           "omitted": "The regular report left the employment out. Once ČSSZ accepts the report, add the form with a corrective report.",
           "to_complete": "Complete the employment data (recalculate the payroll run if needed) and send the form in a corrective report.",
-          "completing": "The corrective report is prepared; send it from Submission status.",
+          "completing": "The corrective report is prepared; send it from Sent tab.",
           "completed": "ČSSZ accepted the corrective report with the form.",
           "revoked": "The deferral was cancelled and the employment is filed in the regular report.",
           "stale": "The run has a newer revision. If the employment still blocks, defer it again in the report test."
         },
         "complete": "Add with a corrective report",
         "complete_failed": "The corrective report could not be prepared.",
-        "completed": "Corrective report no. {id} is prepared; send it from Submission status.",
+        "completed": "Corrective report no. {id} is prepared; send it from Sent tab.",
         "revoke": "Cancel deferral",
         "revoke_reason": "Why are you cancelling the deferral",
         "revoke_confirm": "Cancel deferral",
@@ -11340,7 +11330,7 @@
       },
       "packages": {
         "title": "The report has more than 1500 forms and is split into partial packages ({count}).",
-        "hint": "All packages carry the same submission number and filling date; the summary and the insurance part travel in the first. Freezing stores the report package by package and you send it via VREP in Payroll submissions → Submission status: the packages leave one by one starting with the first, and each shows its own protocol. If sending is interrupted, the button sends only the packages that have not left yet.",
+        "hint": "All packages carry the same submission number and filling date; the summary and the insurance part travel in the first. Freezing stores the report package by package and you send it via VREP in Payroll submissions → Sent tab: the packages leave one by one starting with the first, and each shows its own protocol. If sending is interrupted, the button sends only the packages that have not left yet.",
         "package": "Package {ordinal}",
         "valid": "passed the checks",
         "invalid": "blocking findings: {count}",
@@ -11493,11 +11483,11 @@
         "jmhz_apz_instrument_missing": "The employee is recorded with an APZ contribution, but the employment card section Evidence for CSSZ is missing the APZ instrument code.",
         "jmhz_attribute_10116_unresolved": "It has not been confirmed whether statutory or contractual wage deductions are reported.",
         "jmhz_attribute_10546_unresolved": "It has not been confirmed whether the employee claims the seasonal social-insurance discount.",
-        "jmhz_average_hourly_earning_invalid": "The frozen average hourly earnings have invalid data. Open Payroll → Absences and averages and document the average again.",
-        "jmhz_average_hourly_earning_mismatch": "The average hourly earnings do not match the reporting period or are not approved. Open Payroll → Absences and averages and check the average.",
+        "jmhz_average_hourly_earning_invalid": "The frozen average hourly earnings have invalid data. Open Payroll → Absence and leave and document the average again.",
+        "jmhz_average_hourly_earning_mismatch": "The average hourly earnings do not match the reporting period or are not approved. Open Payroll → Absence and leave and check the average.",
         "jmhz_average_hourly_earning_missing": "The verified average hourly earnings are missing.",
         "jmhz_average_hourly_earning_probable_missing": "The average hourly earnings are missing and the employee did not work the statutory minimum number of days in the relevant period, so the actual average cannot be calculated.",
-        "jmhz_average_hourly_earning_unverified": "The average hourly earnings are not confirmed as a supported calculation case. Open Payroll → Absences and averages and check the average.",
+        "jmhz_average_hourly_earning_unverified": "The average hourly earnings are not confirmed as a supported calculation case. Open Payroll → Absence and leave and check the average.",
         "jmhz_cancellation_component_duplicate": "The same employment relationship is selected for cancellation more than once. Select each relationship only once.",
         "jmhz_cancellation_component_invalid": "The selected employment relationship form does not have a valid identifier. Select the relationship again.",
         "jmhz_cancellation_component_not_frozen": "The selected employment relationship is not among the components of the original submission still valid for cancellation.",
@@ -13010,7 +13000,7 @@
       "account_invalid": "The cash account must be an active 211 analytical account.",
       "account_taken": "The analytical account is already used by another cash register (incl. inactive).",
       "account_locked": "The analytical account cannot be changed — a posted document exists.",
-      "currency_unsupported": "Foreign-currency cash registers are not supported yet (CZK only).",
+      "currency_unsupported": "Foreign-currency cash registers are available only in double-entry bookkeeping, not in tax records.",
       "doc_not_draft": "Only a draft document can be edited.",
       "doc_not_posted": "Only a posted document can be reversed.",
       "invalid_purpose_type": "Invalid document type and purpose combination.",
@@ -14597,7 +14587,7 @@
       "field_currency": "Currency",
       "field_delivery_days": "Delivery (days)",
       "field_stock_qty": "In stock (pcs)",
-      "field_preferred": "Preferred",
+      "field_preferred": "Primary vendor",
       "field_note": "Note",
       "client_required": "Pick a contact for every vendor."
     },
@@ -18024,7 +18014,7 @@
         "none": "No recurring cost with a missing invoice for the last month."
       },
       "close": {
-        "hint": "Closes P&L accounts via 710 — Profit and loss account and balance sheet accounts via 702 — Final balance sheet account. Requires steps 1–5 completed and checks without errors.",
+        "hint": "Closes P&L accounts via 710 - Profit and loss account and balance sheet accounts via 702 - Final balance sheet account. Requires all preceding wizard steps completed or skipped and checks without errors.",
         "button": "Close the books",
         "blocked_precheck": "The books cannot be closed yet — the pre-checks report an error: {checks}. Fix it and run the checks again in step 1.",
         "blocked_steps": "The books cannot be closed yet — one of the previous steps is neither confirmed nor skipped.",
@@ -18186,10 +18176,7 @@
         "button": "Approve statements",
         "confirm_title": "Approving the {year} financial statements",
         "confirm_text_17_7": "Once the financial statements are approved, the books can no longer be reopened (§17(7) of the Accounting Act). Corrections are made in the following period (§35).",
-        "revoke_button": "Revoke approval",
-        "revoke_title": "Revoking the {year} approval",
-        "revoke_text": "Revoking the approval is an audited operation — state a reason (min. 10 characters). The period returns to the Closed state.",
-        "locked_hint": "The statements are approved — the books can no longer be reopened (§17/7)."
+        "locked_hint": "The statements are approved and the approval cannot be revoked (§17/7). Corrections are made in the period in which the error is found (§35)."
       },
       "reopen": {
         "button": "Reopen",
@@ -18494,7 +18481,7 @@
     "expense_kind": {
       "service": "Service",
       "material": "Material",
-      "small_asset": "Small asset",
+      "small_asset": "Small tangible asset",
       "small_intangible": "Low-value intangible asset",
       "fixed_asset": "Fixed asset"
     },
@@ -19644,10 +19631,10 @@
     "renewal_period_unknown": "on a schedule not yet available",
     "renewal_cancelled_at": "Cancelled on {date}",
     "renewal_on_desc": "Renewal is charged to the saved card {period}. You can turn automatic renewal off at any time. The licence then runs until the end of the paid period.",
-    "renewal_off_desc": "No further payment will be charged. Commercial features stay available until {date}; after that a new subscription purchase re-enables them.",
+    "renewal_off_desc": "No further payment will be charged. Commercial features stay available until {date}. You can restore renewal with the Restore subscription button (when offered); otherwise a new subscription purchase re-enables them.",
     "renewal_cancel_cta": "Cancel automatic renewal",
     "renewal_cancelling": "Cancelling…",
-    "renewal_cancel_confirm": "Cancel automatic renewal of the license?\n\nThe license keeps running until {date} and no further payment will be charged. You can restore it later by buying a new subscription.",
+    "renewal_cancel_confirm": "Cancel automatic renewal of the license?\n\nThe license keeps running until {date} and no further payment will be charged. You can restore it later with the Restore subscription button or by buying a new subscription.",
     "renewal_cancel_confirm_managed": "WARNING: Really cancel automatic renewal of the hosted service?\n\nThe instance remains available until {date}. Afterwards you lose hosting and access to stored data; the data may be permanently deleted after the retention period. First download a complete backup from System → Complete data export. You remain responsible for statutory retention of accounting and tax records.",
     "renewal_managed_warning_title": "Warning: cancellation also removes hosting and access to your data",
     "renewal_managed_warning_body": "The hosted instance remains available only until the end of the paid period ({date}). It will then be shut down and stored data may be permanently deleted after the retention period.",
@@ -23349,7 +23336,7 @@
     "signing_diag_reason_missing_certificate": "missing certificate",
     "signing_diag_reason_backend_unhealthy": "backend unavailable",
     "signing_profiles_title": "Signing profiles",
-    "signing_profiles_hint": "Profiles prepare the shared layer for PDF signatures and future outgoing e-mail signing.",
+    "signing_profiles_hint": "Profiles define the certificate and settings used to sign PDFs, ISDOC and outgoing e-mails (S/MIME).",
     "signing_profiles_accountant_enabled": "Allow users to manage their own signing profiles",
     "signing_profiles_accountant_hint": "Users will only be able to edit profiles they own.",
     "signing_profiles_new": "New profile",
@@ -23757,7 +23744,7 @@
     "vat_period": "VAT return period",
     "vat_monthly": "Monthly (due 25th of next month)",
     "vat_quarterly": "Quarterly (due 25th after quarter end)",
-    "vat_period_hint": "VAT control statement is always monthly, even for quarterly VAT payers.",
+    "vat_period_hint": "Legal entities file the VAT control statement monthly. Sole traders who are quarterly VAT payers may file it quarterly, by the same deadline as the VAT return.",
     "flat_tax_band": "Flat tax (band)",
     "flat_tax_none": "Not on flat tax (standard regime)",
     "flat_tax_band1": "Band 1 (up to CZK 1,000,000/yr)",
@@ -24243,7 +24230,7 @@
     "system_descriptions": {
       "superadmin": "A predefined system role with fixed permissions. It has full access to every company and is the only role that manages users, roles, licensing, and system-wide settings.",
       "admin": "A predefined role with fixed permissions. It can do everything in assigned companies and work with multiple companies assigned by a superadmin. It cannot change system-wide items in the System menu.",
-      "admin_plus": "A predefined role with fixed permissions. It has the same permissions as Admin and can also create a company under System → Suppliers; it automatically receives Admin permissions for that company."
+      "admin_plus": "A predefined role with fixed permissions. It has the same permissions as Admin and can also create a company under System → Companies; it automatically receives Admin permissions for that company."
     },
     "types": {
       "superadmin": "Superadmin",
@@ -24673,7 +24660,7 @@
       "type": "Supply type",
       "count": "Count",
       "amount": "Amount",
-      "no_data": "No EU supplies in this period (no issued invoices with VAT classification 20/22 for EU clients with VAT ID).",
+      "no_data": "No EU supplies in this period (no issued invoices with VAT classification 20, 22 or 31 for EU clients with VAT ID).",
       "note": "Recapitulative statement is submitted by VAT payers with at least 1 EU supply in the period. Identified persons (non-payers) submit when B2B EU services or goods purchases over the limit.",
       "note_quarterly_goods": "⚠️ Quarterly ESL is only allowed for services (code 22, §9/1). Goods supplies to EU (code 20) require monthly submission regardless of taxpayer type (§ 102(3) of Act 235/2004).",
       "sh_type": [
@@ -24947,35 +24934,6 @@
       "submit_direct_sandbox_warning": "This is only the Financial Administration sandbox. The result is not a legally effective tax filing and the local snapshot remains unfiled.",
       "submit_now": "Submit for real",
       "submit_now_sandbox": "Submit to sandbox"
-    },
-    "income_tax": {
-      "title": "Income tax",
-      "subtitle": "Annual income tax return. **MVP foundation** — return is NOT complete.",
-      "mvp_disclaimer_title": "⚠️ Only foundation — return is NOT complete",
-      "mvp_disclaimer_body": "This return contains only orientational numbers from the invoicing system and taxpayer identification. Real tax return requires accounting data (depreciation, wages, social and health insurance, advance payments, tax credits), which MyÚčto.cz does not track. Before submission ALWAYS supplement in cooperation with accountant/advisor or in accounting software.",
-      "download_xml": "Download XML skeleton",
-      "export_csv": "Export CSV",
-      "type_from_supplier": "Taxpayer type is taken from the supplier (Settings → Taxpayer type). Sole trader → DPFO, Ltd → DPPO.",
-      "csv_year": "Year",
-      "csv_type": "Taxpayer type",
-      "csv_vat": "VAT payer",
-      "revenue_orientacni": "Revenue (orientational)",
-      "exempt_revenue_orientacni": "of which exempt from income tax",
-      "revenue_hint": "From issued invoices (CZK) in the year",
-      "costs_orientacni": "Costs (orientational)",
-      "costs_hint": "From received invoices (CZK)",
-      "vat_base_excl": "excl. VAT (VAT payer)",
-      "vat_base_incl": "incl. VAT (non-payer)",
-      "profit_orientacni": "Profit (orientational)",
-      "profit_hint": "Revenue − costs (NOT accounting)",
-      "deadline_hint": "by 1.4. of year+1 (FO without accountant)",
-      "missing_data_title": "What XML does not contain (you must supplement):",
-      "missing_odpisy": "Tax depreciation of tangible assets",
-      "missing_mzdy": "Wage costs + contributions",
-      "missing_socsec": "Social + health insurance OSVČ",
-      "missing_zaloha": "Tax advances paid during the year",
-      "missing_slevy": "Tax credits (taxpayer, spouse, children)",
-      "missing_advice": "Recommendation: fill in accounting software or hand over to accountant/advisor."
     },
     "pending_approval": {
       "self_assessment_title": "Self-assessed documents are awaiting approval",
@@ -25308,11 +25266,11 @@
       "period_end_label": "Reference date",
       "action_preview": "Preview",
       "action_record": "Record period",
-      "record_hint": "Records the §74b corrections for the period into the ledger (recordAging). This is not a journal posting.",
-      "record_confirm": "Record the §74b corrections for the selected period into the ledger? This is a deliberate state record, not a journal posting — the actual journal entry is made separately.",
+      "record_hint": "Records the §74b corrections for the period. This is not a journal posting.",
+      "record_confirm": "Record the §74b corrections for the selected period? This is a deliberate state record, not a journal posting - the actual journal entry is made separately.",
       "record_done": "Recorded {count} corrections for the period into the ledger.",
       "explainer_title": "Preview (dry-run) vs. recording",
-      "explainer_body": "\"Preview\" is a non-binding calculation of §74b corrections as of the reference date — it changes nothing. \"Record period\" writes the current correction state into the ledger (recordAging) for record-keeping and the follow-up VAT return. It is neither a journal posting nor a submission to the tax office.",
+      "explainer_body": "\"Preview\" is a non-binding calculation of §74b corrections as of the reference date - it changes nothing. \"Record period\" writes the current correction state into the records for the follow-up VAT return. It is neither a journal posting nor a submission to the tax office.",
       "no_data": "No liabilities eligible for §74b deduction correction in the selected period.",
       "col": {
         "vendor": "Vendor",
@@ -25338,7 +25296,7 @@
         "net_delta": "Net impact on deduction"
       },
       "kh_zdph_44_hint": "Enters the control statement (§44 section / return line 44).",
-      "dphdp3_note": "The delta feeds VAT return line 34; line 44 = total of deduction corrections."
+      "dphdp3_note": "The delta feeds VAT return lines 40/41 (base and tax, signed by the movement) and, for information, line 34."
     },
     "monthly_export": {
       "title": "Bulk export",
@@ -26170,7 +26128,7 @@
     "ai_active_title": "AI extraction active",
     "ai_active_hint": "PDFs without embedded ISDOC will be automatically processed by AI (Anthropic Claude vision).",
     "ai_not_configured_skip": "PDFs without embedded ISDOC are skipped by the scan. With AI set up, the app extracts them automatically.",
-    "purchase_scan_path_hint": "Path is configured in cfg.php. Recommended: C:/inetpub/wwwroot/myucto.cz/inbox (inside webroot, IIS user has read access).",
+    "purchase_scan_path_hint": "Path is configured in cfg.php. We recommend a directory outside the webroot that the web server can read.",
     "purchase_manual_title": "Manual PDF upload",
     "purchase_manual_hint": "Upload single invoice directly in the received invoice editor (drag & drop above form):",
     "title": "Imports",
@@ -27616,7 +27574,7 @@
     }
   },
   "payroll_absence": {
-    "title": "Absence, leave and sickness",
+    "title": "Absence and leave",
     "shifts_missing": {
       "open": "Schedule shifts in attendance"
     },
@@ -27696,7 +27654,7 @@
       "without_shifts": "The obstacle is approved but no wage compensation was created ({name}): there are no scheduled shifts on the obstacle days. Schedule shifts in Attendance, or enter the compensation as a payroll input.",
       "pick_hint": {
         "employee_obstacle": "Select the personal obstacle (doctor, wedding, death, escort…). Compensation is always 100 % of average earnings and is reported monthly as compensation for employee-side obstacles (10341). Record obstacles without compensation as \"Employee-side obstacle without wage compensation\".",
-        "employer_obstacle": "Select the employer-side obstacle: downtime (at least 80 %), bad weather or natural disaster (at least 60 %), partial unemployment (at least 60 % under an internal regulation) or other obstacle (100 %). Compensation is reported monthly as 10340."
+        "employer_obstacle": "Select the employer-side obstacle: downtime (at least 80 %), bad weather or natural disaster (at least 60 %), partial unemployment (at least 60 % under an internal regulation), partial work with a state contribution (at least 80 %) or other obstacle (100 %). Compensation is reported monthly as 10340."
       },
       "kinds": {
         "medical_examination": "Medical examination or treatment",
@@ -27771,9 +27729,9 @@
       "cancel_confirm": "Cancel the {type} absence for {name} from {from} to {to}? Annual leave creates a traceable reversing entry.",
       "correction_pending": "The related payroll run requires correction review.",
       "average_required_hint": "Pick the average earnings the compensation is calculated from — the absence cannot be created without it.",
-      "average_missing_for_relation": "No average earnings have been calculated for this relation. Calculate one on the Averages tab and come back here.",
-      "average_awaiting_approval": "An average earning for this relation has been calculated but is awaiting approval. Approve it on the Averages tab and come back.",
-      "go_to_averages": "Go to Averages",
+      "average_missing_for_relation": "No average earnings have been calculated for this relation. Calculate one on the Average earning tab and come back here.",
+      "average_awaiting_approval": "An average earning for this relation has been calculated but is awaiting approval. Approve it on the Average earning tab and come back.",
+      "go_to_averages": "Go to Average earning",
       "expected_childbirth": "Expected date of birth",
       "childbirth": "Date of birth",
       "childbirth_hint": "Only the part of maternity benefit before the birth is an excluded period of the insurance record. You can add the date of birth later, once it happens.",
@@ -28988,6 +28946,7 @@
   },
   "mcp_server_page": {
     "subtitle": "Connect an AI assistant to your company's invoicing, projects, documents, logbook, statistics and e-shop.",
+    "log_title": "Call log",
     "connection": {
       "tabs_label": "MCP connection method",
       "remote_tab": "Connect online",
@@ -29940,13 +29899,7 @@
     "tool_download_all": "Download all (ZIP)",
     "tool_failed": "The export tool could not be downloaded.",
     "file_help_title": "What the export contains",
-    "file_help_items": [
-      "POHODA keeps every fiscal year separately. One year is transferred at a time; the latest one is recommended.",
-      "The POHODA XML export does not contain fixed assets. Their entries are in the journal and are transferred with it.",
-      "The ZIP may contain subfolders. The wizard finds the XML files of all agendas in them and offers for transfer those that belong to the MyÚčto company by company ID.",
-      "The company must exist in MyÚčto with the same company ID as in POHODA. The transfer goes into the company you are working in; create a new company first.",
-      "The export contains the company's entire accounting. The uploaded file is deleted automatically after 7 days without any work on the migration."
-    ],
+    "file_help_items": ["POHODA keeps every fiscal year separately. The years you tick in the preview are transferred (one or several at once).", "The POHODA XML export does not contain assets or payroll. The wizard takes the fixed asset and small asset cards from the 90_majetek.xml file that the export tool adds to the export (see the manual); payroll from 91_mzdy.xml is not processed by this wizard.", "The ZIP may contain subfolders. The wizard finds the XML files of all agendas in them and offers for transfer those that belong to the MyÚčto company by company ID.", "The company must exist in MyÚčto with the same company ID as in POHODA. The transfer goes into the company you are working in; create a new company first.", "The export contains the company's entire accounting. The uploaded file is deleted automatically after 7 days without any work on the migration."],
     "choose_file": "Export file (.zip)",
     "choose_file_first": "Choose the export file first.",
     "upload": "Upload and read",

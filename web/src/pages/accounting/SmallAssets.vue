@@ -284,7 +284,7 @@ async function searchInvoices() {
 
 function pickInvoice(inv: InvoiceListItem) {
   sellForm.sale_invoice_id = inv.id
-  selectedInvoiceLabel.value = `${inv.varsymbol || '#' + inv.id} — ${inv.client_company_name}`
+  selectedInvoiceLabel.value = `${inv.varsymbol || '#' + inv.id} - ${inv.client_company_name}`
   invoiceResults.value = []
 }
 
@@ -741,7 +741,7 @@ onMounted(async () => {
               <li v-for="inv in invoiceResults" :key="inv.id">
                 <button @click="pickInvoice(inv)" class="w-full text-left px-2 py-1.5 text-sm hover:bg-neutral-50">
                   <span class="font-medium">{{ inv.varsymbol || '#' + inv.id }}</span>
-                  <span class="text-neutral-500"> — {{ inv.client_company_name }}</span>
+                  <span class="text-neutral-500"> - {{ inv.client_company_name }}</span>
                   <span class="text-neutral-400"> · {{ formatMoney(inv.total_with_vat) }}</span>
                 </button>
               </li>

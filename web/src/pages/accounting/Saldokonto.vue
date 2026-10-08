@@ -265,7 +265,7 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 function accountBlockLabel(b: SaldoAccountBlock) {
-  return `${b.account.code} — ${b.account.name}`
+  return `${b.account.code} - ${b.account.name}`
 }
 
 /**

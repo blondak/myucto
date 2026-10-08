@@ -206,7 +206,7 @@ onMounted(async () => {
                   </tr>
                   <tr v-for="row in (expanded[g.key] ? g.rows : [])" :key="g.key + row.account_code"
                     class="text-neutral-600">
-                    <td class="py-1 pl-8">{{ row.account_code }} — {{ row.name }}</td>
+                    <td class="py-1 pl-8">{{ row.account_code }} - {{ row.name }}</td>
                     <td class="py-1 text-right font-mono">{{ formatMoney(row.amount, 'CZK') }}</td>
                   </tr>
                 </template>
@@ -260,7 +260,7 @@ onMounted(async () => {
               </thead>
               <tbody>
                 <tr v-for="row in equity.rows" :key="row.account_code" class="border-t border-neutral-200">
-                  <td class="py-2 pr-3">{{ row.account_code }} — {{ row.name }}</td>
+                  <td class="py-2 pr-3">{{ row.account_code }} - {{ row.name }}</td>
                   <td class="py-2 pr-3 text-right font-mono">{{ formatMoney(row.opening, 'CZK') }}</td>
                   <td class="py-2 pr-3 text-right font-mono">{{ formatMoney(row.increase, 'CZK') }}</td>
                   <td class="py-2 pr-3 text-right font-mono">{{ formatMoney(row.decrease, 'CZK') }}</td>

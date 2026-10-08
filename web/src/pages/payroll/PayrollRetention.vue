@@ -880,7 +880,7 @@ onMounted(reloadAll)
               <span>
                 <span class="font-medium">{{ p.full_name }}</span>
                 <span class="text-neutral-500">
-                  — {{ t(`payroll.retention.action_kind.${p.action ?? 'anonymize'}`) }},
+                  - {{ t(`payroll.retention.action_kind.${p.action ?? 'anonymize'}`) }},
                   {{ t('payroll.retention.retained_until_label') }} {{ fmtDate(p.retained_until) }}
                 </span>
               </span>

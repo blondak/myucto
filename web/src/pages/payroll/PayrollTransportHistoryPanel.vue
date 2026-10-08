@@ -929,7 +929,7 @@ async function loadVariableSymbols() {
     const test = new Map<string, string>()
     for (const office of settings.offices ?? []) {
       if (!office.is_active) continue
-      const label = `${office.code} — ${office.name}`
+      const label = `${office.code} - ${office.name}`
       const productionSymbol = (office.social_security_variable_symbol ?? '').trim()
       if (productionSymbol !== '' && !production.has(productionSymbol)) {
         production.set(productionSymbol, label)
@@ -1688,7 +1688,7 @@ onMounted(loadVariableSymbols)
             :class="btnOutlineSm('neutral')"
             @click="useVariableSymbol(option.value)"
           >
-            {{ option.value }} — {{ option.label }}
+            {{ option.value }} - {{ option.label }}
           </button>
         </div>
         <p

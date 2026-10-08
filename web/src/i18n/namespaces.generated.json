@@ -942,7 +942,8 @@
     "payment-cards": [
       "automation",
       "bank",
-      "cash"
+      "cash",
+      "purchase_invoice"
     ],
     "credit-cards": [
       "credit_cards"
@@ -951,7 +952,8 @@
       "automation",
       "bank",
       "cash",
-      "credit_cards"
+      "credit_cards",
+      "purchase_invoice"
     ],
     "admin-codebooks": [
       "expense_categories",

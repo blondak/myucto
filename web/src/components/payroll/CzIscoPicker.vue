@@ -53,7 +53,7 @@ let requestToken = 0
 function toOption(item: PayrollCzIscoOption): Option {
   return {
     value: item.code,
-    label: `${item.code} — ${item.label}`,
+    label: `${item.code} - ${item.label}`,
     secondary: item.parent_label ?? undefined,
   }
 }

@@ -520,7 +520,7 @@ const clientActions = computed<ActionItem[]>(() => {
               <div class="text-neutral-900 break-all">
                 {{ ec.email }}
                 <span v-if="ec.contact_name || ec.label" class="text-neutral-500 text-xs">
-                  — {{ [ec.contact_name, ec.label].filter(Boolean).join(', ') }}</span>
+                  - {{ [ec.contact_name, ec.label].filter(Boolean).join(', ') }}</span>
                 <span v-if="!ec.is_active" class="text-xs text-neutral-400">({{ t('client.email_contacts.inactive') }})</span>
               </div>
               <div class="flex flex-wrap gap-1 mt-0.5">

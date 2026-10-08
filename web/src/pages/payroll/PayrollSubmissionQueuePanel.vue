@@ -522,7 +522,7 @@ void load()
       <ul v-if="batchResult.failures.length > 0" class="mt-2 space-y-1">
         <li v-for="failure in batchResult.failures" :key="failure.submission_id" class="text-xs">
           <span class="font-medium">#{{ failure.submission_id }}</span>
-          — {{ failure.message }}
+          - {{ failure.message }}
         </li>
       </ul>
     </div>

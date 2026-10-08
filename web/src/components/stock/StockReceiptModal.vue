@@ -79,7 +79,7 @@ async function load() {
       try {
         const si = await stockApi.getItem(l.stock_item_id!)
         itemsCache.set(si.id, { id: si.id, sku: si.sku, name: si.name, unit: si.unit, vat_rate_id: si.vat_rate_id, sale_price_without_vat: si.sale_price_without_vat })
-        l.option = { value: si.id, label: `${si.sku} — ${si.name}`, secondary: si.unit }
+        l.option = { value: si.id, label: `${si.sku} - ${si.name}`, secondary: si.unit }
       } catch { /* karta smazána */ }
     }))
   } catch (e: any) {
@@ -95,7 +95,7 @@ async function onSearch(rowIndex: number, q: string) {
   try {
     const res = await stockApi.searchItems(q, 30)
     for (const r of res) itemsCache.set(r.id, r)
-    rowOptions[rowIndex] = res.map(r => ({ value: r.id, label: `${r.sku} — ${r.name}`, secondary: r.unit }))
+    rowOptions[rowIndex] = res.map(r => ({ value: r.id, label: `${r.sku} - ${r.name}`, secondary: r.unit }))
   } catch { rowOptions[rowIndex] = [] } finally { rowLoading[rowIndex] = false }
 }
 function onSelect(rowIndex: number, itemId: number | null) {
@@ -103,7 +103,7 @@ function onSelect(rowIndex: number, itemId: number | null) {
   if (!row) return
   row.stock_item_id = itemId
   const si = itemId != null ? itemsCache.get(itemId) : null
-  row.option = si ? { value: si.id, label: `${si.sku} — ${si.name}`, secondary: si.unit } : null
+  row.option = si ? { value: si.id, label: `${si.sku} - ${si.name}`, secondary: si.unit } : null
 }
 
 const creatingItem = reactive<Record<number, boolean>>({})
@@ -115,7 +115,7 @@ async function createNewItem(rowIndex: number) {
     const created = await stockApi.createItem({ name: row.newName.trim(), item_type: 'goods', unit: 'ks' })
     itemsCache.set(created.id, { id: created.id, sku: created.sku, name: created.name, unit: created.unit, vat_rate_id: created.vat_rate_id, sale_price_without_vat: created.sale_price_without_vat })
     row.stock_item_id = created.id
-    row.option = { value: created.id, label: `${created.sku} — ${created.name}`, secondary: created.unit }
+    row.option = { value: created.id, label: `${created.sku} - ${created.name}`, secondary: created.unit }
     row.creatingNew = false
     toast.success(t('common.saved'))
   } catch (e: any) {

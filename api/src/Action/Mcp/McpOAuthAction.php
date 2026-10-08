@@ -225,7 +225,7 @@ final class McpOAuthAction
                 . self::escape((string) $host) . ') žádá o přístup k vašim datům.</p>'
                 . '<div class="access-summary"><span>Asistent požaduje nejvýše</span><strong>' . $permission . '</strong></div>'
                 . '<p class="muted">Přístup se vztahuje na všechny firmy, ke kterým máte práva, včetně těch přidaných později. Aktuálně jich můžete použít '
-                . $accessibleCount . '. Práva ke každé firmě se kontrolují při každém volání. Přístup můžete kdykoli odvolat v API tokenech.</p>'
+                . $accessibleCount . '. Práva ke každé firmě se kontrolují při každém volání. Přístup můžete kdykoli odvolat na stránce Firma → MCP server.</p>'
                 . '<form id="mcp-consent-form" method="post" action="/oauth/authorize">' . $fields . $grantChoice
                 . '<div class="verification"><h2>Ověření identity</h2>'
                 . ($passkeyAvailable && $totpRequired ? '<p class="field-hint">Zvolte passkey nebo nový kód z ověřovací aplikace.</p>' : '')

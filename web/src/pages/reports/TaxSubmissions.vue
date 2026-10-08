@@ -1994,7 +1994,7 @@ onMounted(async () => {
                 <div v-if="attempt.error_message" class="text-xs text-danger-600 mt-1">{{ attempt.error_message }}</div>
                 <div v-if="attempt.resolution_code" class="text-xs text-warning-700 mt-1">
                   {{ t('reports.submissions.resolution_recorded') }} · {{ formatDate(attempt.resolved_at) }}
-                  <span v-if="attempt.resolution_note"> — {{ attempt.resolution_note }}</span>
+                  <span v-if="attempt.resolution_note"> - {{ attempt.resolution_note }}</span>
                 </div>
               </li>
             </ol>

@@ -397,7 +397,7 @@ onMounted(() => {
         <ul class="list-disc list-inside">
           <li v-for="d in pagedPostFilingDocs" :key="d.source + d.invoice_id">
             <span class="font-mono">{{ d.doc_number ?? ('#' + d.invoice_id) }}</span>
-            — {{ formatMoney(d.total, 'CZK') }}
+            - {{ formatMoney(d.total, 'CZK') }}
             <span class="text-xs text-neutral-500">({{ t('reports.dph.post_filing.changed_at') }}: {{ d.updated_at }})</span>
           </li>
         </ul>
@@ -446,7 +446,7 @@ onMounted(() => {
             at: formatDate(clearing.run.computed_at),
           }) }}
           <template v-if="clearing.run.submission_id">
-            — {{ t('reports.dph.clearing.linked_submission', { id: clearing.run.submission_id, variant: clearing.run.submission_variant ?? '?' }) }}
+            - {{ t('reports.dph.clearing.linked_submission', { id: clearing.run.submission_id, variant: clearing.run.submission_variant ?? '?' }) }}
           </template>
         </p>
 
@@ -495,7 +495,7 @@ onMounted(() => {
           </div>
           <ul v-if="f.documents.length > 0" class="mt-1 list-disc list-inside">
             <li v-for="d in pagedCrossCheckDocuments(f)" :key="d.invoice_id + d.source">
-              {{ d.doc_number ?? ('#' + d.invoice_id) }} — {{ formatCrossAmount(d.declared) }} vs {{ formatCrossAmount(d.counter) }}<template v-if="d.reason"> — <span :title="d.reason">{{ reasonText(d) }}</span></template>
+              {{ d.doc_number ?? ('#' + d.invoice_id) }} - {{ formatCrossAmount(d.declared) }} vs {{ formatCrossAmount(d.counter) }}<template v-if="d.reason"> — <span :title="d.reason">{{ reasonText(d) }}</span></template>
             </li>
           </ul>
           <PaginationBar embedded :page="crossCheckPage(f)" :per-page="documentPageSize" :total="f.documents.length" @update:page="setCrossCheckPage(f, $event)" />
@@ -509,7 +509,7 @@ onMounted(() => {
             <div class="mt-0.5">{{ f.note }}</div>
             <ul class="mt-1 list-disc list-inside">
               <li v-for="d in pagedCrossCheckDocuments(f)" :key="d.invoice_id + d.source">
-                {{ d.doc_number ?? ('#' + d.invoice_id) }} — {{ formatCrossAmount(d.declared) }} vs {{ formatCrossAmount(d.counter) }}<template v-if="d.reason"> — <span :title="d.reason">{{ reasonText(d) }}</span></template>
+                {{ d.doc_number ?? ('#' + d.invoice_id) }} - {{ formatCrossAmount(d.declared) }} vs {{ formatCrossAmount(d.counter) }}<template v-if="d.reason"> — <span :title="d.reason">{{ reasonText(d) }}</span></template>
               </li>
             </ul>
             <PaginationBar embedded :page="crossCheckPage(f)" :per-page="documentPageSize" :total="f.documents.length" @update:page="setCrossCheckPage(f, $event)" />

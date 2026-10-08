@@ -51,7 +51,7 @@ const advisory = computed(
       <ul class="mt-2 space-y-1.5 text-xs text-danger-800">
         <li v-for="gap in blocking" :key="gap.key">
           <span class="font-medium">{{ t(`payroll.people.data_gap.${gap.key}`) }}</span>
-          — {{ t(`payroll.people.data_gap_where.${gap.key}`) }}
+          - {{ t(`payroll.people.data_gap_where.${gap.key}`) }}
           <button
             type="button"
             class="ml-1 whitespace-nowrap rounded-full bg-danger-100 px-2 py-0.5 font-medium underline underline-offset-2 hover:bg-danger-200 hover:text-danger-900 focus:outline-none focus:ring-2 focus:ring-danger-500/40"
@@ -78,7 +78,7 @@ const advisory = computed(
       <ul class="mt-2 space-y-1.5 text-xs text-warning-800">
         <li v-for="gap in advisory" :key="gap.key">
           <span class="font-medium">{{ t(`payroll.people.data_gap.${gap.key}`) }}</span>
-          — {{ t(`payroll.people.data_gap_where.${gap.key}`) }}
+          - {{ t(`payroll.people.data_gap_where.${gap.key}`) }}
           <button
             type="button"
             class="ml-1 whitespace-nowrap rounded-full bg-warning-100 px-2 py-0.5 font-medium underline underline-offset-2 hover:bg-warning-200 hover:text-warning-900 focus:outline-none focus:ring-2 focus:ring-warning-500/40"

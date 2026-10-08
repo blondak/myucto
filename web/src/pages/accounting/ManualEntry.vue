@@ -461,10 +461,10 @@ async function submitTransfer(force = false) {
     </div>
 
     <datalist :id="`${pageId}-coa-options`">
-      <option v-for="a in pickable" :key="a.id" :value="a.account_code">{{ a.account_code }} — {{ a.name }}</option>
+      <option v-for="a in pickable" :key="a.id" :value="a.account_code">{{ a.account_code }} - {{ a.name }}</option>
     </datalist>
     <datalist :id="`${pageId}-cost-center-options`">
-      <option v-for="center in costCenters" :key="center.id" :value="center.code">{{ center.code }} — {{ center.name }}</option>
+      <option v-for="center in costCenters" :key="center.id" :value="center.code">{{ center.code }} - {{ center.name }}</option>
     </datalist>
 
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 space-y-4">

@@ -294,7 +294,7 @@ function sideLabel(side: string | null): string {
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.accounts.parent') }}</label>
             <select v-model="form.parent_id" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
-              <option v-for="s in syntheticAccounts" :key="s.id" :value="s.id">{{ s.account_code }} — {{ s.name }}</option>
+              <option v-for="s in syntheticAccounts" :key="s.id" :value="s.id">{{ s.account_code }} - {{ s.name }}</option>
             </select>
           </div>
           <div>
@@ -324,7 +324,7 @@ function sideLabel(side: string | null): string {
       <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5">
         <h3 class="text-lg font-semibold mb-1">{{ t('accounting.accounts.delete_title') }}</h3>
         <p class="text-sm text-neutral-600 mb-1">
-          <span class="font-mono">{{ deleteTarget.account_code }}</span> — {{ deleteTarget.name }}
+          <span class="font-mono">{{ deleteTarget.account_code }}</span> - {{ deleteTarget.name }}
         </p>
         <p class="text-sm text-neutral-500 mb-4">{{ t('accounting.accounts.delete_hint') }}</p>
         <div class="flex justify-end gap-2">

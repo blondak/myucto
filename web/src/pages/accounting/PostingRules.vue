@@ -106,7 +106,7 @@ async function save() {
 function accountName(code: string | null): string {
   if (!code) return '—'
   const a = accountByCode.value[code]
-  return a ? `${code} — ${a.name}` : code
+  return a ? `${code} - ${a.name}` : code
 }
 </script>
 
@@ -134,7 +134,7 @@ function accountName(code: string | null): string {
     </div>
 
     <datalist :id="`${pageId}-pr-coa-options`">
-      <option v-for="a in pickable" :key="a.id" :value="a.account_code">{{ a.account_code }} — {{ a.name }}</option>
+      <option v-for="a in pickable" :key="a.id" :value="a.account_code">{{ a.account_code }} - {{ a.name }}</option>
     </datalist>
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
@@ -197,7 +197,7 @@ function accountName(code: string | null): string {
     <div v-if="showForm" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
       <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5">
         <h3 class="text-lg font-semibold mb-1">{{ t('accounting.posting_rules.edit_title') }}</h3>
-        <p class="text-xs text-neutral-500 mb-3 font-mono">{{ form.rule_key }} — {{ form.description }}</p>
+        <p class="text-xs text-neutral-500 mb-3 font-mono">{{ form.rule_key }} - {{ form.description }}</p>
         <div class="space-y-3">
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.posting_rules.debit') }}</label>

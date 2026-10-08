@@ -113,14 +113,14 @@ function institutionCodeOptions(
   if (type === 'tax_office') {
     return TAX_OFFICE_CODES.map(code => ({
       value: code,
-      label: `${code} — ${t(`payroll.employer.health_accounts.tax_office_codes.${code}`)}`,
+      label: `${code} - ${t(`payroll.employer.health_accounts.tax_office_codes.${code}`)}`,
     }))
   }
   if (type === 'social_security') {
     const code = employerOfficeCode.value?.trim().toUpperCase() ?? ''
     return code === ''
       ? null
-      : [{ value: code, label: `${code} — ${institutionCodeName(type, code)}` }]
+      : [{ value: code, label: `${code} - ${institutionCodeName(type, code)}` }]
   }
   return null
 }
@@ -208,7 +208,7 @@ const selectedInsurerOption = computed(() => {
   const code = selectedInsurerCode.value
   if (code === null) return null
   const known = institutionCodeName(createForm.institution_type, code)
-  return { value: code, label: known === '' ? code : `${code} — ${known}` }
+  return { value: code, label: known === '' ? code : `${code} - ${known}` }
 })
 
 const editingAccount = computed(() =>
@@ -227,7 +227,7 @@ const selectedEditCodeOption = computed(() => {
   const code = selectedEditCode.value
   if (code === null) return null
   const known = institutionCodeName(editCodeType.value, code)
-  return { value: code, label: known === '' ? code : `${code} — ${known}` }
+  return { value: code, label: known === '' ? code : `${code} - ${known}` }
 })
 
 const institutionAccounts = computed(() =>

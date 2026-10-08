@@ -117,7 +117,7 @@ function levelClass(level: string): string {
 
     <div v-if="protocol.failure" class="rounded-lg border border-danger-500/30 bg-danger-50 px-4 py-3 text-sm text-danger-600">
       {{ t(k('protocol.failure'), { step: label('steps', protocol.failure) }) }}
-      <span v-if="protocol.error"> — {{ protocol.error }}</span>
+      <span v-if="protocol.error"> - {{ protocol.error }}</span>
     </div>
 
     <section>

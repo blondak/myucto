@@ -159,14 +159,14 @@ export function previewUiState(scenario: PreviewScenario): PreviewUiState | null
       return {
         storageQuote: PREVIEW_STORAGE_QUOTE,
         error: 'Platbu se nepodařilo strhnout z uložené karty. Doplatek zaplatíte '
-          + 'jinou kartou přes odkaz níž — poslali jsme ho i e-mailem.',
+          + 'jinou kartou přes odkaz níž - poslali jsme ho i e-mailem.',
         payUrl: PREVIEW_DUE.pay_url,
       }
     case 'result_unknown':
       // ⚠️ Peníze MOHLY odejít. Nabídka se zavírá a nikde se nepobízí k opakování.
       return {
         offerClosed: true,
-        error: 'Nevíme, jak platba dopadla. Nezkoušejte to prosím znovu — '
+        error: 'Nevíme, jak platba dopadla. Nezkoušejte to prosím znovu - '
           + 'za chvíli obnovte stránku, a pokud se nic nezmění, ozvěte se podpoře.',
       }
     default:

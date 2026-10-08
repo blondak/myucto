@@ -110,7 +110,7 @@ const activeFilterCount = computed(() => {
 })
 function accountLabel(a: BankAccountOption): string {
   const num = formatAccountNumber(a.account_number, a.bank_code)
-  return a.label ? `${num} — ${a.label}` : num
+  return a.label ? `${num} - ${a.label}` : num
 }
 // „Filtr je aktivní" = zúžení oproti zobrazení všeho (rok ≠ vše / měsíc / účet).
 const filtersActive = computed(() => yearFilter.value !== '' || monthFilter.value !== '' || accountFilter.value !== ''

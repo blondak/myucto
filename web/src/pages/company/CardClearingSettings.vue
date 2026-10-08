@@ -81,7 +81,7 @@ async function save(confirm = false) {
 }
 
 function accountLabel(a: CardClearingAccountOption): string {
-  return `${a.account_code} — ${a.name}`
+  return `${a.account_code} - ${a.name}`
 }
 function defaultLabel(code: string | undefined): string {
   return t('payment_cards.clearing.default_account', { code: code ?? '' })

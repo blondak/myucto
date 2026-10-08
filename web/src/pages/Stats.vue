@@ -81,7 +81,7 @@ function topProjectChart(scope: 'this' | 'prev') {
   const ps = projectStats.value
   const block = scope === 'this' ? ps?.top_this_year : ps?.top_prev_year
   if (!block) return { labels: [], values: [], greyed: [] as number[] }
-  const labels = block.top.map(p => `${p.name} — ${p.client_company_name}`)
+  const labels = block.top.map(p => `${p.name} - ${p.client_company_name}`)
   const values = block.top.map(p => p.revenue)
   const greyed: number[] = []
   if (block.others.count > 0) {

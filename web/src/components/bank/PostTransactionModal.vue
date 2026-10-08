@@ -519,17 +519,17 @@ onMounted(async () => {
       <!-- Plná osnova (rozúčtování i protiúčet dvojice) — analytiky před svou syntetikou. -->
       <datalist :id="splitListId">
         <option v-for="a in activeAccounts" :key="a.id" :value="a.account_code">
-          {{ a.account_code }} — {{ a.name }}
+          {{ a.account_code }} - {{ a.name }}
         </option>
       </datalist>
       <datalist :id="debitListId">
         <option v-for="a in (isIncoming ? bankOptions : counterOptions)" :key="a.id" :value="a.account_code">
-          {{ a.account_code }} — {{ a.name }}
+          {{ a.account_code }} - {{ a.name }}
         </option>
       </datalist>
       <datalist :id="creditListId">
         <option v-for="a in (isIncoming ? counterOptions : bankOptions)" :key="a.id" :value="a.account_code">
-          {{ a.account_code }} — {{ a.name }}
+          {{ a.account_code }} - {{ a.name }}
         </option>
       </datalist>
       <p v-if="!splitMode" class="text-xs text-neutral-500 mt-1">{{ t('bank.posting.saldo_manual_hint') }}</p>

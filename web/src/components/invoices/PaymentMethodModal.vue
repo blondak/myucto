@@ -202,7 +202,7 @@ async function submit() {
 <template>
   <div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" @click.self="emit('close')">
     <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5">
-      <h3 class="text-lg font-semibold mb-1">{{ title || t('invoice.modals.mark_paid_title') }}</h3>
+      <h3 class="text-lg font-semibold mb-1">{{ title || (docType === 'purchase_invoice' ? t('purchase_invoice.actions.mark_paid') : t('invoice.modals.mark_paid_title')) }}</h3>
       <p class="text-sm text-neutral-500 mb-3">{{ docNumber }}</p>
       <p v-if="intro" class="text-sm text-neutral-700 mb-3">{{ intro }}</p>
 
@@ -243,7 +243,7 @@ async function submit() {
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.pay_settlement.account') }}</label>
             <select v-model.number="accountId" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm">
               <option v-for="a in accounts" :key="a.id" :value="a.id">
-                {{ a.account_code }} — {{ a.name }}
+                {{ a.account_code }} - {{ a.name }}
               </option>
             </select>
           </div>
@@ -274,7 +274,7 @@ async function submit() {
 
           <p v-if="postingHint" class="text-xs text-neutral-500">
             {{ t('invoice.pay_common.will_post') }}: <span class="font-mono">{{ postingHint }}</span>
-            — {{ formatMoney(amount, currency) }}
+            - {{ formatMoney(amount, currency) }}
           </p>
         </template>
 

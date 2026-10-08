@@ -633,7 +633,7 @@ const WARN_ICON = 'M12 9v4m0 4h.01M10.29 3.86l-8.48 14.7A1 1 0 0 0 2.67 20h18.66
       <p v-if="showEstimate && estimable === 0" :class="BTN_DISABLED_NOTE" class="mt-1">{{ t('logbook_fuel.estimate_none') }}</p>
       <ul class="mt-1 space-y-0.5 text-xs">
         <li v-for="c in warnings.cars" :key="c.car_id">
-          <span class="font-mono font-medium">{{ c.registration }}</span> — {{ warningParts(c) }}
+          <span class="font-mono font-medium">{{ c.registration }}</span> - {{ warningParts(c) }}
           <span v-if="estimateReason(c)" class="text-warning-600"> · {{ t('logbook_fuel.estimate_reason_label') }}: {{ estimateReason(c) }}</span>
         </li>
       </ul>

@@ -142,7 +142,7 @@ describe('AccidentInsuranceRatePicker', () => {
     const hint = wrapper.find('[data-testid="accident-rate-nace-hint"]')
 
     expect(hint.text()).toContain('nace_is')
-    expect(hint.text()).toContain('31.00.00 — Výroba nábytku')
+    expect(hint.text()).toContain('31.00.00 - Výroba nábytku')
     expect(hint.text()).toContain('suggestion_disclaimer')
   })
 

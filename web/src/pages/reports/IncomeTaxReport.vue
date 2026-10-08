@@ -135,7 +135,7 @@ const effectiveBankAccount = computed<TaxReturnBankAccount | null>(() =>
   ((state.value?.podklady as any)?.bank_account as TaxReturnBankAccount | null) ?? null)
 function bankAccountLabel(acc: TaxReturnBankAccount): string {
   const parts = [acc.account_number, acc.bank_code].filter(Boolean).join('/')
-  return acc.bank_name ? `${parts} — ${acc.bank_name}` : parts
+  return acc.bank_name ? `${parts} - ${acc.bank_name}` : parts
 }
 
 // Číselník druhů ostatních příjmů §10 (sloupec 1 a 5 Přílohy č. 2). Jediný zdroj pravdy
@@ -855,7 +855,7 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
               <div>{{ t('taxReturn.check_total') }}: {{ formatMoney(Number(c.value?.total ?? 0), 'CZK') }}</div>
               <ul class="mt-1 space-y-0.5">
                 <li v-for="a in ((c.value?.accounts as any[]) || [])" :key="a.account_id" class="font-mono flex justify-between">
-                  <span>{{ a.account_code }} — {{ a.name }}</span><span>{{ formatMoney(a.turnover, 'CZK') }}</span>
+                  <span>{{ a.account_code }} - {{ a.name }}</span><span>{{ formatMoney(a.turnover, 'CZK') }}</span>
                 </li>
               </ul>
             </template>
@@ -1187,12 +1187,12 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
                   <select v-model="item.kind_code" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
                     :class="item.kind_code ? '' : 'border-danger-500'">
                     <option value="">{{ t('taxReturn.s10_kind_code_empty') }}</option>
-                    <option v-for="kind in section10Kinds" :key="kind.code" :value="kind.code">{{ kind.code }} — {{ kind.label }}</option>
+                    <option v-for="kind in section10Kinds" :key="kind.code" :value="kind.code">{{ kind.code }} - {{ kind.label }}</option>
                   </select></label>
                 <label class="text-xs">{{ t('taxReturn.s10_code') }}
                   <select v-model="item.code" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
                     <option value="">{{ t('taxReturn.s10_code_empty') }}</option>
-                    <option v-for="code in section10Codes" :key="code.code" :value="code.code">{{ code.code }} — {{ code.label }}</option>
+                    <option v-for="code in section10Codes" :key="code.code" :value="code.code">{{ code.code }} - {{ code.label }}</option>
                   </select></label>
                 <label class="text-xs md:col-span-3">{{ t('taxReturn.s10_kind') }}
                   <input v-model="item.text" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" /></label>
@@ -1278,7 +1278,7 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
             <ul class="space-y-1.5 text-sm">
               <li v-for="a in addbackSuggestions" :key="a.account_code" class="flex justify-between gap-3">
                 <span>
-                  <span class="font-mono">{{ a.account_code }}</span> — {{ a.name }}
+                  <span class="font-mono">{{ a.account_code }}</span> - {{ a.name }}
                   <span v-if="a.already_non_deductible" class="ml-1 text-[10px] px-1 py-0.5 rounded bg-success-100 text-success-700">{{ t('taxReturn.suggest_already') }}</span>
                   <span class="block text-xs text-neutral-500">{{ t(a.hint_key) }}</span>
                 </span>

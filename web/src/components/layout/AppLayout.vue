@@ -507,6 +507,8 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/stock/purchase-orders', label: t('nav.stock_purchase_orders'), icon: ICONS.purchase, newTo: '/stock/purchase-orders/new', newPermission: 'stock.orders.write' },
         // „U dodavatele" — kdo zboží nabízí, za kolik a kolik kusů (fáze 3 epicu SKLAD).
         { to: '/stock/vendor-offers', label: t('nav.stock_vendor_offers'), icon: ICONS.factory },
+        // Kompletace výrobků — vydá komponenty virtuálního setu a přijme oceněný výrobek.
+        { to: '/stock/assemblies', label: t('nav.stock_assemblies'), icon: ICONS.swap, permission: 'stock' as PermissionKey },
         // E-shop — číselníky (Sklady/Výrobci/Kategorie/Atributy/Tagy/Poplatky) + import
         // jako záložky; 3. položka sekce „Zboží" (za Skladovými doklady).
         { to: '/eshop',            label: t('nav.section_eshop'),    icon: ICONS.folderOpen },

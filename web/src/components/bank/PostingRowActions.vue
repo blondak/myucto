@@ -166,7 +166,7 @@ function onPosted(payload: { result: PostResult; debit: string; credit: string }
         <input v-model="overrideCredit" :list="accountListId" type="text" :placeholder="t('bank.posting.credit')"
           class="w-20 h-7 px-1.5 border border-neutral-300 rounded text-xs font-mono" />
       <datalist :id="accountListId">
-          <option v-for="a in activeAccounts" :key="a.id" :value="a.account_code">{{ a.account_code }} — {{ a.name }}</option>
+          <option v-for="a in activeAccounts" :key="a.id" :value="a.account_code">{{ a.account_code }} - {{ a.name }}</option>
         </datalist>
       </div>
     </template>

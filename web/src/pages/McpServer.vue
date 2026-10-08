@@ -598,7 +598,7 @@ onMounted(() => {
         a <strong>{{ t('mcp_server_page.capabilities.payroll') }}</strong>.
       </p>
       <p class="mb-2">
-        Řekneš třeba <em>„přidej mi do výkazu práce pro AVYX 3 hodiny práce na MCP serveru“</em> —
+        Řeknete třeba <em>„přidej mi do výkazu práce pro AVYX 3 hodiny práce na MCP serveru“</em> —
         asistent dohledá koncept faktury dané zakázky, doplní hodinovou sazbu
         (zakázka → odběratel → výchozí sazba firmy) a řádek přidá, aniž by sáhl
         na ty stávající.
@@ -963,7 +963,7 @@ npm install</pre>
     <!-- Log volání -->
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <div class="p-5 pb-3">
-        <h2 class="text-lg font-semibold">Log volání</h2>
+        <h2 class="text-lg font-semibold">{{ t('mcp_server_page.log_title') }}</h2>
         <p class="text-sm text-neutral-500 mt-0.5">
           Každé volání vašich API tokenů — včetně zamítnutých. U volání z MCP serveru
           je vidět i nástroj, který ho vyvolal.

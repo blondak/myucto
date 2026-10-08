@@ -318,7 +318,7 @@ async function confirmPost(): Promise<void> {
                 class="block w-full text-left text-sm px-2 py-1 rounded hover:bg-neutral-100"
                 @click="applyTemplate(tpl.id)">
                 {{ tpl.name }}
-                <span v-if="tpl.description" class="text-neutral-500"> — {{ tpl.description }}</span>
+                <span v-if="tpl.description" class="text-neutral-500"> - {{ tpl.description }}</span>
               </button>
             </div>
           </div>
@@ -380,7 +380,7 @@ async function confirmPost(): Promise<void> {
               <tr v-for="(l, i) in preview.lines" :key="i">
                 <td class="px-3 py-2">
                   <span class="font-mono">{{ l.account_code }}</span>
-                  <span v-if="l.account_name" class="text-neutral-500"> — {{ l.account_name }}</span>
+                  <span v-if="l.account_name" class="text-neutral-500"> - {{ l.account_name }}</span>
                   <span v-if="l.cost_center" class="ml-2 text-xs text-neutral-400">{{ l.cost_center }}</span>
                 </td>
                 <td class="px-3 py-2 text-right font-mono">

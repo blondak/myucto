@@ -250,7 +250,7 @@ onMounted(() => { void load() })
           <p class="font-medium">{{ t('payroll.people.foreign_permits.alerts_title') }}</p>
           <ul class="mt-1 space-y-1">
             <li v-for="alert in alerts" :key="alert.permit_id">
-              {{ t(`payroll.people.foreign_permits.status.${alert.status}`) }}: {{ alert.permit_label }} — {{ alert.valid_until }}
+              {{ t(`payroll.people.foreign_permits.status.${alert.status}`) }}: {{ alert.permit_label }} - {{ alert.valid_until }}
             </li>
           </ul>
         </div>
@@ -262,7 +262,7 @@ onMounted(() => { void load() })
               <span class="font-medium text-neutral-900">{{ permit.permit_label }}</span>
               <span :class="`rounded-full px-2 py-0.5 font-medium ${statusClass(permit.status)}`">{{ t(`payroll.people.foreign_permits.status.${permit.status}`) }}</span>
             </div>
-            <p class="mt-1 text-neutral-600">{{ t(`payroll.people.foreign_permits.kind.${permit.permit_kind}`) }} · {{ permit.issuing_country_code }} · {{ permit.effective_from }} — {{ permit.valid_until }}</p>
+            <p class="mt-1 text-neutral-600">{{ t(`payroll.people.foreign_permits.kind.${permit.permit_kind}`) }} · {{ permit.issuing_country_code }} · {{ permit.effective_from }} - {{ permit.valid_until }}</p>
             <div class="mt-1 flex flex-wrap items-center gap-3">
               <RouterLink v-if="canReadDocuments && permit.document_id !== null" :to="{ name: 'document-detail', params: { id: permit.document_id } }" class="text-primary-600 hover:text-primary-700">
                 {{ t('payroll.people.foreign_permits.open_document') }}

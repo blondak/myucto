@@ -470,7 +470,7 @@ function reportSkipped(items: UploadSkip[]) {
   const head = items.length === 1
     ? t('documents.upload_skipped_one')
     : t('documents.upload_skipped_many', { n: items.length })
-  const shown = items.slice(0, 8).map(s => `• ${s.name} — ${reasonLabel(s.reason)}`)
+  const shown = items.slice(0, 8).map(s => `• ${s.name} - ${reasonLabel(s.reason)}`)
   if (items.length > 8) shown.push(t('documents.upload_skipped_more', { n: items.length - 8 }))
   toast.warning(`${head}\n${shown.join('\n')}`)
 }

@@ -513,14 +513,14 @@ onMounted(load)
                 <input type="radio" name="token-scope" v-model="form.scope" value="read" class="mt-0.5" />
                 <span>
                   <strong>{{ t('api_tokens.scope_read') }}</strong>
-                  <span class="text-neutral-500"> — {{ t('api_tokens.scope_read_desc') }}</span>
+                  <span class="text-neutral-500"> - {{ t('api_tokens.scope_read_desc') }}</span>
                 </span>
               </label>
               <label class="flex items-start gap-2">
                 <input type="radio" name="token-scope" v-model="form.scope" value="read_write" class="mt-0.5" />
                 <span>
                   <strong>{{ t('api_tokens.scope_read_write') }}</strong>
-                  <span class="text-neutral-500"> — {{ t('api_tokens.scope_read_write_desc') }}</span>
+                  <span class="text-neutral-500"> - {{ t('api_tokens.scope_read_write_desc') }}</span>
                 </span>
               </label>
             </div>
@@ -533,7 +533,7 @@ onMounted(load)
             <input type="checkbox" v-model="form.allow_payroll_submission_docs" class="mt-0.5" data-token-payroll-docs />
             <span>
               <strong>{{ t('api_tokens.payroll_docs') }}</strong>
-              <span class="text-neutral-500"> — {{ t('api_tokens.payroll_docs_desc') }}</span>
+              <span class="text-neutral-500"> - {{ t('api_tokens.payroll_docs_desc') }}</span>
             </span>
           </label>
 

@@ -1903,7 +1903,7 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
             <select v-model="ossBulkForm.country" @change="ossBulkPreview = null"
               class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
               <option value="">{{ t('invoice.bulk_oss_keep_value') }}</option>
-              <option v-for="c in euCountries" :key="c.id" :value="c.iso2">{{ c.iso2 }} — {{ c.name_cs }}</option>
+              <option v-for="c in euCountries" :key="c.id" :value="c.iso2">{{ c.iso2 }} - {{ c.name_cs }}</option>
             </select>
           </div>
           <div>

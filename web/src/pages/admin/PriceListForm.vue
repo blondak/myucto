@@ -288,7 +288,7 @@ onMounted(async () => {
           <label class="block text-sm font-medium text-neutral-700">
             {{ t('price_list.unit') }}
             <select v-model="form.unit" required class="mt-1 w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface">
-              <option v-for="unit in units" :key="unit.id" :value="unit.code">{{ unit.code }} — {{ locale === 'en' ? unit.label_en : unit.label_cs }}</option>
+              <option v-for="unit in units" :key="unit.id" :value="unit.code">{{ unit.code }} - {{ locale === 'en' ? unit.label_en : unit.label_cs }}</option>
             </select>
           </label>
           <label class="block text-sm font-medium text-neutral-700 lg:col-span-3">

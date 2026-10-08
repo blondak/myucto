@@ -1236,7 +1236,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
 
     <datalist :id="`${pageId}-journal-coa`">
       <option v-for="a in activeAccounts" :key="a.id" :value="a.account_code">
-        {{ a.account_code }} — {{ a.name }}
+        {{ a.account_code }} - {{ a.name }}
       </option>
     </datalist>
   </div>

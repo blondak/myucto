@@ -63,7 +63,7 @@ const accounts = ref<ChartAccount[]>([])
 function accountOptions(prefixes: string[]) {
   return accounts.value
     .filter(a => a.is_active && prefixes.some(p => a.account_code.startsWith(p)))
-    .map(a => ({ value: a.account_code, label: `${a.account_code} — ${a.name}` }))
+    .map(a => ({ value: a.account_code, label: `${a.account_code} - ${a.name}` }))
 }
 const assetAccountOptions = computed(() => accountOptions(['01', '02', '03']))
 const accumulatedAccountOptions = computed(() => accountOptions(['07', '08']))

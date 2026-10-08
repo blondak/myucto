@@ -130,7 +130,7 @@ function deductibilityClass(d: string): string {
               <tr v-for="row in data.disposals" :key="row.asset_id">
                 <td class="px-3 py-2">
                   <RouterLink :to="{ name: 'accounting-asset-detail', params: { id: row.asset_id } }" class="text-primary-600 hover:underline">
-                    {{ row.inventory_number }} — {{ row.name }}
+                    {{ row.inventory_number }} - {{ row.name }}
                   </RouterLink>
                 </td>
                 <td class="px-3 py-2">{{ formatDate(row.disposal_date) }}</td>

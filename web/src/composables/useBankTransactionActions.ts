@@ -334,7 +334,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
             const shown = owed > 0 ? owed : i.amount_to_pay
             return {
               value: i.id,
-              label: `${i.varsymbol || '#' + i.id} — ${i.client_company_name}`,
+              label: `${i.varsymbol || '#' + i.id} - ${i.client_company_name}`,
               secondary: `${formatMoney(shown, i.currency)} · ${formatDate(i.due_date || i.issue_date)}`,
             }
           })

@@ -112,8 +112,8 @@ async function save() {
   }
 }
 
-// ── Stavové přechody (F4 R2: schválit / zrušit schválení / znovuotevřít) ────
-type StatusAction = 'approve' | 'unapprove' | 'reopen'
+// ── Stavové přechody (F4 R2: schválit / znovuotevřít; schválení je konečné, API vrací approval_is_final) ────
+type StatusAction = 'approve' | 'reopen'
 
 const statusDialog = reactive({
   period: null as ClosingPeriod | null,
@@ -147,7 +147,6 @@ async function submitStatusDialog() {
   }
   const target: ClosingPeriodStatus =
     statusDialog.action === 'approve' ? 'approved'
-    : statusDialog.action === 'unapprove' ? 'closed'
     : 'open'
   statusDialog.saving = true
   try {
@@ -309,10 +308,6 @@ function statusBadge(status: string): string {
                       class="cursor-pointer text-xs px-2 py-1 rounded-md border border-warning-300 text-warning-600 hover:bg-warning-50 font-medium">
                       {{ t('accounting.closing.reopen.button') }}
                     </button>
-                    <button v-if="p.status === 'approved'" @click="openStatusDialog(p, 'unapprove')"
-                      class="cursor-pointer text-xs px-2 py-1 rounded-md border border-danger-300 text-danger-500 hover:bg-danger-50 font-medium">
-                      {{ t('accounting.closing.approve.revoke_button') }}
-                    </button>
                   </template>
                   <span v-if="p.status === 'approved'" class="text-xs text-neutral-400"
                     :title="t('accounting.closing.approve.locked_hint')">🔒</span>
@@ -349,10 +344,6 @@ function statusBadge(status: string): string {
               <button v-if="p.status === 'closed'" @click="openStatusDialog(p, 'reopen')"
                 class="cursor-pointer text-xs px-2 py-1 rounded-md border border-warning-300 text-warning-600 hover:bg-warning-50 font-medium">
                 {{ t('accounting.closing.reopen.button') }}
-              </button>
-              <button v-if="p.status === 'approved'" @click="openStatusDialog(p, 'unapprove')"
-                class="cursor-pointer text-xs px-2 py-1 rounded-md border border-danger-300 text-danger-500 hover:bg-danger-50 font-medium">
-                {{ t('accounting.closing.approve.revoke_button') }}
               </button>
             </template>
             <RouterLink v-if="auth.can('reports.export')"
@@ -397,15 +388,14 @@ function statusBadge(status: string): string {
       </div>
     </div>
 
-    <!-- Modal: schválení / zrušení schválení / znovuotevření -->
+    <!-- Modal: schválení / znovuotevření -->
     <div v-if="statusDialog.period" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
       <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5">
         <h3 class="text-lg font-semibold mb-3">
-          {{ t(`accounting.closing.${statusDialog.action === 'reopen' ? 'reopen' : 'approve'}.${statusDialog.action === 'approve' ? 'confirm_title' : statusDialog.action === 'unapprove' ? 'revoke_title' : 'title'}`, { year: statusDialog.period.fiscal_year }) }}
+          {{ t(`accounting.closing.${statusDialog.action === 'reopen' ? 'reopen' : 'approve'}.${statusDialog.action === 'approve' ? 'confirm_title' : 'title'}`, { year: statusDialog.period.fiscal_year }) }}
         </h3>
         <p class="text-sm text-neutral-600 mb-3">
           <template v-if="statusDialog.action === 'approve'">{{ t('accounting.closing.approve.confirm_text_17_7') }}</template>
-          <template v-else-if="statusDialog.action === 'unapprove'">{{ t('accounting.closing.approve.revoke_text') }}</template>
           <template v-else>{{ t('accounting.closing.reopen.text') }}</template>
         </p>
         <div v-if="statusDialog.action !== 'approve'" class="mb-3">

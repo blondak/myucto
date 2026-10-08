@@ -155,7 +155,7 @@ async function onStockSearch(rowIndex: number, q: string) {
   try {
     const res = await stockApi.searchItems(q, 30)
     for (const r of res) stockItemsCache.set(r.id, r)
-    stockRowOptions[rowIndex] = res.map(r => ({ value: r.id, label: `${r.sku} — ${r.name}`, secondary: r.unit }))
+    stockRowOptions[rowIndex] = res.map(r => ({ value: r.id, label: `${r.sku} - ${r.name}`, secondary: r.unit }))
   } catch {
     stockRowOptions[rowIndex] = []
   } finally {
@@ -171,7 +171,7 @@ function onStockSelect(rowIndex: number, itemId: number | null) {
   if (itemId === null) return
   const si = stockItemsCache.get(itemId)
   if (si) {
-    stockOptionById[si.id] = { value: si.id, label: `${si.sku} — ${si.name}`, secondary: si.unit }
+    stockOptionById[si.id] = { value: si.id, label: `${si.sku} - ${si.name}`, secondary: si.unit }
     // Sloučené pole (popis = combobox): výběr karty popis přepíše názvem — dosavadní text byl
     // vyhledávací dotaz. Řádek jde dál libovolně přepsat ručně (volný text zůstává první občan).
     it.description = si.name
@@ -190,7 +190,7 @@ function hydrateStockSelections() {
     if (it.stock_item_id != null && it.stock_sku) {
       stockOptionById[it.stock_item_id] = {
         value: it.stock_item_id,
-        label: `${it.stock_sku} — ${it.stock_name ?? ''}`.trim(),
+        label: `${it.stock_sku} - ${it.stock_name ?? ''}`.trim(),
       }
     }
   }
@@ -2457,7 +2457,7 @@ function fieldErr(key: string): string | null {
             <select v-model="form.vat_classification_code" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
               <option :value="null">— {{ t('purchase_invoice.classification.no_vat_class') }} —</option>
               <option v-for="vc in vatClassifications" :key="vc.id" :value="vc.code">
-                {{ vc.code }} — {{ vc.label.length > 60 ? vc.label.slice(0, 60) + '…' : vc.label }}
+                {{ vc.code }} - {{ vc.label.length > 60 ? vc.label.slice(0, 60) + '…' : vc.label }}
               </option>
             </select>
             <p class="text-xs text-neutral-500 mt-1">{{ t('purchase_invoice.classification.vat_classification_hint') }}</p>
