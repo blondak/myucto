@@ -8091,6 +8091,7 @@
           "ozuspoj_xsd_validation_failed": "The notice of intent to claim the contribution discount failed XML schema validation.",
           "regzel_xsd_validation_failed": "The registration submission failed XML schema validation.",
           "registration_xsd_validation_failed": "The registration submission failed XML schema validation.",
+          "manual_acceptance_contradicted": "A verified ČSSZ protocol disagrees with the manual confirmation of acceptance. Check the submission in the ČSSZ application.",
           "unknown": "The submission needs review. Support details are available below."
         },
         "issue_remediation": {
@@ -8197,6 +8198,39 @@
           "xsd_versions": "Report format: saved version {old}, current version {current}.",
           "control_versions": "Validation rules: saved version {old}, current version {current}."
         }
+      },
+      "manual_acceptance": {
+        "badge": "Accepted manually",
+        "action": "Mark as accepted manually",
+        "title": "Manual confirmation of acceptance for submission #{id}",
+        "explanation": "Use this when the ČSSZ application shows the submission as accepted (possibly after ČSSZ edited it), but no verified protocol reached MyÚčto. The submission is marked as accepted with all consequences, while the history keeps showing that a person confirmed it. A later verified ČSSZ protocol takes precedence.",
+        "loading": "Loading the submission status…",
+        "load_failed": "The submission status could not be loaded.",
+        "save_failed": "The manual confirmation could not be saved.",
+        "current_status": "Current submission status: {status}",
+        "variant_label": "What did you see in the ČSSZ application?",
+        "variant": {
+          "unchanged": "Accepted unchanged",
+          "changed_by_authority": "Accepted after an edit in the ČSSZ application"
+        },
+        "variant_hint": {
+          "unchanged": "ČSSZ accepted the submission exactly as MyÚčto sent it.",
+          "changed_by_authority": "The submission was corrected in the ČSSZ application by ČSSZ or by you. The data held by ČSSZ may differ from what was sent, so corrective submissions cannot be built from the app's own data."
+        },
+        "note_label": "Internal note (required)",
+        "note_placeholder": "E.g. the status in the ČSSZ application, the submission number, what ČSSZ changed and who verified it.",
+        "note_hint": "At least {min} characters, currently {count} of {max}.",
+        "accepted_on_label": "Acceptance date according to ČSSZ (optional)",
+        "accepted_on_value": "accepted by ČSSZ on {date}",
+        "attachment_label": "Screenshot or PDF from the ČSSZ application (optional)",
+        "attachment_hint": "PDF, PNG or JPEG up to 10 MB. Stored with the submission.",
+        "attachment_too_large": "The attachment is larger than 10 MB.",
+        "history_title": "Earlier manual confirmations",
+        "detail": "{variant} · confirmed manually by {who} on {when} (previous status: {before})",
+        "contradiction_badge": "Conflicts with protocol: {status}",
+        "contradiction_detail": "The verified ČSSZ protocol from {date} says: {status}. The protocol takes precedence; please check the submission.",
+        "submit": "Mark as accepted",
+        "saving": "Saving…"
       },
       "subject": {
         "open_person": "Employee card"

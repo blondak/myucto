@@ -47,6 +47,7 @@ import {
   type PayrollJmhzTransportEnvironment,
   type PayrollJmhzTransportPoll,
   type PayrollJmhzTransportStatus,
+  type PayrollSubmissionManualAcceptance as ManualAcceptanceSummary,
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
@@ -59,6 +60,7 @@ import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/butt
 // stránce se čte jako dvě různá data.
 import { formatDate, formatDateTime, formatPeriod, formatUtcDateTime } from '@/composables/useFormat'
 import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConfirmDialog.vue'
+import PayrollSubmissionManualAcceptance from '@/components/payroll/PayrollSubmissionManualAcceptance.vue'
 import PayrollPossiblyDeliveredNotice from '@/components/payroll/PayrollPossiblyDeliveredNotice.vue'
 import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
 import { isTestEnvironmentRejection, useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
@@ -91,6 +93,8 @@ const attempts = ref<PayrollJmhzTransportAttempt[]>([])
 const readySubmissions = ref<PayrollJmhzReadySubmission[]>([])
 const dispatchedSubmissions = ref<PayrollJmhzDispatchedSubmission[]>([])
 const imported = ref<PayrollJmhzImportedProtocol[]>([])
+/** Poslední ruční potvrzení přijetí podle podání — štítek „Přijato ručně". */
+const manualAcceptances = ref<Record<number, ManualAcceptanceSummary>>({})
 const importing = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 
@@ -996,6 +1000,9 @@ async function load() {
     attempts.value = history.attempts ?? []
     readySubmissions.value = history.ready_submissions ?? []
     dispatchedSubmissions.value = history.dispatched_submissions ?? []
+    manualAcceptances.value = Object.fromEntries(
+      (history.manual_acceptances ?? []).map(entry => [entry.submission_id, entry]),
+    )
     attemptsTotal.value = history.total ?? 0
     filterYears.value = history.years ?? []
     imported.value = protocols.protocols ?? []
@@ -1015,6 +1022,7 @@ async function load() {
     attempts.value = []
     readySubmissions.value = []
     dispatchedSubmissions.value = []
+    manualAcceptances.value = {}
     attemptsTotal.value = 0
     imported.value = []
     importedTotal.value = 0
@@ -1969,6 +1977,14 @@ onMounted(loadVariableSymbols)
               >
                 {{ t(`payroll.submissions.transport.result.${resultKey(entry.group)}`) }}
               </span>
+              <PayrollSubmissionManualAcceptance
+                :environment="requestEnvironment"
+                :submission-id="entry.group.submissionId"
+                :submission-status="entry.group.submissionStatus"
+                :summary="manualAcceptances[entry.group.submissionId] ?? null"
+                :can-write="canWrite"
+                @accepted="load"
+              />
               <span
                 v-if="entry.replacement"
                 class="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-700"

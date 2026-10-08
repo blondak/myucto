@@ -8091,6 +8091,7 @@
           "ozuspoj_xsd_validation_failed": "Oznámení záměru uplatňovat slevu neprošlo kontrolou XML schématu.",
           "regzel_xsd_validation_failed": "Registrační podání neprošlo kontrolou XML schématu.",
           "registration_xsd_validation_failed": "Registrační podání neprošlo kontrolou XML schématu.",
+          "manual_acceptance_contradicted": "Ověřený protokol ČSSZ nesouhlasí s ručním potvrzením přijetí. Zkontrolujte podání v aplikaci ČSSZ.",
           "unknown": "Podání vyžaduje kontrolu. Podrobnosti pro podporu jsou dostupné níže."
         },
         "issue_remediation": {
@@ -8197,6 +8198,39 @@
           "xsd_versions": "Formát hlášení: uložená verze {old}, aktuální verze {current}.",
           "control_versions": "Kontrolní pravidla: uložená verze {old}, aktuální verze {current}."
         }
+      },
+      "manual_acceptance": {
+        "badge": "Přijato ručně",
+        "action": "Označit jako přijaté ručně",
+        "title": "Ruční potvrzení přijetí podání #{id}",
+        "explanation": "Použijte, když v aplikaci ČSSZ vidíte, že podání bylo přijato (případně ho ČSSZ upravila), ale ověřený protokol do MyÚčta nedorazil. Podání se označí za přijaté se všemi následky, ale v historii zůstane vidět, že to potvrdil člověk. Pozdější ověřený protokol ČSSZ má přednost.",
+        "loading": "Načítám stav podání…",
+        "load_failed": "Stav podání se nepodařilo načíst.",
+        "save_failed": "Ruční potvrzení se nepodařilo uložit.",
+        "current_status": "Aktuální stav podání: {status}",
+        "variant_label": "Co jste v aplikaci ČSSZ viděli?",
+        "variant": {
+          "unchanged": "Přijato beze změny",
+          "changed_by_authority": "Přijato s úpravou v aplikaci ČSSZ"
+        },
+        "variant_hint": {
+          "unchanged": "ČSSZ podání přijala tak, jak ho MyÚčto odeslalo.",
+          "changed_by_authority": "Podání v aplikaci ČSSZ opravila ČSSZ nebo vy. Data u ČSSZ se mohou lišit od odeslaných, opravná hlášení proto aplikace nesestaví z vlastních dat."
+        },
+        "note_label": "Interní poznámka (povinná)",
+        "note_placeholder": "Např. stav v aplikaci ČSSZ, číslo podání, co ČSSZ upravila a kdo to ověřil.",
+        "note_hint": "Nejméně {min} znaků, nyní {count} z {max}.",
+        "accepted_on_label": "Datum přijetí podle ČSSZ (nepovinné)",
+        "accepted_on_value": "přijato ČSSZ {date}",
+        "attachment_label": "Snímek nebo PDF z aplikace ČSSZ (nepovinné)",
+        "attachment_hint": "PDF, PNG nebo JPEG do 10 MB. Uloží se k podání.",
+        "attachment_too_large": "Příloha je větší než 10 MB.",
+        "history_title": "Dřívější ruční potvrzení",
+        "detail": "{variant} · ručně potvrdil(a) {who} {when} (stav předtím: {before})",
+        "contradiction_badge": "Rozpor s protokolem: {status}",
+        "contradiction_detail": "Ověřený protokol ČSSZ z {date} říká: {status}. Protokol má přednost, zkontrolujte podání.",
+        "submit": "Označit jako přijaté",
+        "saving": "Ukládám…"
       },
       "subject": {
         "open_person": "Karta zaměstnance"

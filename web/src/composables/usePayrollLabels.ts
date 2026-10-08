@@ -55,6 +55,7 @@ const SUBMISSION_ISSUE_CODES = new Set([
   'ozuspoj_xsd_validation_failed',
   'regzel_xsd_validation_failed',
   'registration_xsd_validation_failed',
+  'manual_acceptance_contradicted',
 ])
 
 /**

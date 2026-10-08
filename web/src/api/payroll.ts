@@ -3072,6 +3072,66 @@ export interface PayrollSubmissionOverviewItem {
     /** Čím je doručení doložené: `delivered` | `receipt` | `accepted`. */
     delivery_proof: string | null
   }
+  /** Poslední ruční potvrzení přijetí posledního podání; `null` = žádné. */
+  manual_acceptance?: PayrollSubmissionManualAcceptance | null
+}
+
+/** Varianta ručního přijetí: ČSSZ podání přijala beze změny, nebo upravené. */
+export type PayrollSubmissionManualAcceptanceVariant = 'unchanged' | 'changed_by_authority'
+
+/**
+ * Ruční potvrzení, že úřad podání přijal — výrok ÚČETNÍ, ne protokol úřadu.
+ * `contradiction` nese pozdější ověřený protokol, který s ním nesouhlasí.
+ */
+export interface PayrollSubmissionManualAcceptance {
+  id: number
+  submission_id: number
+  variant: PayrollSubmissionManualAcceptanceVariant
+  status_before: string
+  note: string
+  authority_accepted_on: string | null
+  attachment_artifact_id: number | null
+  recorded_by: number
+  recorded_by_name: string | null
+  /** UTC, `YYYY-MM-DD HH:MM:SS`. */
+  recorded_at: string
+  contradiction: {
+    receipt_id: number
+    remote_status: string | null
+    received_at: string
+    is_resolved: boolean
+  } | null
+}
+
+export interface PayrollSubmissionManualAcceptanceOverview {
+  submission: {
+    id: number
+    environment: PayrollRegzelEnvironment
+    agenda_code: string
+    status: string
+    row_version: number
+  }
+  supported: boolean
+  can_accept: boolean
+  blocked_reason: string | null
+  /** Od nejnovějšího. */
+  history: PayrollSubmissionManualAcceptance[]
+}
+
+export interface PayrollSubmissionManualAcceptanceInput {
+  rowVersion: number
+  variant: PayrollSubmissionManualAcceptanceVariant
+  note: string
+  acceptedOn: string | null
+  attachment: File | null
+  idempotencyKey: string
+}
+
+export interface PayrollSubmissionManualAcceptanceResult {
+  environment: PayrollRegzelEnvironment
+  acceptance: PayrollSubmissionManualAcceptance
+  submission: { id: number; status: string; row_version: number }
+  created: boolean
 }
 
 export interface PayrollSubmissionOverviewResponse {
@@ -7311,6 +7371,8 @@ export interface PayrollJmhzTransportHistory {
   attempts: PayrollJmhzTransportAttempt[]
   ready_submissions: PayrollJmhzReadySubmission[]
   dispatched_submissions: PayrollJmhzDispatchedSubmission[]
+  /** Poslední ruční potvrzení přijetí k zobrazeným podáním. */
+  manual_acceptances?: PayrollSubmissionManualAcceptance[]
   total: number
   /** Roky, za které firma nějaké hlášení odesílala — nabídka rychlého filtru. */
   years?: number[]
@@ -8191,6 +8253,43 @@ export const payrollApi = {
       `/payroll/submissions/${submissionId}/filed-externally`,
       { environment, row_version: rowVersion, filed_on: filedOn, note },
     ).then(response => response.data),
+  /** Smí se podání ručně označit za přijaté a co se už ručně potvrdilo. */
+  submissionManualAcceptance: (
+    environment: PayrollRegzelEnvironment,
+    submissionId: number,
+  ) =>
+    api.get<PayrollSubmissionManualAcceptanceOverview>(
+      `/payroll/submissions/${submissionId}/manual-acceptance`,
+      { params: { environment } },
+    ).then(response => response.data),
+  /**
+   * Ruční označení podání za přijaté podle aplikace úřadu. Podání přejde na
+   * přijaté se všemi následky, ale zůstává poznat, že to tvrdí člověk:
+   * pozdější ověřený protokol má přednost a rozpor se ukáže jako nález.
+   */
+  acceptSubmissionManually: (
+    environment: PayrollRegzelEnvironment,
+    submissionId: number,
+    input: PayrollSubmissionManualAcceptanceInput,
+  ) => {
+    const fd = new FormData()
+    fd.append('environment', environment)
+    fd.append('row_version', String(input.rowVersion))
+    fd.append('variant', input.variant)
+    fd.append('note', input.note)
+    if (input.acceptedOn) fd.append('accepted_on', input.acceptedOn)
+    if (input.attachment) fd.append('file', input.attachment)
+    return api.post<PayrollSubmissionManualAcceptanceResult>(
+      `/payroll/submissions/${submissionId}/manual-acceptance`,
+      fd,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          'Idempotency-Key': input.idempotencyKey,
+        },
+      },
+    ).then(response => response.data)
+  },
   /**
    * Jeden měsíční přehled: co se za zvolené období generuje/odesílá, kam,
    * jakou cestou, do kdy a co s tím — přes VŠECHNY agendy i to, co appka
