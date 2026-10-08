@@ -53,6 +53,14 @@ final class PayrollEmployeeRegistrationDeadlinePolicy
     private const CANCELLATION_OTHER_RULESET_ID =
         'cz-regzec-cancellation-other-2026-07.v1';
 
+    /** Druh pracovního oprávnění (ID 10106): povolení k zaměstnání, zaměstnanecká a modrá karta. */
+    public const FOREIGN_PERMIT_TYPES = ['1', '2', '4'];
+    private const FOREIGN_PERMIT_RULESET_ID =
+        'cz-regzec-foreign-permit-labour-office-2026-07.v1';
+    private const FOREIGN_PERMIT_NO_SHOW_DAYS = 10;
+    private const FOREIGN_CARD_NO_SHOW_DAYS = 45;
+    private const FOREIGN_PERMIT_EARLY_END_DAYS = 10;
+
     /**
      * Doplnění plné registrace po předregistraci: osm dnů PO nástupu.
      *
@@ -346,6 +354,115 @@ final class PayrollEmployeeRegistrationDeadlinePolicy
                 . 'referentského zpracování.',
             false,
         );
+    }
+
+    /**
+     * Cizinec s povolením k zaměstnání (1), zaměstnaneckou (2) nebo modrou
+     * kartou (4): podle § 88 odst. 1 zákona o zaměstnanosti (citováno
+     * v zásadách REGZEC 1.4.6, úvod) se úřadu práce, kterému informaci dnes
+     * předává REGZEC, oznamuje
+     *
+     *  - nenastoupení (A8): u povolení k zaměstnání do 10 dnů ode dne, kdy
+     *    měl nastoupit, u karty do 45 dnů ode dne splnění podmínek pro vydání,
+     *  - předčasné ukončení před koncem platnosti oprávnění (A2): do 10 dnů
+     *    ode dne skončení.
+     *
+     * Jedno podání plní obě povinnosti, platí tedy dřívější z lhůt; osm dnů
+     * podle § 19 zákona č. 323/2025 Sb. se nikdy neprodlužuje. Den splnění
+     * podmínek pro kartu aplikace nezná: nejpozději je to první den
+     * platnosti karty (`permit_from`), takže termín nejvýš 45 dnů od něj je
+     * horní mez a `notice` žádá ověření podle rozhodnutí.
+     *
+     * Bez oprávnění 1, 2, 4 (nebo u A2 bez předčasného ukončení) vrací okno
+     * beze změny, aby se otisk lhůty u ostatních zaměstnanců nehnul.
+     *
+     * @param array<string,mixed>|null $permit `type_code`, `permit_from`, `permit_to`
+     */
+    public function withForeignPermit(
+        PayrollEmployeeRegistrationDeadlineWindow $window,
+        int $actionCode,
+        bool $notStarted,
+        ?array $permit,
+        string $triggerOn,
+    ): PayrollEmployeeRegistrationDeadlineWindow {
+        $type = is_array($permit) ? ($permit['type_code'] ?? null) : null;
+        if (!is_string($type) || !in_array($type, self::FOREIGN_PERMIT_TYPES, true)) {
+            return $window;
+        }
+        $trigger = $this->date($triggerOn);
+        if ($actionCode === 8 && $notStarted && $type === '1') {
+            $candidate = $trigger->modify('+' . self::FOREIGN_PERMIT_NO_SHOW_DAYS . ' days');
+            $rule = ['case' => 'no_show_employment_permit', 'days' => self::FOREIGN_PERMIT_NO_SHOW_DAYS];
+            $notice = 'Úřadu práce se nenastoupení cizince s povolením k zaměstnání '
+                . 'oznamuje do ' . self::FOREIGN_PERMIT_NO_SHOW_DAYS . ' dnů ode dne, kdy měl '
+                . 'nastoupit (§ 88 odst. 1 zákona o zaměstnanosti). Storno REGZEC A8 '
+                . 'plní obě povinnosti, platí dřívější lhůta.';
+        } elseif ($actionCode === 8 && $notStarted) {
+            $from = is_string($permit['permit_from'] ?? null) ? $permit['permit_from'] : null;
+            $candidate = $from === null
+                ? null
+                : $this->date($from)->modify('+' . self::FOREIGN_CARD_NO_SHOW_DAYS . ' days');
+            $rule = ['case' => 'no_show_card', 'days' => self::FOREIGN_CARD_NO_SHOW_DAYS];
+            $notice = 'U zaměstnanecké nebo modré karty se nenastoupení oznamuje do '
+                . self::FOREIGN_CARD_NO_SHOW_DAYS . ' dnů ode dne, kdy byly splněny '
+                . 'podmínky pro vydání karty (§ 88 odst. 1 zákona o zaměstnanosti). '
+                . 'Ten den aplikace nezná' . ($from === null
+                    ? ' ani nemá začátek platnosti karty v profilu A1'
+                    : ', termín počítá od začátku platnosti karty ' . $from)
+                . '. Ověřte ho podle rozhodnutí; nastal-li dřív, je lhůta kratší.';
+        } elseif ($actionCode === 2 && self::endsBeforePermitExpiry($permit, $triggerOn)) {
+            $candidate = $trigger->modify('+' . self::FOREIGN_PERMIT_EARLY_END_DAYS . ' days');
+            $rule = ['case' => 'early_termination', 'days' => self::FOREIGN_PERMIT_EARLY_END_DAYS];
+            $notice = 'Předčasné ukončení zaměstnání cizince před koncem platnosti '
+                . 'oprávnění se úřadu práce oznamuje do ' . self::FOREIGN_PERMIT_EARLY_END_DAYS
+                . ' dnů ode dne skončení (§ 88 odst. 1 zákona o zaměstnanosti). '
+                . 'Odhláška REGZEC A2 s důvodem předčasného ukončení plní obě '
+                . 'povinnosti, platí dřívější lhůta.';
+        } else {
+            return $window;
+        }
+        $dueOn = $candidate !== null && $candidate->format('Y-m-d') < $window->dueOn
+            ? $candidate->format('Y-m-d')
+            : $window->dueOn;
+
+        return new PayrollEmployeeRegistrationDeadlineWindow(
+            $window->earliestRegistrationOn,
+            $dueOn,
+            $window->calendarBasis,
+            self::FOREIGN_PERMIT_RULESET_ID,
+            hash('sha256', CanonicalJson::encode([
+                'schema_reference' =>
+                    'payroll-employee-registration-deadline-policy.v1',
+                'ruleset_id' => self::FOREIGN_PERMIT_RULESET_ID,
+                'base_ruleset_hash' => $window->rulesetHash,
+                'action_code' => $actionCode,
+                'permit_type_code' => $type,
+                'rule' => $rule,
+                'sources' => [
+                    'law' => '435/2004 Sb. § 88 odst. 1 (citace: zásady REGZEC 1.4.6, úvod)',
+                ],
+            ])),
+            $window->derived,
+            trim(($window->notice === null ? '' : $window->notice . ' ') . $notice),
+            $window->statutory,
+        );
+    }
+
+    /**
+     * Končí cizinec s oprávněním 1, 2, 4 dřív, než oprávnění vyprší? Stejná
+     * podmínka rozhoduje o důvodu předčasného ukončení v A2 (EDV 1.4.0.6,
+     * ID 10534) i o lhůtě pro úřad práce.
+     *
+     * @param array<string,mixed>|null $permit
+     */
+    public static function endsBeforePermitExpiry(?array $permit, string $endOn): bool
+    {
+        $permitTo = is_array($permit) ? ($permit['permit_to'] ?? null) : null;
+
+        return is_array($permit)
+            && in_array($permit['type_code'] ?? null, self::FOREIGN_PERMIT_TYPES, true)
+            && is_string($permitTo)
+            && $endOn < $permitTo;
     }
 
     /** @param array<string,mixed> $rule */

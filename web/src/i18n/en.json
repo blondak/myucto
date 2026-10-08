@@ -6614,7 +6614,8 @@
         "employer_window": "Note: this is the first employee. File the employer's own registration no later than {to} — after that date the employer status is presumed by law.",
         "registration_window": {
           "not_derived": "The start date {start} precedes 1 July 2026, when the current registration duty took effect. File the registration without undue delay — the app does not derive a deadline under the former rules and treats the filing as late.",
-          "not_statutory": "This filing has no statutory deadline. Until {milestone} the monthly report can be cancelled together with it without manual processing; later, file a corrective report."
+          "not_statutory": "This filing has no statutory deadline. Until {milestone} the monthly report can be cancelled together with it without manual processing; later, file a corrective report.",
+          "foreign_permit": "Foreigner with an employment permit, employee card or blue card: the filing also serves as the notice to the labour office (section 88 of the Employment Act) and the earlier of both deadlines applies. For a card it runs 45 days from the day the conditions for issuing it were met; check that day against the decision."
         },
         "completion": {
           "action": "Supplement data (A3)",
@@ -6713,6 +6714,7 @@
             "postal_code_cz": "{field} must have five digits for an address in the Czech Republic and must not start with 0, 8 or 9 (for example 60200), it is now “{value}”.",
             "house_number_cz": "{field} must be a number of at most four digits for a Czech address (no letters or slashes), it is now “{value}”. Put the orientation number in its own field.",
             "orientation_number_cz_residence": "{field} may have at most {max} characters for an address of stay in the Czech Republic, it is now “{value}”.",
+            "orientation_number_cz": "{field} may have at most {max} characters for a Czech address, it is now “{value}”.",
             "residence_country_mismatch": "{field} must match the tax residency country (“{tax}”), it is now “{value}”.",
             "small_scale_dpp": "{field} must not be switched on for activity “{activity}” (agreement to complete a job), small-scale employment is not used for agreements.",
             "underage": "The employee is younger than {min_age} on the start date and ČSSZ rejects such a filing on entry. Check the date of birth and the start date.",
@@ -6957,7 +6959,8 @@
             "tax_residency": "Tax residence",
             "relationship_detail_code": "Employment-relation detail",
             "health_insurance_code": "Health-insurer code",
-            "highest_education_code": "Highest-education code"
+            "highest_education_code": "Highest-education code",
+            "actual_start_on": "Actual start date"
           },
           "address": {
             "street": "Street",
@@ -6984,6 +6987,9 @@
           "a8_attachment": "Attach explanation",
           "a8_attachment_missing": "No explanation attached yet.",
           "a8_attachment_description": "Attachment description (optional)",
+          "a4_start_hint": "The registration was filed with an expected start date and the employee started on a different day. ČSSZ processes a correction of the actual start date only with a cover letter attached, by a clerk.",
+          "a4_attachment": "Attach cover letter",
+          "a4_attachment_missing": "No cover letter attached yet.",
           "identifiers_verified": "I verified the OIČ and ID PPV in the employee list on the ČSSZ ePortal",
           "identifiers_verified_hint": "Only for an employee taken over from an earlier notification (ONZ) whose numbers do not come from a ČSSZ protocol, an accepted A3 completion or an imported ČSSZ employee export. The A2 deregistration can then be filed without the A3 completion, which stays as a separate duty.",
           "select_placeholder": "Select…"
@@ -11931,6 +11937,15 @@
       "registration_a8_explanation_attachment_invalid": "The file with the explanation of the cancellation could not be read, or it is larger than 15 MB. Attach it in the form again.",
       "registration_a8_explanation_attachment_required": "The cancellation needs a reason: either the employee never started (confirm it in the form), or it is another reason and then attach a file with a written explanation. Without it ČSSZ will not process the cancellation.",
       "registration_a5_variable_symbol_unchanged": "The new variable symbol equals the original one. ČSSZ rejects such a transfer, enter the new variable symbol assigned by ČSSZ.",
+      "registration_a4_start_attachment_required": "ČSSZ processes a correction of the actual start date only with a cover letter attached. Attach a file explaining the correction in the form.",
+      "registration_a4_explanation_attachment_invalid": "The cover letter file for the correction could not be read or does not meet the ČSSZ conditions (extension, size). Attach it in the form again.",
+      "registration_a5_variable_symbol_invalid": "The new variable symbol is not valid: its check digit does not match or it does not start with a social security district office code. ČSSZ would reject the transfer, copy the new symbol exactly from the ČSSZ notice.",
+      "registration_event_before_start": "The notice is reported as of a day before the employee started. ČSSZ accepts a change only as of the start day or later. Correct the date in the form, or check the start day on the employment record.",
+      "registration_event_czech_residence_forbidden": "The address of stay in the Czech Republic is not sent for an employee with permanent residence in the Czech Republic, ČSSZ would reject the notice. Remove it from the notice; if the permanent residence moves abroad, report the new permanent address in the same change.",
+      "registration_event_czech_residence_unverifiable": "The address of stay in the Czech Republic is sent only for an employee with permanent residence abroad, but the person has no country of permanent residence. Add the permanent address with its country on the person record, or report it in the same change.",
+      "registration_event_birth_number_missing": "A change or correction of the registration of an employee with Czech citizenship must carry the birth number or the insured person's registration number, otherwise ČSSZ rejects it. Add the birth number on the person record and approve the notice again.",
+      "registration_event_foreign_insurance_missing": "A change or correction of the registration of an employee with activity type “N” (contract employee) must carry the foreign insurance carrier. Fill it in the registration profile (A1), save it and approve the notice again.",
+      "registration_employer_variable_symbol_invalid":"The employer variable symbol is not valid: its check digit does not match or it does not start with a social security district office code. ČSSZ would reject the filing. Copy the symbol exactly from the ČSSZ notice into the employer payroll settings (accounting unit).",
       "registration_cssz_workplace_code_invalid": "The social security office code is not in the ČSSZ district codebook, so ČSSZ rejects it. Correct the code in the employer payroll settings.",
       "registration_event_delta_variant_forbidden": "The notification contains a part that the data message must not carry for this activity type (forbidden element), so ČSSZ would reject it. Remove the listed data from the notification.",
       "registration_a3_underage": "The employee is younger than 14 on the new start date and ČSSZ rejects such a filing on entry. Check the date of birth and the start date.",

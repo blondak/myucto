@@ -650,7 +650,7 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
             preparedOn: '2026-08-04',
             expectedStartOn: $expectedStartOn,
             actualStartOn: $actualStartOn,
-            employerVariableSymbol: '1234567890',
+            employerVariableSymbol: '1100000007',
             employerName: 'Syntetický zaměstnavatel s.r.o.',
             csszWorkplaceCode: '110',
             eventSnapshot: $eventSnapshot,
@@ -687,7 +687,7 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
                 'value' => '200000000000000000002',
             ],
             'employer' => [
-                'variable_symbol' => '1234567890',
+                'variable_symbol' => '1100000007',
                 'name' => 'Syntetický zaměstnavatel s.r.o.',
                 'workplace_code' => '110',
             ],
@@ -876,6 +876,54 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
         }
     }
 
+    /**
+     * PREZEC26-vs-3: VS10 musí projít Luhnovým součtem a začínat kódem
+     * okresu z C_COKR (zahraniční VS 1868… okres nemá).
+     */
+    public function testPrezecRejectsVariableSymbolFailingChecksumOrDistrict(): void
+    {
+        $validator = new PayrollRegistrationXmlValidator(
+            new PayrollRegistrationSchemaCatalog(),
+        );
+        $base = self::payload(
+            self::snapshot('CZ'),
+            new PayrollRegistrationInteraction(
+                'PREZEC26',
+                'limited_pre_registration',
+                9,
+            ),
+        );
+        $withSymbol = static fn (string $symbol): PayrollRegistrationXmlPayload
+            => new PayrollRegistrationXmlPayload(
+                identity: $base->identity,
+                interaction: $base->interaction,
+                sequenceNumber: $base->sequenceNumber,
+                formGuid: $base->formGuid,
+                preparedOn: $base->preparedOn,
+                expectedStartOn: $base->expectedStartOn,
+                actualStartOn: $base->actualStartOn,
+                employerVariableSymbol: $symbol,
+                employerName: $base->employerName,
+                csszWorkplaceCode: $base->csszWorkplaceCode,
+            );
+        // 1100000008: překlep v kontrolní číslici; 9990000003: Luhn sedí,
+        // ale 999 není okres ČSSZ.
+        foreach (['1100000008', '9990000003'] as $symbol) {
+            $this->expectCode(
+                'registration_employer_variable_symbol_invalid',
+                static fn () => $validator->validate($withSymbol($symbol), '<PREZEC/>'),
+            );
+        }
+        // Platný český i zahraniční VS10 a starší osmimístný symbol projdou
+        // touhle branou a padnou až na porovnání bajtů.
+        foreach (['1100000007', '1868000009', '12345678'] as $symbol) {
+            $this->expectCode(
+                'registration_xml_snapshot_mismatch',
+                static fn () => $validator->validate($withSymbol($symbol), '<PREZEC/>'),
+            );
+        }
+    }
+
     /** Chybějící údaje zaměstnavatele musí být pojmenované, ne spočítané. */
     public function testMissingEmployerMetadataNamesWhichFieldIsMissing(): void
     {
@@ -955,7 +1003,7 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
         <birth nam="Nováková" cit="Testov"/>
         <stat cnt="CZ"/>
       </client>
-      <comp vs="1234567890"/>
+      <comp vs="1100000007"/>
     </employee>
   </employees>
 </PREZEC>
@@ -971,7 +1019,7 @@ XML;
   <employees>
     <employee sqnr="1" act="10" idform="AAAAAAAA-1111-2222-3333-BBBBBBBBBBBB" dat="2026-08-04">
       <client bno="9152031234"/>
-      <comp vs="1234567890"/>
+      <comp vs="1100000007"/>
     </employee>
   </employees>
 </PREZEC>

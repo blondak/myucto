@@ -176,7 +176,11 @@ final class PayrollRegistrationXmlSerializer
         $bno = $this->nullableBno($payload);
         if ($bno !== null) {
             $client->setAttribute('bno', $bno);
-        } elseif ($payload->identity->identifiers['vcp'] !== null) {
+        } elseif ($payload->identity->identifiers['vcp'] !== null
+            // EDV 1.4.0.6, ID 10060: u A1-10 je VČP zakázané, ČSSZ by
+            // přihlášku zamítla. Osobu bez RČ/EČP identifikuje datum narození.
+            && $a1->variant !== PayrollRegistrationBusinessMatrix::VARIANT_10
+        ) {
             $client->setAttribute(
                 'vcp',
                 $payload->identity->identifiers['vcp'],
@@ -521,7 +525,11 @@ final class PayrollRegistrationXmlSerializer
         }
         $employee->appendChild($job);
 
-        if (in_array($action, [6, 7], true)) {
+        if (in_array($action, [6, 7], true)
+            || (in_array($action, [3, 4], true) && is_array($data['foreign_insurance'] ?? null))
+        ) {
+            // A3/A4 u druhu „N" nesou nositele zmrazeného z profilu A1
+            // (EDV 1.4.0.6, ID 10092).
             $this->appendForeignInsurance($document, $namespace, $employee, $data);
         }
         if ($action === 2 && is_array($data['unemployment'] ?? null)) {
@@ -540,9 +548,10 @@ final class PayrollRegistrationXmlSerializer
                 $this->eventObject($data, 'delta'),
             );
         }
-        if ($action === 8 && is_array($data['explanation_attachment'] ?? null)) {
-            // Storno z jiného důvodu než nenastoupení nese písemné
-            // zdůvodnění jako přílohu (zásady REGZEC, kód akce 8).
+        if (in_array($action, [4, 8], true) && is_array($data['explanation_attachment'] ?? null)) {
+            // Storno z jiného důvodu než nenastoupení (A8) a oprava dne
+            // nástupu (A4) nesou písemné vysvětlení jako přílohu (zásady
+            // REGZEC, kód akce 8 a specifický postup č. 10).
             $attachments = $this->element($document, $namespace, 'attachs');
             $node = $this->element($document, $namespace, 'attach');
             $this->setMappedAttributes($node, $data['explanation_attachment'], [
@@ -601,6 +610,10 @@ final class PayrollRegistrationXmlSerializer
         $delta = $this->eventObject($data, 'delta');
         if (isset($delta['birth_number'])) {
             $client->setAttribute('bno', (string) $delta['birth_number']);
+        } elseif (isset($data['birth_number'])) {
+            // EDV 1.4.0.6, ID 10057: u českého občanství povinné i v A3/A4;
+            // událost ho zmrazí z karty osoby.
+            $client->setAttribute('bno', (string) $data['birth_number']);
         }
         $identity = is_array($delta['identity'] ?? null) ? $delta['identity'] : [];
         $nameAttributes = array_filter([

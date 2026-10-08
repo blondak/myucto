@@ -36,6 +36,7 @@ import {
   registrationMissingItems,
 } from './registrationMissingItems'
 import { registrationA1FieldLabel } from './registrationA1FieldLabels'
+import { registrationRemediation } from './registrationRemediation'
 import { usePersonCardSaveSection } from './personCardSave'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
@@ -117,6 +118,7 @@ const events = ref<PayrollRegistrationEvent[]>([])
 const eventsBusy = ref(false)
 const eventSaving = ref(false)
 const eventError = ref('')
+const eventErrorCode = ref('')
 const selectedEventId = ref<number | null>(null)
 const eventFormOpen = ref(false)
 const eventInteraction = ref<PayrollRegistrationEventInteraction>('termination')
@@ -214,6 +216,8 @@ function emptyA1Address(): PayrollRegistrationA1Address {
 
 /** Číselník CIS Sektor (účel zahraničního pojištění). */
 const FOREIGN_INSURANCE_SECTORS = ['01', '02', '03', '04', '05', '06', '07', '08'] as const
+/** Lhůta A2/A8 zkrácená o oznámení úřadu práce u cizince s povolením nebo kartou (§ 88 ZoZ). */
+const FOREIGN_PERMIT_RULESET_ID = 'cz-regzec-foreign-permit-labour-office-2026-07.v1'
 
 function emptyA1ForeignInsurance(): PayrollRegistrationA1ForeignInsurance {
   return {
@@ -1205,7 +1209,7 @@ async function writeA1MasterData(fields: string[]): Promise<void> {
 }
 
 const deltaFieldOptions = computed(() => eventInteraction.value === 'correction'
-  ? ['title_prefix', 'tax_residency', 'relationship_detail_code', 'highest_education_code']
+  ? ['title_prefix', 'tax_residency', 'relationship_detail_code', 'highest_education_code', 'actual_start_on']
   : [
       'title_prefix', 'contact_address', 'tax_residency', 'relationship_detail_code',
       'health_insurance_code', 'highest_education_code',
@@ -1295,6 +1299,7 @@ const eventCanSave = computed(() => {
   if (eventInteraction.value === 'change') return deltaValueReady.value
   if (eventInteraction.value === 'correction') {
     return deltaValueReady.value
+      && (!correctionNeedsAttachment.value || cancellationAttachment.value !== null)
       && discoveredOn.value !== ''
       && sourceSubmissionId.value !== null
       && sourceSubmissionId.value > 0
@@ -1592,8 +1597,16 @@ function deltaPayload(): Record<string, unknown> {
       },
     }
   }
+  if (deltaField.value === 'actual_start_on') {
+    return { employment: { actual_start_on: deltaValue.value.trim() } }
+  }
   return { [deltaField.value]: deltaValue.value.trim() }
 }
+
+/** Oprava skutečného dne nástupu (A4) jde na ČSSZ jen s průvodním dopisem v příloze. */
+const correctionNeedsAttachment = computed(
+  () => eventInteraction.value === 'correction' && deltaField.value === 'actual_start_on',
+)
 
 /** Proč se čistý průměr nepředvyplnil (typicky daňové zvýhodnění na dítě). */
 const a2NetAverageNote = ref('')
@@ -1718,6 +1731,12 @@ function eventPayload(): PayrollRegistrationEventInput {
     payload.corrections = deltaPayload()
     payload.discovered_on = discoveredOn.value
     payload.source_submission_id = sourceSubmissionId.value ?? undefined
+    if (correctionNeedsAttachment.value && cancellationAttachment.value !== null) {
+      payload.explanation_attachment = {
+        ...cancellationAttachment.value,
+        description: optionalText(cancellationAttachmentDescription.value) ?? null,
+      }
+    }
   }
   if (eventInteraction.value === 'variable_symbol_transfer') {
     payload.new_variable_symbol = newVariableSymbol.value
@@ -1749,6 +1768,7 @@ async function saveEvent(): Promise<void> {
   if (!eventCanSave.value) return
   eventSaving.value = true
   eventError.value = ''
+  eventErrorCode.value = ''
   try {
     const event = await payrollApi.approveEmploymentRegistrationEvent(
       props.employmentId,
@@ -1760,6 +1780,7 @@ async function saveEvent(): Promise<void> {
     resetEventForm()
     await run('preview')
   } catch (exception) {
+    eventErrorCode.value = apiErrorCode(exception)
     eventError.value = serverErrorMessage(
       exception,
       t('payroll.people.registration.event.save_failed'),
@@ -1993,6 +2014,15 @@ function problemTarget(
   if (props.personId !== undefined) query.person = String(props.personId)
 
   return { name: 'payroll-people', query }
+}
+
+/** Proklik k nápravě blokátoru podle kódu chyby, viz `registrationRemediation.ts`. */
+function remediationTarget(code: string) {
+  const remediation = registrationRemediation(code)
+  if (remediation === null || remediation.kind === 'a1_profile') return null
+  return remediation.kind === 'employer_settings'
+    ? problemTarget('employer_settings', null, 'employer_variable_symbol')
+    : problemTarget('person', remediation.panel, remediation.field)
 }
 
 /**
@@ -4496,7 +4526,7 @@ async function copyXml(): Promise<void> {
             </label>
             <label class="text-xs font-medium text-neutral-700">
               {{ t('payroll.people.registration.event.discovered_on') }}
-              <DateInput v-model="discoveredOn" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" />
+              <DateInput v-model="discoveredOn" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" data-test="registration-event-discovered-on" />
             </label>
           </div>
           <label v-if="eventInteraction === 'change'" class="block text-xs font-medium text-neutral-700 sm:max-w-md">
@@ -4505,7 +4535,7 @@ async function copyXml(): Promise<void> {
           </label>
           <label class="block text-xs font-medium text-neutral-700">
             {{ t('payroll.people.registration.event.delta_field') }}
-            <select v-model="deltaField" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 sm:max-w-md">
+            <select v-model="deltaField" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 sm:max-w-md" data-test="registration-event-delta-field">
               <option v-for="field in deltaFieldOptions" :key="field" :value="field">
                 {{ t(`payroll.people.registration.event.delta.${field}`) }}
               </option>
@@ -4547,6 +4577,32 @@ async function copyXml(): Promise<void> {
               >{{ option.code }} · {{ option.label }}</option>
             </select>
           </label>
+          <template v-else-if="deltaField === 'actual_start_on'">
+            <label class="block text-xs font-medium text-neutral-700">
+              {{ t('payroll.people.registration.event.delta.actual_start_on') }}
+              <DateInput v-model="deltaValue" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 sm:max-w-md" data-test="registration-event-delta-actual-start" />
+            </label>
+            <p class="text-xs text-neutral-600" data-test="registration-event-a4-start-hint">
+              {{ t('payroll.people.registration.event.a4_start_hint') }}
+            </p>
+            <div class="flex flex-wrap items-center gap-2">
+              <label :class="btnOutline('primary')" class="cursor-pointer whitespace-nowrap">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
+                {{ t('payroll.people.registration.event.a4_attachment') }}
+                <input type="file" class="sr-only" data-test="registration-event-a4-attachment" @change="addCancellationAttachment" />
+              </label>
+              <span v-if="cancellationAttachment" class="text-xs text-neutral-700" data-test="registration-event-a4-attachment-name">
+                {{ cancellationAttachment.name }}
+              </span>
+              <span v-else class="text-xs text-warning-700">
+                {{ t('payroll.people.registration.event.a4_attachment_missing') }}
+              </span>
+            </div>
+            <label class="block text-xs font-medium text-neutral-700">
+              {{ t('payroll.people.registration.event.a8_attachment_description') }}
+              <input v-model="cancellationAttachmentDescription" maxlength="255" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 sm:max-w-md" />
+            </label>
+          </template>
           <label v-else class="block text-xs font-medium text-neutral-700">
             {{ t(`payroll.people.registration.event.delta.${deltaField}`) }}
             <input v-model="deltaValue" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 sm:max-w-md" />
@@ -4567,7 +4623,12 @@ async function copyXml(): Promise<void> {
           <label class="text-xs font-medium text-neutral-700">{{ t('payroll.people.registration.event.address.orientation_number') }}<input v-model="foreignOrientationNumber" maxlength="50" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" /></label>
           <label class="text-xs font-medium text-neutral-700">{{ t('payroll.people.registration.event.address.postal_code') }}<input v-model="foreignPostalCode" maxlength="50" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" /></label>
           <label class="text-xs font-medium text-neutral-700">{{ t('payroll.people.registration.event.address.city') }}<input v-model="foreignCity" maxlength="50" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" /></label>
-          <label class="text-xs font-medium text-neutral-700">{{ t('payroll.people.registration.event.foreign_sector') }}<input v-model="foreignSector" maxlength="50" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" /></label>
+          <label class="text-xs font-medium text-neutral-700">{{ t('payroll.people.registration.event.foreign_sector') }}<select v-model="foreignSector" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" data-test="registration-event-foreign-sector">
+            <option value="">{{ t('payroll.people.registration.a1.unset') }}</option>
+            <option v-for="code in FOREIGN_INSURANCE_SECTORS" :key="code" :value="code">
+              {{ code }} · {{ t(`payroll.people.registration.a1.foreign_insurance.sector_option.${code}`) }}
+            </option>
+          </select></label>
         </div>
 
         <div v-if="eventInteraction === 'cancellation'" class="mt-4 space-y-3" data-test="registration-event-a8">
@@ -4629,9 +4690,38 @@ async function copyXml(): Promise<void> {
         </div>
       </div>
 
-      <p v-if="eventError" class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700" role="alert" data-test="registration-event-error">
-        {{ eventError }}
-      </p>
+      <div v-if="eventError" class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700" role="alert" data-test="registration-event-error">
+        <p>{{ eventError }}</p>
+        <div v-if="registrationRemediation(eventErrorCode) !== null" class="mt-2 flex flex-wrap gap-2">
+          <button
+            v-if="registrationRemediation(eventErrorCode)?.kind === 'a1_profile'"
+            type="button"
+            :class="btnFilled('success')"
+            class="whitespace-nowrap"
+            data-test="registration-event-error-open-a1"
+            @click="openA1ProfileFromError"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.eye" />
+            </svg>
+            {{ t('payroll.people.registration.a1.show') }}
+          </button>
+          <RouterLink
+            v-else-if="remediationTarget(eventErrorCode) !== null"
+            :to="remediationTarget(eventErrorCode)!"
+            :class="btnOutline('danger')"
+            class="whitespace-nowrap"
+            data-test="registration-event-error-open-remediation"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.edit" />
+            </svg>
+            {{ registrationRemediation(eventErrorCode)?.kind === 'employer_settings'
+              ? t('payroll.people.registration.missing.open_settings')
+              : t('payroll.people.registration.missing.open') }}
+          </RouterLink>
+        </div>
+      </div>
     </div>
 
     <div
@@ -4657,6 +4747,13 @@ async function copyXml(): Promise<void> {
           from: formatDate(deadline.earliest_registration_on),
           to: formatDate(deadline.due_on),
         }) }}
+      </p>
+      <p
+        v-if="deadline.ruleset_id === FOREIGN_PERMIT_RULESET_ID"
+        class="mt-1 text-warning-700"
+        data-test="registration-deadline-foreign-permit"
+      >
+        {{ t('payroll.people.registration.registration_window.foreign_permit') }}
       </p>
       <p
         v-if="deadlineOverdue"
@@ -4797,7 +4894,7 @@ async function copyXml(): Promise<void> {
     >
       <p>{{ error }}</p>
       <button
-        v-if="errorCode === 'registration_regzec_a1_profile_missing'"
+        v-if="registrationRemediation(errorCode)?.kind === 'a1_profile'"
         type="button"
         :class="[btnFilled('success'), 'mt-2']"
         data-test="registration-error-open-a1"
@@ -4808,6 +4905,19 @@ async function copyXml(): Promise<void> {
         </svg>
         {{ t('payroll.people.registration.a1.show') }}
       </button>
+      <RouterLink
+        v-else-if="remediationTarget(errorCode) !== null"
+        :to="remediationTarget(errorCode)!"
+        :class="[btnOutline('danger'), 'mt-2 whitespace-nowrap']"
+        data-test="registration-error-open-remediation"
+      >
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path :d="ICONS.edit" />
+        </svg>
+        {{ registrationRemediation(errorCode)?.kind === 'employer_settings'
+          ? t('payroll.people.registration.missing.open_settings')
+          : t('payroll.people.registration.missing.open') }}
+      </RouterLink>
       <ul v-if="errorProblems.length > 0" class="mt-2 space-y-1.5" data-test="registration-missing-list">
         <li
           v-for="problem in errorProblems"

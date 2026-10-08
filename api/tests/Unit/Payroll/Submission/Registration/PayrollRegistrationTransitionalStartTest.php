@@ -56,7 +56,7 @@ final class PayrollRegistrationTransitionalStartTest extends TestCase
             preparedOn: '2026-09-26',
             expectedStartOn: null,
             actualStartOn: self::START,
-            employerVariableSymbol: '1234567890',
+            employerVariableSymbol: '1100000007',
             employerName: 'Syntetický zaměstnavatel s.r.o.',
             csszWorkplaceCode: '110',
         );

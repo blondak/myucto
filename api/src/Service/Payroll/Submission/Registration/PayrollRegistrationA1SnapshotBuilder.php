@@ -693,7 +693,7 @@ final class PayrollRegistrationA1SnapshotBuilder
                 $this->missing($key);
             }
             if ($result['sector'] !== null
-                && preg_match('/^0[1-8]$/D', $result['sector']) !== 1
+                && !PayrollRegistrationForeignInsurerSector::isKnown($result['sector'])
             ) {
                 $this->malformed(
                     'sector',
@@ -782,7 +782,7 @@ final class PayrollRegistrationA1SnapshotBuilder
         return [
             'street' => $this->optionalText($input, 'street', 255),
             'house_number' => $this->houseNumber($input, $isCzech, $czech),
-            'orientation_number' => $this->orientationNumber($input, $czech),
+            'orientation_number' => $this->orientationNumber($input, $isCzech, $czech),
             'city' => $this->text($input, 'city', 255),
             'postal_code' => $this->postalCode($input, 'postal_code', $isCzech),
             'country_code' => $country,
@@ -812,21 +812,26 @@ final class PayrollRegistrationA1SnapshotBuilder
         return $value;
     }
 
-    /** @param array<string,mixed> $input */
-    private function orientationNumber(array $input, bool $czechResidence): ?string
+    /**
+     * EDV 1.4.0.6, ID 10079, 10508 a 10515: u české adresy (stát CZ i pobyt
+     * v ČR) má orientační číslo nejvýš 4 znaky, jinak 12.
+     *
+     * @param array<string,mixed> $input
+     */
+    private function orientationNumber(array $input, bool $isCzech, bool $czechResidence): ?string
     {
         $value = $this->optionalText($input, 'orientation_number', 12);
-        if ($value !== null && $czechResidence
-            && !PayrollRegistrationHouseNumber::validCzechResidenceOrientation($value)
+        if ($value !== null && $isCzech
+            && !PayrollRegistrationHouseNumber::validOrientation($value, true)
         ) {
             $this->malformed(
                 'orientation_number',
-                'smí mít u adresy pobytu v ČR nejvýš '
-                    . PayrollRegistrationHouseNumber::CZECH_RESIDENCE_ORIENTATION_MAX
+                'smí mít u ' . ($czechResidence ? 'adresy pobytu v ČR' : 'české adresy')
+                    . ' nejvýš ' . PayrollRegistrationHouseNumber::CZECH_ORIENTATION_MAX
                     . ' znaky, teď je „' . $value . '".',
-                'orientation_number_cz_residence',
+                $czechResidence ? 'orientation_number_cz_residence' : 'orientation_number_cz',
                 [
-                    'max' => PayrollRegistrationHouseNumber::CZECH_RESIDENCE_ORIENTATION_MAX,
+                    'max' => PayrollRegistrationHouseNumber::CZECH_ORIENTATION_MAX,
                     'value' => $value,
                 ],
             );

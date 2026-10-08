@@ -1279,6 +1279,52 @@ describe('EmploymentRegistrationPanel', () => {
     }))
   })
 
+  /** REGZEC25-PROC.A1.prereg-combos-01 (d): oprava skutečného nástupu A4 jen s průvodním dopisem. */
+  it('files A4 correction of the actual start only with a cover letter', async () => {
+    m.approveEvent.mockResolvedValue({
+      id: 95,
+      employment_id: 5,
+      environment: 'production',
+      interaction: 'correction',
+      action_code: 4,
+      effective_on: '2026-09-20',
+      source_kind: 'verified_correction',
+      source_reference: 'start-1',
+      snapshot_fingerprint: 'f'.repeat(64),
+      approved_at: '2026-09-20 11:00:00',
+      consumed: false,
+      created: true,
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-event-new"]').trigger('click')
+    await wrapper.get('[data-test="registration-event-interaction"]').setValue('correction')
+    await wrapper.get('[data-test="registration-event-effective-on"]').setValue('2026-09-20')
+    await wrapper.get('[data-test="registration-event-source-reference"]').setValue('start-1')
+    await wrapper.get('[data-test="registration-event-source-submission-id"]').setValue('44')
+    await wrapper.get('[data-test="registration-event-discovered-on"]').setValue('2026-09-21')
+    await wrapper.get('[data-test="registration-event-delta-field"]').setValue('actual_start_on')
+    await wrapper.get('[data-test="registration-event-delta-actual-start"]').setValue('2026-09-22')
+
+    expect(wrapper.get('[data-test="registration-event-a4-start-hint"]').text())
+      .toBe('payroll.people.registration.event.a4_start_hint')
+    expect(wrapper.get('[data-test="registration-event-save"]').attributes('disabled')).toBeDefined()
+
+    const input = wrapper.get('[data-test="registration-event-a4-attachment"]')
+    const file = new File(['%PDF'], 'dopis.pdf', { type: 'application/pdf' })
+    Object.defineProperty(input.element, 'files', { value: [file] })
+    await input.trigger('change')
+    await flushPromises()
+
+    await wrapper.get('[data-test="registration-event-save"]').trigger('click')
+    await flushPromises()
+    expect(m.approveEvent).toHaveBeenCalledWith(5, expect.objectContaining({
+      interaction: 'correction',
+      corrections: { employment: { actual_start_on: '2026-09-22' } },
+      explanation_attachment: { name: 'dopis.pdf', description: null, data_base64: btoa('%PDF') },
+    }))
+  })
+
   /**
    * Důvod skončení se zadává jednou na kartě vztahu; odhláška A2 si ho odsud
    * předvyplní i s čistým průměrem a odstupným (DIS přijme odstupné jen

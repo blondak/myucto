@@ -6614,7 +6614,8 @@
         "employer_window": "Pozor: jde o prvního zaměstnance. Přihlášku zaměstnavatele do evidence ČSSZ podejte nejpozději {to} — po tomto termínu vzniká fikce zaměstnavatele.",
         "registration_window": {
           "not_derived": "Nástup {start} je dřívější než 1. 7. 2026, kdy začala platit dnešní registrační povinnost. Přihlášku podejte bez zbytečného odkladu — lhůtu podle tehdejších pravidel aplikace neodvozuje a podání vede jako po lhůtě.",
-          "not_statutory": "Toto podání nemá zákonnou lhůtu. Do {milestone} jde spolu s ním stornovat i měsíční hlášení bez referentského zpracování; později podejte opravné hlášení."
+          "not_statutory": "Toto podání nemá zákonnou lhůtu. Do {milestone} jde spolu s ním stornovat i měsíční hlášení bez referentského zpracování; později podejte opravné hlášení.",
+          "foreign_permit": "Cizinec s povolením k zaměstnání, zaměstnaneckou nebo modrou kartou: podání plní i oznámení úřadu práce (§ 88 zákona o zaměstnanosti) a platí dřívější z obou lhůt. U karty běží 45 dnů ode dne splnění podmínek pro její vydání, ten den ověřte podle rozhodnutí."
         },
         "completion": {
           "action": "Dohlásit údaje (A3)",
@@ -6713,6 +6714,7 @@
             "postal_code_cz": "{field} musí mít u adresy v ČR pět číslic a nesmí začínat 0, 8 ani 9 (například 60200), teď je „{value}“.",
             "house_number_cz": "{field} musí být u české adresy jen číslo o nejvýš čtyřech číslicích (bez písmene a lomítka), teď je „{value}“. Orientační číslo patří do vlastního pole.",
             "orientation_number_cz_residence": "{field} smí mít u adresy pobytu v ČR nejvýš {max} znaky, teď je „{value}“.",
+            "orientation_number_cz": "{field} smí mít u české adresy nejvýš {max} znaky, teď je „{value}“.",
             "residence_country_mismatch": "{field} musí být shodný se státem daňové rezidence („{tax}“), teď je „{value}“.",
             "small_scale_dpp": "{field} nesmí být u druhu činnosti „{activity}“ (dohoda o provedení práce) zapnuté, zaměstnání malého rozsahu se u dohod nepoužívá.",
             "underage": "Zaměstnanci je k datu nástupu méně než {min_age} let, ČSSZ takové podání zamítne na vstupu. Zkontrolujte datum narození a datum nástupu.",
@@ -6957,7 +6959,8 @@
             "tax_residency": "Daňová rezidence",
             "relationship_detail_code": "Bližší určení pracovního vztahu",
             "health_insurance_code": "Kód zdravotní pojišťovny",
-            "highest_education_code": "Kód nejvyššího vzdělání"
+            "highest_education_code": "Kód nejvyššího vzdělání",
+            "actual_start_on": "Skutečný den nástupu"
           },
           "address": {
             "street": "Ulice",
@@ -6984,6 +6987,9 @@
           "a8_attachment": "Přiložit zdůvodnění",
           "a8_attachment_missing": "Zdůvodnění zatím není přiložené.",
           "a8_attachment_description": "Popis přílohy (nepovinné)",
+          "a4_start_hint": "Přihláška byla podaná s předpokládaným dnem nástupu a zaměstnanec nastoupil jindy. Opravu skutečného dne nástupu ČSSZ zpracuje jen s průvodním dopisem v příloze, referentsky.",
+          "a4_attachment": "Přiložit průvodní dopis",
+          "a4_attachment_missing": "Průvodní dopis zatím není přiložený.",
           "identifiers_verified": "OIČ a ID PPV jsem ověřil(a) v Seznamu zaměstnanců na ePortálu ČSSZ",
           "identifiers_verified_hint": "Jen u zaměstnance převzatého z dřívějšího oznámení (ONZ), jehož čísla nejsou z protokolu ČSSZ, přijatého dohlášení A3 ani z importu exportu zaměstnanců ČSSZ. Odhlášku A2 pak jde podat i bez dohlášení A3; to zůstane jako samostatná povinnost.",
           "select_placeholder": "Vyberte…"
@@ -11931,6 +11937,15 @@
       "registration_a8_explanation_attachment_invalid": "Soubor se zdůvodněním storna se nepodařilo přečíst, nebo je větší než 15 MB. Přiložte ho ve formuláři znovu.",
       "registration_a8_explanation_attachment_required": "Storno potřebuje vědět, proč se podává: buď zaměstnanec vůbec nenastoupil (zaškrtněte to ve formuláři), nebo jde o jiný důvod a pak přiložte soubor s písemným zdůvodněním. Bez něj ČSSZ storno nezpracuje.",
       "registration_a5_variable_symbol_unchanged": "Nový variabilní symbol se shoduje s původním. ČSSZ takový převod zamítne, zadejte nový variabilní symbol přidělený ČSSZ.",
+      "registration_a4_start_attachment_required": "Opravu skutečného dne nástupu ČSSZ zpracuje jen s průvodním dopisem v příloze. Přiložte ve formuláři soubor, který opravu vysvětluje.",
+      "registration_a4_explanation_attachment_invalid": "Soubor s průvodním dopisem k opravě se nepodařilo přečíst nebo nesplňuje podmínky ČSSZ (přípona, velikost). Přiložte ho ve formuláři znovu.",
+      "registration_a5_variable_symbol_invalid": "Nový variabilní symbol není platný: nesouhlasí kontrolní číslice nebo nezačíná kódem okresní správy sociálního zabezpečení. ČSSZ by převod odmítla, opište nový symbol přesně z oznámení ČSSZ.",
+      "registration_event_before_start": "Oznámení se hlásí ke dni před nástupem zaměstnance. ČSSZ přijme jen změnu ke dni nástupu nebo pozdějšímu. Opravte datum ve formuláři, nebo zkontrolujte den nástupu na kartě pracovního vztahu.",
+      "registration_event_czech_residence_forbidden": "Adresa pobytu v ČR se u zaměstnance s trvalým pobytem v ČR neposílá, ČSSZ by oznámení zamítla. Odeberte ji z oznámení; mění-li se trvalý pobyt do zahraničí, ohlaste novou trvalou adresu ve stejné změně.",
+      "registration_event_czech_residence_unverifiable": "Adresa pobytu v ČR se posílá jen zaměstnanci s trvalým pobytem mimo ČR, ale stát trvalého pobytu u osoby vyplněný není. Doplňte trvalou adresu se státem na kartě osoby, nebo ji ohlaste ve stejné změně.",
+      "registration_event_birth_number_missing": "Změna nebo oprava registrace zaměstnance s českým státním občanstvím musí nést rodné číslo nebo EČP, jinak ji ČSSZ zamítne. Doplňte rodné číslo na kartě osoby a oznámení schvalte znovu.",
+      "registration_event_foreign_insurance_missing": "Změna nebo oprava registrace zaměstnance s druhem činnosti „N“ (smluvní zaměstnanec) musí nést cizozemského nositele pojištění. Vyplňte ho v profilu registrace (A1), uložte a oznámení schvalte znovu.",
+      "registration_employer_variable_symbol_invalid":"Variabilní symbol zaměstnavatele není platný: nesouhlasí kontrolní číslice nebo nezačíná kódem okresní správy sociálního zabezpečení. ČSSZ by podání odmítla. Opište symbol přesně z oznámení ČSSZ v nastavení mezd zaměstnavatele (účtárna).",
       "registration_cssz_workplace_code_invalid": "Kód správy sociálního zabezpečení není v číselníku okresních správ ČSSZ, takže ho ČSSZ odmítne. Opravte kód v nastavení mezd zaměstnavatele.",
       "registration_event_delta_variant_forbidden": "Oznámení obsahuje část, kterou datová věta pro tento druh činnosti nesmí nést (zakázaný element), takže by ho ČSSZ zamítla. Odeberte uvedené údaje z oznámení.",
       "registration_a3_underage": "Zaměstnanci je k novému datu nástupu méně než 14 let, ČSSZ takové podání zamítne na vstupu. Zkontrolujte datum narození a datum nástupu.",

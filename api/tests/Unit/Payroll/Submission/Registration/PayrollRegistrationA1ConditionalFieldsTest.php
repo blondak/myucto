@@ -454,7 +454,7 @@ final class PayrollRegistrationA1ConditionalFieldsTest extends TestCase
             preparedOn: '2026-08-04',
             expectedStartOn: null,
             actualStartOn: '2026-08-05',
-            employerVariableSymbol: '1234567890',
+            employerVariableSymbol: '1100000007',
             employerName: 'Syntetický zaměstnavatel s.r.o.',
             csszWorkplaceCode: '110',
         );
