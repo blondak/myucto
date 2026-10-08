@@ -290,6 +290,73 @@ final class PohodaImportTest extends TestCase
         self::assertEqualsWithDelta(525.0, $a2['vat'], 0.005);
     }
 
+    /**
+     * Samovyměření vedené jen dvojicí interních dokladů (vyměření `DD…` + odpočet `PD…`)
+     * u faktury v členění mimo přiznání nebo u smíšené tuzemské faktury. Převod dřív tyto
+     * interní doklady nepřiřadil („doplňte ručně") a ř. 3–13 i 43, 44 zůstaly prázdné.
+     * Rozdíl proti téže agendě bez těchto dokladů: ř. 5 +3 500 / 735, ř. 10 +10 000 / 2 100,
+     * ř. 43 jen ze dvou dokladů s odpočtem (525 + 2 100), tuzemská doprava ř. 40 +210.
+     */
+    public function testSelfAssessmentKeptOnlyOnInternalDocumentsGoesToTheReturn(): void
+    {
+        $base = $this->supplier();
+        $baseDir = $this->tmp . DIRECTORY_SEPARATOR . 'base';
+        mkdir($baseDir);
+        $this->importer->run($base, $this->userId, PohodaExport::open(SyntheticPohodaExport::write($baseDir)), false);
+
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withSelfAssessmentByInternalDocuments($dir);
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+
+        self::assertSame(3, self::stepCounts($protocol, 'purchase_invoices')['self_assessed'] ?? 0, $this->explain($protocol));
+        self::assertStringNotContainsString('self_assessment_unlinked', $this->explain($protocol));
+        self::assertSame(3, $this->rows('purchase_invoices', $supplierId, sprintf("varsymbol IN ('%s', '%s', '%s') AND reverse_charge = 1 AND status <> 'draft'",
+            SyntheticPohodaExport::PAIR_SERVICE, SyntheticPohodaExport::PAIR_MIXED, SyntheticPohodaExport::PAIR_NO_DEDUCTION)), $this->explain($protocol));
+        self::assertSame(1, $this->rows('purchase_invoices', $supplierId, sprintf("varsymbol = '%s' AND vat_deduction = 'none'", SyntheticPohodaExport::PAIR_NO_DEDUCTION)));
+        self::assertSame(1, $this->rows('purchase_invoices', $supplierId, sprintf("varsymbol = '%s' AND total_with_vat = 11210.00 AND total_vat = 210.00", SyntheticPohodaExport::PAIR_MIXED)));
+
+        $builder = Bootstrap::buildContainer()->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class);
+        $before = $builder->build($base, SyntheticPohodaExport::YEAR, 2, 'monthly')['summary']['lines'];
+        $after = $builder->build($supplierId, SyntheticPohodaExport::YEAR, 2, 'monthly')['summary']['lines'];
+        $delta = static fn (string $line, string $key): float => (float) ($after[$line][$key] ?? 0) - (float) ($before[$line][$key] ?? 0);
+        $context = json_encode(['before' => $before, 'after' => $after]);
+        self::assertEqualsWithDelta(3500.0, $delta('5', 'base'), 0.005, $context);
+        self::assertEqualsWithDelta(735.0, $delta('5', 'vat'), 0.005, $context);
+        self::assertEqualsWithDelta(10000.0, $delta('10', 'base'), 0.005, $context);
+        self::assertEqualsWithDelta(2100.0, $delta('10', 'vat'), 0.005, $context);
+        self::assertEqualsWithDelta(2625.0, $delta('43', 'vat'), 0.005, $context);
+        self::assertEqualsWithDelta(210.0, $delta('40', 'vat'), 0.005, $context);
+    }
+
+    /**
+     * Platební brána: poplatek a příjem jsou v POHODĚ dva bankovní doklady se stejným číslem
+     * a jejich zápisy převod sloučí do jednoho. Vlastnit ho musí pohyb, který hradí fakturu -
+     * dřív ho dostal první pohyb (poplatek) a uhrazená faktura visela mezi nezaúčtovanými
+     * pohyby, ačkoli zápis v deníku má.
+     */
+    public function testPaymentGatewayEntryBelongsToTheMovementPayingTheInvoice(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withPaymentGateway($dir);
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT t.amount, t.match_status, EXISTS(SELECT 1 FROM journal_entries j WHERE j.supplier_id = s.supplier_id AND j.source_type = 'bank'
+                    AND j.source_id = t.id AND j.reversed_by IS NULL) AS owns_entry
+               FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
+              WHERE s.supplier_id = ? AND t.bank_ref = ? ORDER BY t.id"
+        );
+        $stmt->execute([$supplierId, SyntheticPohodaExport::GATEWAY_BANK]);
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        self::assertCount(2, $rows, $this->explain($protocol));
+        $payment = array_values(array_filter($rows, static fn (array $r): bool => (float) $r['amount'] > 0))[0] ?? [];
+        self::assertSame('manual', $payment['match_status'] ?? null, json_encode($rows));
+        self::assertSame(1, (int) ($payment['owns_entry'] ?? 0), json_encode($rows));
+    }
+
     /** Vydaný doklad v tuzemském přenesení daňové povinnosti (ř. 25) nese příznak na hlavičce. */
     public function testDomesticReverseSaleIsFlagged(): void
     {
@@ -524,10 +591,9 @@ final class PohodaImportTest extends TestCase
     }
 
     /**
-     * Doklad v EUR: převod ho zakládá v Kč, a OSS náhled pak koruny přepočítal zpátky kurzem
-     * ECB ke konci čtvrtletí - OSS podání neodpovídalo eurům z dokladu (na reálné agendě
-     * o 0,8 % víc). Plnění vyjádřené v eurech se pro OSS nepřepočítává, takže řádek nese
-     * částky pro přiznání v EUR z dokladu. Tuzemská evidence zůstává v Kč beze změny.
+     * Doklad v EUR u firmy bez eura v číselníku měn: převod euro založí a doklad převezme
+     * v měně. OSS řádek nese částky pro přiznání v EUR z dokladu, ne koruny přepočtené
+     * zpátky kurzem ECB ke konci čtvrtletí (na reálné agendě o 0,8 % víc).
      */
     public function testEurOssDocumentGoesToReturnInEurosFromTheDocument(): void
     {
@@ -542,8 +608,10 @@ final class PohodaImportTest extends TestCase
         $row = $this->ossDocument($supplierId);
         self::assertNotNull($row, $this->explain($protocol));
         self::assertSame(1, (int) $row['oss_applicable'], $this->explain($protocol));
-        self::assertEqualsWithDelta(1000.0, (float) $row['total_without_vat'], 0.001, 'Tuzemská evidence zůstává v Kč.');
-        self::assertEqualsWithDelta(230.0, (float) $row['total_vat'], 0.001);
+        self::assertEqualsWithDelta(40.0, (float) $row['total_without_vat'], 0.001, 'Doklad převzatý v EUR.');
+        self::assertEqualsWithDelta(9.2, (float) $row['total_vat'], 0.001);
+        self::assertSame(1, $this->rows('currencies', $supplierId, "code = 'EUR'"));
+        self::assertStringContainsString('currency_created', $this->explain($protocol));
         self::assertNotNull($row['oss_taxable_amount_return']);
         self::assertEqualsWithDelta(40.0, (float) $row['oss_taxable_amount_return'], 0.001);
         self::assertEqualsWithDelta(9.2, (float) $row['oss_vat_amount_return'], 0.001);

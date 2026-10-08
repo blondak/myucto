@@ -563,6 +563,19 @@ jen když se shodují s jediným již převedeným zápisem v deníku na účtu 
 s likvidací, zálohou, cizí měnou nebo nejednoznačnou kontací zůstanou k ruční
 kontrole. Interní doklady mimo přiznání k DPH zůstávají v deníku.
 
+**Samovyměření jen na interních dokladech.** Někdy účetní vede přijatou fakturu
+v členění mimo přiznání (například `PN`) a výstup i odpočet zachytí až dvojicí
+interních dokladů navázaných na fakturu (vyměření `DD…`, odpočet `PD…`). Převod
+takovou fakturu převezme se samovyměřením ze základu interního dokladu. U smíšené
+faktury zůstane tuzemská část s daní dodavatele v odpočtu ř. 40/41. Když k faktuře
+chybí interní doklad s odpočtem, převezme se samovyměření bez nároku na odpočet,
+stejně jako ho podala POHODA. Interní doklady samotné zůstanou jen v deníku.
+
+**Platební brána.** Úhradu přes bránu vede POHODA jako několik bankovních dokladů
+se stejným číslem: příjem, poplatek a odvod netto. Zápis v deníku pod tímto číslem
+patří k pohybu, kterým POHODA hradí doklad. Úhrada faktury proto nezůstane mezi
+nezaúčtovanými pohyby.
+
 Číslo dokladu, které už ve firmě je, dostane příponu roku, například
 `FV-0001/2026`.
 
@@ -581,7 +594,8 @@ kontrole. Interní doklady mimo přiznání k DPH zůstávají v deníku.
   (DPH, kontrolní hlášení i deník tak zůstávají v Kč přesně stejné). Jinak se
   převezme v Kč a poznámka dokladu i protokol uvedou důvod: samovyměření,
   odpočet nedaňové zálohy, částečná úhrada vydaného dokladu, položky jen
-  z rekapitulace, nesedící přepočet nebo měna mimo číselník měn firmy.
+  z rekapitulace nebo nesedící přepočet. Měnu, kterou firma v číselníku měn
+  nemá, převod založí a protokol to uvede.
 
 ### 107.9.4 Postup
 

@@ -40,10 +40,35 @@ final class ForeignCurrencyTakeover
 {
     public const HOME = 'CZK';
 
+    /** Symbol a název (česky, anglicky) běžných měn, které převod zakládá; jiná měna dostane svůj kód. */
+    private const NAMES = [
+        'EUR' => ['€', 'Euro', 'Euro'],
+        'USD' => ['$', 'Americký dolar', 'US Dollar'],
+        'GBP' => ['£', 'Britská libra', 'British Pound'],
+        'CHF' => ['CHF', 'Švýcarský frank', 'Swiss Franc'],
+        'PLN' => ['zł', 'Polský zlotý', 'Polish Zloty'],
+        'HUF' => ['Ft', 'Maďarský forint', 'Hungarian Forint'],
+        'SEK' => ['kr', 'Švédská koruna', 'Swedish Krona'],
+        'NOK' => ['kr', 'Norská koruna', 'Norwegian Krone'],
+        'DKK' => ['kr', 'Dánská koruna', 'Danish Krone'],
+        'JPY' => ['¥', 'Japonský jen', 'Japanese Yen'],
+        'CNY' => ['¥', 'Čínský jüan', 'Chinese Yuan'],
+        'CAD' => ['C$', 'Kanadský dolar', 'Canadian Dollar'],
+        'AUD' => ['A$', 'Australský dolar', 'Australian Dollar'],
+    ];
+
     /** @var array<string,\PDOStatement> */
     private array $stmts = [];
 
-    public function __construct(private readonly Connection $db) {}
+    /**
+     * `$createMissingCurrency` = měnu dokladu, kterou firma v číselníku nemá, převod založí
+     * ({@see createCurrency()}). Zapíná si ji převod, který ji chce; bez ní se doklad
+     * s chybějící měnou převezme v Kč jako dřív.
+     */
+    public function __construct(
+        private readonly Connection $db,
+        private readonly bool $createMissingCurrency = false,
+    ) {}
 
     /**
      * @param list<array{base:float,vat:float,foreign_base?:?float,foreign_vat?:?float}>|array<int,array<string,mixed>> $items
@@ -63,10 +88,15 @@ final class ForeignCurrencyTakeover
             return ForeignCurrencyDecision::keptInHome($currency, $reason);
         }
         $currencyId = $this->currencyId($supplierId, $currency);
+        $created = false;
+        if ($currencyId === null && $this->createMissingCurrency && preg_match('/^[A-Z]{3}$/', $currency) === 1) {
+            $currencyId = $this->createCurrency($supplierId, $currency);
+            $created = true;
+        }
         if ($currencyId === null) {
             return ForeignCurrencyDecision::keptInHome($currency, 'měna ' . $currency . ' není v číselníku měn firmy');
         }
-        return ForeignCurrencyDecision::foreign($currency, $currencyId, (float) self::rate($rate, $units));
+        return ForeignCurrencyDecision::foreign($currency, $currencyId, (float) self::rate($rate, $units), $created);
     }
 
     /**
@@ -165,6 +195,10 @@ final class ForeignCurrencyTakeover
         }
         if ($decision->inForeignCurrency()) {
             $protocol->count($step, 'foreign_currency');
+            if ($decision->currencyCreated) {
+                $protocol->info($step, 'currency_created', sprintf('Měna %s v číselníku měn firmy chyběla, převod ji založil (doklad %s).', $decision->currency, $label),
+                    ['document_no' => $label, 'currency' => $decision->currency]);
+            }
             return;
         }
         $protocol->count($step, 'foreign_currency_in_home');
@@ -231,6 +265,21 @@ final class ForeignCurrencyTakeover
         $base = round(array_sum(array_map(static fn (array $i): float => (float) $i['base'], $items)), 2);
         $vat = round(array_sum(array_map(static fn (array $i): float => (float) $i['vat'], $items)), 2);
         return ['base' => $base, 'vat' => $vat, 'total' => round($base + $vat, 2)];
+    }
+
+    /**
+     * Měna dokladu, kterou firma v číselníku nemá: převod ji založí jako výchozí měnu
+     * daného kódu (bez bankovního účtu), stejně jako ji založí uživatel v nastavení.
+     * Jinak by se doklad převzal v Kč a ztratila by se měna, kurz i částky v měně.
+     */
+    private function createCurrency(int $supplierId, string $code): int
+    {
+        [$symbol, $nameCs, $nameEn] = self::NAMES[$code] ?? [$code, $code, $code];
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default)
+                       VALUES (?, ?, ?, ?, ?, ?, 2, 1, 1)')
+            ->execute([$supplierId, $code, $code . ' — výchozí', $symbol, $nameCs, $nameEn]);
+        return (int) $pdo->lastInsertId();
     }
 
     /** id měny firmy podle kódu; `null` = firma ji v číselníku nemá. */

@@ -314,6 +314,70 @@ final class SyntheticPohodaExport
             . self::entry('Interní doklady', self::SELF_ASSESSMENT_DOCUMENT, 'DPH samovyměření', 525, '343011', '343021', '2026-02-15'));
     }
 
+    /** Faktury se samovyměřením jen na interních dokladech ({@see withSelfAssessmentByInternalDocuments()}). */
+    public const PAIR_SERVICE = '26PF0030';
+    public const PAIR_MIXED = '26PF0031';
+    public const PAIR_NO_DEDUCTION = '26PF0032';
+
+    /**
+     * Agenda z {@see write()} s fakturami, které samy členění samovyměření nemají. Výstup
+     * i odpočet vede POHODA dvojicí interních dokladů navázaných na fakturu:
+     *
+     *  - 26PF0030: služba z EU 2 530 Kč v členění `PN`, vyměření 26DD0002 (`DDslRegEU`
+     *    ř. 5, 6) a odpočet 26DD0003 (`PDslRegEU` ř. 43, 44) ze základu 2 500 Kč;
+     *  - 26PF0031: tuzemská smíšená faktura v členění `PD` - zboží v přenesení daňové
+     *    povinnosti 10 000 Kč bez daně (řádek `PN`) a služba 1 000 + 210 Kč, vyměření
+     *    26DD0004 (`DDpdp` ř. 10, 11) a odpočet 26DD0005 (`PDpdp` ř. 43, 44);
+     *  - 26PF0032: služba z EU 1 000 Kč v `PN` jen s vyměřením 26DD0006, bez odpočtu.
+     */
+    public static function withSelfAssessmentByInternalDocuments(string $agendaDir): void
+    {
+        self::append($agendaDir . '/06_cleneni_dph.xml', '</lst:listClassificationVAT>',
+            '<lst:classificationVAT version="2.0"><vat:classificationVATHeader><vat:code>DDpdp</vat:code><vat:name>Přenesení daňové povinnosti, odběratel</vat:name>'
+            . '<vat:lineInVATReturn>10, 11</vat:lineInVATReturn><vat:sectionInVATLedgerStatement>B.1.</vat:sectionInVATLedgerStatement></vat:classificationVATHeader></lst:classificationVAT>'
+            . '<lst:classificationVAT version="2.0"><vat:classificationVATHeader><vat:code>PDpdp</vat:code><vat:name>Přenesení daňové povinnosti, odpočet</vat:name>'
+            . '<vat:lineInVATReturn>43, 44</vat:lineInVATReturn><vat:sectionInVATLedgerStatement>Nezahrnovat</vat:sectionInVATLedgerStatement></vat:classificationVATHeader></lst:classificationVAT>');
+        $foreign = '<inv:partnerIdentity><typ:address><typ:company>Lieferant Test GmbH</typ:company><typ:city>Berlin</typ:city><typ:street>Teststraße 1</typ:street>'
+            . '<typ:zip>10115</typ:zip><typ:country><typ:ids>DE</typ:ids></typ:country><typ:dic>DE999999999</typ:dic></typ:address></inv:partnerIdentity>';
+        $invoice = static fn (string $number, string $class, string $partner, float $none, float $high, float $vat, string $items = ''): string =>
+            '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>receivedInvoice</inv:invoiceType><inv:number><typ:numberRequested>' . $number . '</typ:numberRequested></inv:number>'
+            . '<inv:symVar>' . substr($number, -4) . '</inv:symVar><inv:originalDocument>D-' . $number . '</inv:originalDocument><inv:date>2026-02-16</inv:date><inv:dateTax>2026-02-16</inv:dateTax>'
+            . '<inv:dateAccounting>2026-02-16</inv:dateAccounting><inv:dateDue>2026-03-02</inv:dateDue>'
+            . '<inv:classificationVAT><typ:ids>' . $class . '</typ:ids></inv:classificationVAT><inv:text>Nákup ' . $number . '</inv:text>' . $partner
+            . '<inv:liquidation><typ:amountHome>' . ($none + $high + $vat) . '</typ:amountHome></inv:liquidation></inv:invoiceHeader>' . $items
+            . '<inv:invoiceSummary><inv:homeCurrency><typ:priceNone>' . $none . '</typ:priceNone><typ:priceLow>0</typ:priceLow><typ:priceLowVAT rate="12">0</typ:priceLowVAT>'
+            . '<typ:priceLowSum>0</typ:priceLowSum><typ:priceHigh>' . $high . '</typ:priceHigh><typ:priceHighVAT rate="21">' . $vat . '</typ:priceHighVAT><typ:priceHighSum>' . ($high + $vat) . '</typ:priceHighSum>'
+            . '<typ:round><typ:priceRound>0</typ:priceRound></typ:round></inv:homeCurrency></inv:invoiceSummary></lst:invoice>';
+        $item = static fn (string $text, float $base, float $vat, string $rate, string $class): string =>
+            '<inv:invoiceItem><inv:text>' . $text . '</inv:text><inv:quantity>1</inv:quantity><inv:rateVAT>' . $rate . '</inv:rateVAT>'
+            . '<inv:homeCurrency><typ:unitPrice>' . $base . '</typ:unitPrice><typ:price>' . $base . '</typ:price><typ:priceVAT>' . $vat . '</typ:priceVAT><typ:priceSum>' . ($base + $vat) . '</typ:priceSum></inv:homeCurrency>'
+            . ($class !== '' ? '<inv:classificationVAT><typ:ids>' . $class . '</typ:ids></inv:classificationVAT>' : '') . '</inv:invoiceItem>';
+        self::append($agendaDir . '/20_faktury_receivedInvoice.xml', '</lst:listInvoice>',
+            $invoice(self::PAIR_SERVICE, 'PN', $foreign, 2530, 0, 0)
+            . $invoice(self::PAIR_MIXED, 'PD', self::partner('inv', 'Dodavatel Test s.r.o.', self::VENDOR_ICO, 'CZ' . self::VENDOR_ICO), 10000, 1000, 210,
+                '<inv:invoiceDetail>' . $item('Zboží v přenesení daňové povinnosti', 10000, 0, 'none', 'PN') . $item('Doprava', 1000, 210, 'high', '') . '</inv:invoiceDetail>')
+            . $invoice(self::PAIR_NO_DEDUCTION, 'PN', $foreign, 1000, 0, 0));
+        $internal = static fn (string $number, string $class, string $invoice, float $base, float $vat): string =>
+            '<lst:intDoc version="2.0"><int:intDocHeader><int:number><typ:numberRequested>' . $number . '</typ:numberRequested></int:number>'
+            . '<int:date>2026-02-16</int:date><int:dateTax>2026-02-16</int:dateTax><int:dateAccounting>2026-02-16</int:dateAccounting>'
+            . '<int:classificationVAT><typ:ids>' . $class . '</typ:ids></int:classificationVAT><int:text>DPH k ' . $invoice . '</int:text></int:intDocHeader>'
+            . '<int:intDocDetail><int:intDocItem><int:text>DPH k ' . $invoice . '</int:text><int:rateVAT value="21">high</int:rateVAT>'
+            . '<int:homeCurrency><typ:price>' . $base . '</typ:price><typ:priceVAT>' . $vat . '</typ:priceVAT></int:homeCurrency></int:intDocItem></int:intDocDetail>'
+            . '<int:linkedDocuments><typ:link><typ:sourceAgenda>receivedInvoice</typ:sourceAgenda><typ:sourceDocument><typ:number>' . $invoice . '</typ:number></typ:sourceDocument></typ:link></int:linkedDocuments></lst:intDoc>';
+        self::file($agendaDir . '/27_interni_doklady.xml', '<lst:listIntDoc version="2.0" state="ok">'
+            . $internal('26DD0002', 'DDslRegEU', self::PAIR_SERVICE, 2500, 525) . $internal('26DD0003', 'PDslRegEU', self::PAIR_SERVICE, 2500, 525)
+            . $internal('26DD0004', 'DDpdp', self::PAIR_MIXED, 10000, 2100) . $internal('26DD0005', 'PDpdp', self::PAIR_MIXED, 10000, 2100)
+            . $internal('26DD0006', 'DDslRegEU', self::PAIR_NO_DEDUCTION, 1000, 210) . '</lst:listIntDoc>');
+        self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Přijaté faktury', self::PAIR_SERVICE, 'Služba z EU', 2530, '518000', '321001', '2026-02-16')
+            . self::entry('Přijaté faktury', self::PAIR_MIXED, 'Zboží a doprava', 11000, '518000', '321001', '2026-02-16')
+            . self::entry('Přijaté faktury', self::PAIR_MIXED, 'DPH', 210, '343011', '321001', '2026-02-16')
+            . self::entry('Přijaté faktury', self::PAIR_NO_DEDUCTION, 'Služba z EU', 1000, '518000', '321001', '2026-02-16')
+            . self::entry('Interní doklady', '26DD0002', 'DPH samovyměření', 525, '343011', '343021', '2026-02-16')
+            . self::entry('Interní doklady', '26DD0004', 'DPH samovyměření', 2100, '343011', '343021', '2026-02-16')
+            . self::entry('Interní doklady', '26DD0006', 'DPH samovyměření', 210, '518000', '343021', '2026-02-16'));
+    }
+
     /** Doklady v EUR ({@see withForeignCurrencyDocuments()}), kurz faktur 25,12 Kč/EUR. */
     public const FOREIGN_ISSUED = '26FV0020';
     public const FOREIGN_ISSUED_VS = '260020';
@@ -386,6 +450,32 @@ final class SyntheticPohodaExport
     {
         self::append($agendaDir . '/29_banka.xml', '</lst:listBank>',
             self::bank(self::FOREIGN_RECEIPT, 'receipt', '2026-03-10', 4255.33, self::FOREIGN_ISSUED_VS, 'Odběratel Test s.r.o.', self::PARTNER_ACCOUNT));
+    }
+
+    /** Úhrada přes platební bránu ({@see withPaymentGateway()}). */
+    public const GATEWAY_INVOICE = '26FV0040';
+    public const GATEWAY_BANK = 'BAN0010040';
+
+    /**
+     * Faktura 26FV0040 (1 000 + 210 Kč) uhrazená přes platební bránu tak, jak ji vede POHODA:
+     * dva bankovní doklady se stejným číslem BAN0010040 a datem - nejdřív poplatek brány
+     * 20 Kč, pak příjem 1 210 Kč, kterým je faktura zlikvidovaná. V deníku mají oba doklady
+     * zápis pod týmž číslem.
+     */
+    public static function withPaymentGateway(string $agendaDir): void
+    {
+        $doc = static fn (string $id, string $type, float $amount, string $vs): string =>
+            str_replace('<bnk:id>' . abs(crc32(self::GATEWAY_BANK)) . '</bnk:id>', '<bnk:id>' . abs(crc32($id)) . '</bnk:id>',
+                self::bank(self::GATEWAY_BANK, $type, '2026-03-05', $amount, $vs, 'Platební brána Test'));
+        self::append($agendaDir . '/12_faktury_issuedInvoice.xml', '</lst:listInvoice>',
+            self::invoice('issuedInvoice', self::GATEWAY_INVOICE, '260040', '2026-03-01', 1000, 210, '', 'GW-PAY', self::GATEWAY_BANK));
+        self::append($agendaDir . '/29_banka.xml', '</lst:listBank>',
+            $doc('GW-FEE', 'expense', 20, '') . $doc('GW-PAY', 'receipt', 1210, '260040'));
+        self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Vydané faktury', self::GATEWAY_INVOICE, 'Služby', 1000, '311001', '602000', '2026-03-01')
+            . self::entry('Vydané faktury', self::GATEWAY_INVOICE, 'DPH', 210, '311001', '343021', '2026-03-01')
+            . self::entry('Banka', self::GATEWAY_BANK, 'Poplatek brány', 20, '568000', '221001', '2026-03-05')
+            . self::entry('Banka', self::GATEWAY_BANK, 'Úhrada ' . self::GATEWAY_INVOICE, 1210, '221001', '311001', '2026-03-05'));
     }
 
     /** Totéž bez částek v cizí měně - doklady, jak by je převod převzal v Kč. */

@@ -107,6 +107,10 @@ final class InvoiceImporter
     /** Přihrádky rekapitulace a jejich výchozí sazba, když export `@rate` nenese. */
     private const BUCKETS = ['Low' => 12.0, 'High' => 21.0, '3' => 10.0];
 
+    /** Kód zařazení tuzemského odpočtu (ř. 40 / 41) pro položku na dokladu se samovyměřením. */
+    private const DOMESTIC_DEDUCTION_BASE = '40';
+    private const DOMESTIC_DEDUCTION_REDUCED = '41';
+
     private readonly MigrationVatRateLookup $rates;
 
     private readonly ForeignCurrencyTakeover $foreignCurrency;
@@ -124,7 +128,7 @@ final class InvoiceImporter
         private readonly MigrationHomeCurrency $homeCurrency,
     ) {
         $this->rates = new MigrationVatRateLookup($db);
-        $this->foreignCurrency = new ForeignCurrencyTakeover($db);
+        $this->foreignCurrency = new ForeignCurrencyTakeover($db, createMissingCurrency: true);
     }
 
     public function importIssued(PohodaContext $ctx): void
@@ -391,6 +395,9 @@ final class InvoiceImporter
         if (($agenda === 'commitment' || $agenda === 'internal') && !$class['in_return']) {
             $p->count($step, 'journal_only');
             return;
+        }
+        if (!$class['reverse'] && $kind !== 'advance' && $class['reasons'] === [] && isset($selfAssessed[$doc['number']])) {
+            $class = self::selfAssessedByInternalDocuments($class, $selfAssessed[$doc['number']], $amounts);
         }
         if ($class['reverse']) {
             $sa = $selfAssessed[$doc['number']] ?? null;
@@ -932,22 +939,31 @@ final class InvoiceImporter
      * Samovyměření DPH, které Pohoda vede interním dokladem (`DD…` - ř. 3–13) s vazbou
      * na přijatou fakturu (`linkedDocuments`, agenda `receivedInvoice`).
      *
-     * @return array<string,array{doc:string,date:?string,lines:list<array{base:float,rate:float,code:string}>,error:?string}>
+     * `deducted` = k téže faktuře vede Pohoda i interní doklad s odpočtem ze samovyměření
+     * (`PD…` - ř. 43, 44). Rozhoduje jen u faktury, která sama členění samovyměření nemá
+     * ({@see selfAssessedByInternalDocuments()}).
+     *
+     * @return array<string,array{doc:string,date:?string,lines:list<array{base:float,rate:float,code:string}>,error:?string,deducted:bool}>
      */
     private function selfAssessments(PohodaContext $ctx): array
     {
         $out = [];
+        $deducted = [];
         foreach ($ctx->export->records('internal', 'intDoc') as $r) {
             $h = PohodaXml::get($r, 'intDocHeader');
-            $headerCode = $ctx->vat->selfAssessmentCode(PohodaXml::text($h, 'classificationVAT/ids'));
-            if ($headerCode === null) {
-                continue;
-            }
+            $headerClass = PohodaXml::text($h, 'classificationVAT/ids');
+            $headerCode = $ctx->vat->selfAssessmentCode($headerClass);
             $ref = '';
             foreach (PohodaXml::all($r, 'linkedDocuments/link') as $link) {
                 if (PohodaXml::text($link, 'sourceAgenda') === 'receivedInvoice') {
                     $ref = PohodaXml::text($link, 'sourceDocument/number');
                 }
+            }
+            if ($headerCode === null) {
+                if ($ref !== '' && ($ctx->vat->purchase($headerClass)['reverse'] ?? false)) {
+                    $deducted[$ref] = true;
+                }
+                continue;
             }
             $docNo = PohodaXml::text($h, 'number/numberRequested');
             $entry = ['doc' => $docNo, 'date' => PohodaXml::date($h, 'dateTax'), 'lines' => [], 'error' => null];
@@ -979,7 +995,42 @@ final class InvoiceImporter
             }
             $out[$ref] = $entry;
         }
+        foreach ($out as $ref => $entry) {
+            $out[$ref]['deducted'] = isset($deducted[$ref]);
+        }
         return $out;
+    }
+
+    /**
+     * Faktura bez členění samovyměření, ke které Pohoda vede výstup i odpočet dvojicí
+     * interních dokladů (`DD…` ř. 3–13 a `PD…` ř. 43, 44). Faktura sama je „mimo
+     * přiznání" (PN), u smíšené faktury nese členěním jen tuzemskou část s daní. Daň
+     * vyměřená interním dokladem patří k faktuře stejně jako u faktury se členěním
+     * samovyměření; interní doklady zůstanou jen v deníku. Bez dokladu s odpočtem Pohoda
+     * daň jen vyměřila a nárok neuplatnila.
+     *
+     * @param array{reasons:list<string>,deduction:string,in_return:bool,reverse:bool,fixed_asset:bool} $class
+     * @param array{deducted:bool} $sa
+     * @param array{items:list<array<string,mixed>>} $amounts
+     * @return array{reasons:list<string>,deduction:string,in_return:bool,reverse:bool,fixed_asset:bool}
+     */
+    private static function selfAssessedByInternalDocuments(array $class, array $sa, array $amounts): array
+    {
+        $domesticVat = false;
+        foreach ($amounts['items'] as $item) {
+            $domesticVat = $domesticVat || abs((float) $item['vat']) >= 0.005;
+        }
+        if ($domesticVat && (!$class['in_return'] || !$sa['deducted'])) {
+            // Nárok na odpočet nese hlavička dokladu: tuzemská daň a samovyměření by se
+            // neuplatnily stejně jako v Pohodě.
+            $class['reasons'][] = 'samovyměření z interního dokladu u faktury s tuzemskou daní mimo odpočet';
+        }
+        $class['reverse'] = true;
+        $class['in_return'] = true;
+        if (!$sa['deducted']) {
+            $class['deduction'] = 'none';
+        }
+        return $class;
     }
 
     /**
@@ -997,6 +1048,22 @@ final class InvoiceImporter
     {
         $items = [];
         $base = 0.0;
+        // Tuzemská část smíšené faktury ({@see selfAssessedByInternalDocuments()}) zůstává
+        // s daní dodavatele a s kódem odpočtu - na dokladu s příznakem samovyměření by ji
+        // evidence DPH bez kódu zařadila podle sazby jako samovyměření.
+        $domestic = [];
+        $domesticGross = 0.0;
+        $domesticVat = 0.0;
+        foreach ($amounts['items'] as $item) {
+            if (abs((float) $item['vat']) < 0.005) {
+                continue;
+            }
+            $item['code'] ??= (float) $item['rate'] === VatReturnLineClassifier::domesticRate(VatReturnLineClassifier::RATE_BASE, $taxDate)
+                ? self::DOMESTIC_DEDUCTION_BASE : self::DOMESTIC_DEDUCTION_REDUCED;
+            $domestic[] = $item;
+            $domesticGross += (float) $item['base'] + (float) $item['vat'];
+            $domesticVat += (float) $item['vat'];
+        }
         foreach ($sa['lines'] as $line) {
             $items[] = [
                 'description' => $amounts['items'][0]['description'] ?? 'Převzato z Pohody',
@@ -1006,7 +1073,7 @@ final class InvoiceImporter
             ];
             $base += $line['base'];
         }
-        $diff = round($amounts['total'] - $base, 2);
+        $diff = round($amounts['total'] - $domesticGross - $base, 2);
         if (abs($diff) >= 0.01) {
             $items[] = [
                 'description' => 'Rozdíl proti základu samovyměření (kurz)', 'quantity' => 1.0, 'unit' => null, 'unit_price' => $diff,
@@ -1014,9 +1081,9 @@ final class InvoiceImporter
                 'code' => VatReturnLineClassifier::PURCHASE_OUTSIDE_SCOPE_CODE,
             ];
         }
-        $amounts['items'] = $items;
-        $amounts['base'] = $amounts['total'];
-        $amounts['vat'] = 0.0;
+        $amounts['items'] = [...$items, ...$domestic];
+        $amounts['base'] = round($amounts['total'] - $domesticVat, 2);
+        $amounts['vat'] = round($domesticVat, 2);
         $amounts['rounding'] = 0.0;
         return $amounts;
     }

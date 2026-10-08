@@ -15,6 +15,8 @@ final class ForeignCurrencyDecision
         public readonly ?int $currencyId,
         public readonly ?float $rate,
         public readonly ?string $reason,
+        /** Měnu dokladu převod pro tento doklad teprve založil v číselníku měn firmy. */
+        public readonly bool $currencyCreated = false,
     ) {}
 
     /** Doklad v domácí měně - převod se ho netýká. */
@@ -23,9 +25,9 @@ final class ForeignCurrencyDecision
         return new self('CZK', null, null, null);
     }
 
-    public static function foreign(string $currency, int $currencyId, float $rate): self
+    public static function foreign(string $currency, int $currencyId, float $rate, bool $currencyCreated = false): self
     {
-        return new self($currency, $currencyId, $rate, null);
+        return new self($currency, $currencyId, $rate, null, $currencyCreated);
     }
 
     /** Doklad v cizí měně, který pojistka nepustila - převezme se v Kč. */

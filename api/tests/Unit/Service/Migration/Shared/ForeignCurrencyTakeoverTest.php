@@ -19,8 +19,9 @@ final class ForeignCurrencyTakeoverTest extends TestCase
     {
         $this->pdo = new \Pdo\Sqlite('sqlite::memory:');
         $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $this->pdo->exec('CREATE TABLE currencies (id INTEGER PRIMARY KEY, supplier_id INT, code TEXT, is_default INT)');
-        $this->pdo->exec("INSERT INTO currencies VALUES (1, 5, 'CZK', 1), (2, 5, 'EUR', 0), (3, 6, 'USD', 0)");
+        $this->pdo->exec('CREATE TABLE currencies (id INTEGER PRIMARY KEY, supplier_id INT, code TEXT, label TEXT, symbol TEXT, name_cs TEXT, name_en TEXT,
+            decimals INT, is_active INT, is_default INT)');
+        $this->pdo->exec("INSERT INTO currencies (id, supplier_id, code, is_default) VALUES (1, 5, 'CZK', 1), (2, 5, 'EUR', 0), (3, 6, 'USD', 0)");
         $db = new Connection(new Config([]));
         (new \ReflectionProperty($db, 'pdo'))->setValue($db, $this->pdo);
         $this->takeover = new ForeignCurrencyTakeover($db);
@@ -110,7 +111,49 @@ final class ForeignCurrencyTakeoverTest extends TestCase
         $d = $this->takeover->decide(5, 'USD', 23.0, 1.0, $items, 2300.0);
         self::assertFalse($d->inForeignCurrency());
         self::assertSame('měna USD není v číselníku měn firmy', $d->reason);
+        self::assertSame(0, (int) $this->pdo->query("SELECT COUNT(*) FROM currencies WHERE supplier_id = 5 AND code = 'USD'")->fetchColumn());
         self::assertTrue($this->takeover->decide(6, 'USD', 23.0, 1.0, $items, 2300.0)->inForeignCurrency());
+    }
+
+    public function testMissingCurrencyIsCreatedOnceWhenEnabled(): void
+    {
+        $takeover = $this->creating();
+        $items = [['base' => 2300.0, 'vat' => 0.0, 'foreign_base' => 100.0, 'foreign_vat' => 0.0]];
+        $d = $takeover->decide(5, 'USD', 23.0, 1.0, $items, 2300.0);
+        self::assertTrue($d->inForeignCurrency());
+        self::assertTrue($d->currencyCreated);
+        self::assertSame(['5', 'USD', 'Americký dolar', '1', '1'], array_map('strval', array_values($this->pdo->query(
+            "SELECT supplier_id, code, name_cs, is_active, is_default FROM currencies WHERE id = {$d->currencyId}")->fetch(PDO::FETCH_ASSOC))));
+
+        $again = $takeover->decide(5, 'USD', 23.0, 1.0, $items, 2300.0);
+        self::assertSame($d->currencyId, $again->currencyId);
+        self::assertFalse($again->currencyCreated);
+        self::assertSame(1, (int) $this->pdo->query("SELECT COUNT(*) FROM currencies WHERE supplier_id = 5 AND code = 'USD'")->fetchColumn());
+        self::assertFalse($takeover->decide(6, 'USD', 23.0, 1.0, $items, 2300.0)->currencyCreated);
+    }
+
+    public function testInvalidCurrencyCodeIsNotCreated(): void
+    {
+        $items = [['base' => 2300.0, 'vat' => 0.0, 'foreign_base' => 100.0, 'foreign_vat' => 0.0]];
+        $d = $this->creating()->decide(5, 'US', 23.0, 1.0, $items, 2300.0);
+        self::assertFalse($d->inForeignCurrency());
+        self::assertSame('měna US není v číselníku měn firmy', $d->reason);
+        self::assertSame(0, (int) $this->pdo->query("SELECT COUNT(*) FROM currencies WHERE code = 'US'")->fetchColumn());
+    }
+
+    /** Pojistka platí i pro zakládání: doklad, který kurzem nevyjde, měnu nezaloží. */
+    public function testBlockedDocumentDoesNotCreateCurrency(): void
+    {
+        $items = [['base' => 2300.0, 'vat' => 0.0, 'foreign_base' => 100.0, 'foreign_vat' => 0.0]];
+        self::assertFalse($this->creating()->decide(5, 'USD', 23.0, 1.0, $items, 2300.0, 'samovyměření DPH')->inForeignCurrency());
+        self::assertSame(0, (int) $this->pdo->query("SELECT COUNT(*) FROM currencies WHERE supplier_id = 5 AND code = 'USD'")->fetchColumn());
+    }
+
+    private function creating(): ForeignCurrencyTakeover
+    {
+        $db = new Connection(new Config([]));
+        (new \ReflectionProperty($db, 'pdo'))->setValue($db, $this->pdo);
+        return new ForeignCurrencyTakeover($db, createMissingCurrency: true);
     }
 
     public function testReasonFromSourceWins(): void

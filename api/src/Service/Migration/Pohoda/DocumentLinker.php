@@ -43,8 +43,19 @@ final class DocumentLinker
             'invoice' => $this->unbookedIds('invoices', $ctx->supplierId),
             'purchase_invoice' => $this->unbookedIds('purchase_invoices', $ctx->supplierId),
         ];
+        // Pohyby se stejným číslem dokladu (platební brána: úhrada, poplatek a odvod netto)
+        // mají v deníku Pohody jediný zápis a vlastnit ho může jen jeden z nich. Dostane ho
+        // pohyb, kterým Pohoda hradí doklad - jinak by úhrada faktury zůstala mezi
+        // nezaúčtovanými pohyby, ačkoli její zápis v deníku je.
+        $paying = [];
+        foreach ($ctx->liquidations as $l) {
+            if ($l['agenda'] === 'bank' && ($l['source_id'] ?? '') !== '' && isset($ctx->bankByPohodaId[$l['source_id']])) {
+                $paying[$ctx->bankByPohodaId[$l['source_id']]] = true;
+            }
+        }
         $bankDocs = [];
         foreach ($ctx->bankTransactions as $number => $txs) {
+            usort($txs, static fn (array $a, array $b): int => isset($paying[$b['id']]) <=> isset($paying[$a['id']]));
             foreach ($txs as $tx) {
                 $bankDocs[$number . '#' . $tx['date'] . '#' . $tx['id']] = $tx['id'];
             }
