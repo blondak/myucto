@@ -1164,7 +1164,8 @@ paths:
         - `pdf-zip` — ZIP s jedním PDF na doklad (`Faktura-{vs}.pdf`, dobropisy
           `Dobropis-{vs}.pdf` atd.); s `merge_pdf=true` místo ZIPu vrátí jeden
           sloučený PDF soubor obsahující pouze faktury bez příloh a výkazů práce
-        - `isdoc` — ISDOC XML; jeden doklad = samostatný `.isdoc`, víc dokladů = ZIP
+        - `isdoc` — ISDOC XML; jeden doklad = samostatný `.isdoc`, víc dokladů = ZIP;
+          při zapnutém podpisu výstupu „Vydaná faktura" je každý `.isdoc` podepsaný (XMLDSig)
         - `pohoda` — Pohoda XML dataPack
         - `stereo` — Stereo (Ježek) XML
         - `money_s3` — Money S3 (Seyfor) XML, formát „Faktury vydané"
@@ -1223,6 +1224,12 @@ paths:
         s `/api/v1/purchase-invoices/{id}/isdoc`. Koncept (draft) nelze
         exportovat (400) — nemá přidělené číslo. Stornovanou fakturu (409)
         také ne — stejné pravidlo jako u hromadného exportu.
+
+        Má-li dodavatel zapnutý podpis výstupu „Vydaná faktura", nese ISDOC
+        elektronický podpis XMLDSig podle ISDOC 6.0.2 kap. 5 (poslední prvek
+        kořene `ds:Signature`, enveloped + XPath transformace, C14N 1.0,
+        RSA-SHA256). Selhání podpisu s politikou `fail_closed` vrací 500
+        `signing_failed`.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }

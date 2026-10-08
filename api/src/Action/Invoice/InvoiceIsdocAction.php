@@ -13,6 +13,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Currency\ExchangeRateApplier;
 use MyInvoice\Service\Export\IsdocExporter;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Signing\Pdf\PdfSigningService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -34,6 +35,7 @@ final class InvoiceIsdocAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly ExchangeRateApplier $rateApplier,
+        private readonly PdfSigningService $pdfSigning,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -71,13 +73,23 @@ final class InvoiceIsdocAction
                 : $this->repo->find($id);
         }
 
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         try {
             $xml = $this->isdoc->buildXml($invoice);
         } catch (\Throwable $e) {
             return Json::error($response, 'export_failed', $e->getMessage(), 500);
         }
+        try {
+            $xml = $this->pdfSigning->signIsdocIfEnabled(
+                $xml,
+                ['id' => (int) ($invoice['supplier_id'] ?? 0)],
+                $id,
+                isset($user['id']) ? (int) $user['id'] : null,
+            );
+        } catch (\Throwable $e) {
+            return Json::error($response, 'signing_failed', $e->getMessage(), 500);
+        }
 
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('invoice.isdoc_exported', isset($user['id']) ? (int) $user['id'] : null, 'invoice', $id,
             null, $ip, $request->getHeaderLine('User-Agent'), $sid);

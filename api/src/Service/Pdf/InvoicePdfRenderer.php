@@ -145,6 +145,13 @@ final class InvoicePdfRenderer
                 // PDF renderujeme bez přílohy, nezdržujeme uživatele.
                 $isdocXml = null;
             }
+            // Vložené ISDOC se podepisuje vlastním XML podpisem (POHODA ho při
+            // importu ověřuje přímo v XML) a ještě před vložením do PDF, aby ho
+            // následný podpis PDF kryl už podepsané. Mimo try výše: při
+            // failure_policy fail_closed se chyba podpisu nesmí tiše spolknout.
+            if ($isdocXml !== null) {
+                $isdocXml = $this->pdfSigning->signIsdocIfEnabled($isdocXml, $supplierData, $invoiceId, $userId);
+            }
         }
 
         $rendered = $this->renderHtmlAndCss($invoice, $isdocXml !== null);

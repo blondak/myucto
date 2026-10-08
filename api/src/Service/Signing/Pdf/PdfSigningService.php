@@ -7,10 +7,13 @@ namespace MyInvoice\Service\Signing\Pdf;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Repository\SigningProfileRepository;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Pdf\SigningConfig;
 use MyInvoice\Service\Signing\PersonalCertificateVaultService;
+use MyInvoice\Service\Signing\SigningCredentialUnlocker;
 use MyInvoice\Service\Signing\SigningProfile;
 use MyInvoice\Service\Signing\SigningPassphraseProviderInterface;
+use MyInvoice\Service\Signing\Xml\XmlDsigEnvelopedSigner;
 
 final class PdfSigningService
 {
@@ -21,7 +24,94 @@ final class PdfSigningService
         private readonly ?SigningProfileRepository $profiles = null,
         private readonly ?SigningPassphraseProviderInterface $passphrases = null,
         private readonly ?PersonalCertificateVaultService $certificateVault = null,
+        private readonly ?SigningCredentialUnlocker $credentials = null,
+        private readonly XmlDsigEnvelopedSigner $xmlSigner = new XmlDsigEnvelopedSigner(),
     ) {}
+
+    /**
+     * Podepíše ISDOC vydané faktury (XMLDSig, ISDOC 6.0.2 kap. 5) stejným profilem,
+     * stejnými branami a stejnou politikou selhání jako PDF výstup „Vydaná faktura".
+     *
+     * Účetní programy (POHODA a další) při importu ISDOC ověřují podpis přímo
+     * v XML; PAdES podpis PDF, do kterého je ISDOC vložený, za něj nestačí.
+     * Volající proto podepisuje ISDOC PŘED vložením do PDF, aby podpis PDF kryl
+     * už podepsaný ISDOC.
+     *
+     * Bez podpisového profilu nebo s vypnutým výstupem vrátí XML beze změny;
+     * při chybě podpisu se řídí failure_policy (nepodepsané XML, nebo výjimka).
+     *
+     * @param array<string,mixed> $supplierRow řádek supplier (stačí klíč `id`)
+     */
+    public function signIsdocIfEnabled(string $isdocXml, array $supplierRow, int $invoiceId, ?int $userId = null): string
+    {
+        $documentType = 'invoice';
+        if ($this->profiles === null || !$this->platformEnabled()) {
+            return $isdocXml;
+        }
+        $supplierId = (int) ($supplierRow['id'] ?? 0) ?: null;
+        $outputSetting = $this->effectiveOutputSetting($supplierId, $documentType, $invoiceId);
+        if (!$this->configOutputEnabled($documentType) || !$this->outputSettingEnabled($outputSetting)) {
+            return $isdocXml;
+        }
+
+        $profile = $this->selectProfile($supplierRow, $outputSetting, $userId, $documentType);
+        if ($profile === null || $profile->pdfConfig === null) {
+            $policy = new PdfSignaturePolicy($this->unconfiguredFailurePolicy($outputSetting));
+            if ($policy->failClosed()) {
+                $this->logIsdocFailure($userId, $invoiceId, $supplierId, $profile, $policy, 'Podpisový profil není nakonfigurovaný.');
+                throw new \RuntimeException('Podpis ISDOC není nakonfigurovaný.');
+            }
+
+            return $isdocXml;
+        }
+
+        $policy = new PdfSignaturePolicy($this->failurePolicy($outputSetting));
+        try {
+            $signed = $this->xmlSigner->sign(
+                $isdocXml,
+                $this->credentialUnlocker()->unlock($profile->pdfConfig),
+            );
+        } catch (\Throwable $e) {
+            $this->logIsdocFailure($userId, $invoiceId, $supplierId, $profile, $policy, $e->getMessage());
+            if ($policy->failClosed()) {
+                throw new \RuntimeException('Podpis ISDOC selhal.', 0, $e);
+            }
+
+            return $isdocXml;
+        }
+
+        $this->activity->log('signing.isdoc_signed', $userId, $documentType, $invoiceId, [
+            'status' => 'signed',
+            'format' => 'xmldsig',
+            'profile_code' => $profile->code,
+        ], null, null, $supplierId);
+
+        return $signed;
+    }
+
+    private function credentialUnlocker(): SigningCredentialUnlocker
+    {
+        return $this->credentials ?? new SigningCredentialUnlocker(new SecretEncryption($this->config));
+    }
+
+    private function logIsdocFailure(
+        ?int $userId,
+        int $invoiceId,
+        ?int $supplierId,
+        ?SigningProfile $profile,
+        PdfSignaturePolicy $policy,
+        string $error,
+    ): void {
+        $this->activity->log('signing.isdoc_failed', $userId, 'invoice', $invoiceId, [
+            'document_type' => 'invoice',
+            'document_id' => $invoiceId,
+            'format' => 'xmldsig',
+            'status' => $policy->failClosed() ? 'failed' : 'fallback_unsigned',
+            'error' => $this->sanitizeError($error),
+            'profile_code' => $profile?->code,
+            'failure_policy' => $policy->failurePolicy,
+        ], null, null, $supplierId);
+    }
 
     /**
      * Zjistí, zda by se dokument se SOUČASNÝM nastavením skutečně podepsal —

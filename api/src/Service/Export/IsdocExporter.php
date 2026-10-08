@@ -101,10 +101,16 @@ final class IsdocExporter
 
     /**
      * @param int[] $invoiceIds
+     * @param (callable(string, array<string,mixed>): string)|null $finalize úprava hotového
+     *   XML jedné faktury před zabalením (elektronický podpis ISDOC)
      * @return array{filename:string, content:string, mime:string}
      */
-    public function export(array $invoiceIds, string $monthLabel = ''): array
+    public function export(array $invoiceIds, string $monthLabel = '', ?callable $finalize = null): array
     {
+        $build = fn (array $inv): string => $finalize !== null
+            ? $finalize($this->buildXml($inv), $inv)
+            : $this->buildXml($inv);
+
         $invoices = [];
         foreach ($invoiceIds as $id) {
             $inv = $this->repo->find((int) $id);
@@ -120,7 +126,7 @@ final class IsdocExporter
             $vs = ExportFilename::sanitize((string) ($inv['varsymbol'] ?? ('draft-' . $inv['id'])));
             return [
                 'filename' => "Faktura-{$vs}.isdoc",
-                'content'  => $this->buildXml($inv),
+                'content'  => $build($inv),
                 'mime'     => 'application/x-isdoc',
             ];
         }
@@ -139,7 +145,7 @@ final class IsdocExporter
                 'tax_document' => 'DanovyDoklad',
                 default        => 'Faktura',
             };
-            $zip->addFromString("$type-{$vs}.isdoc", $this->buildXml($inv));
+            $zip->addFromString("$type-{$vs}.isdoc", $build($inv));
         }
         $zip->close();
         $content = (string) file_get_contents($tmpZip);

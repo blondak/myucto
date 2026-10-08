@@ -21,6 +21,7 @@ use MyInvoice\Service\Export\MergedInvoicePdfExporter;
 use MyInvoice\Service\Export\MoneyS3XmlExporter;
 use MyInvoice\Service\Export\PohodaXmlExporter;
 use MyInvoice\Service\Export\StereoXmlExporter;
+use MyInvoice\Service\Signing\Pdf\PdfSigningService;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -55,6 +56,7 @@ final class ExportAction
         private readonly ExportPeriodResolver $periodResolver,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly PdfSigningService $pdfSigning,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -101,7 +103,7 @@ final class ExportAction
                 'pdf-zip' => $mergePdf
                     ? $this->buildMergedPdf($ids, $sid, $period, $type, $userId, $signPdf, !DemoReadOnlyMiddleware::enabled($request))
                     : $this->buildPdfZip($ids, $period, $type, $userId),
-                'isdoc'   => $this->buildIsdoc($ids, $period),
+                'isdoc'   => $this->buildIsdoc($ids, $period, $userId),
                 'pohoda'  => $this->buildPohoda($ids, $sid, $period),
                 'stereo'  => $this->buildStereo($ids, $period),
                 'csv'     => $this->buildCsv($sid, $period, $dateBy, $type),
@@ -249,9 +251,18 @@ final class ExportAction
      * @param int[] $ids
      * @return array{0:string,1:string,2:string}
      */
-    private function buildIsdoc(array $ids, ExportPeriod $period): array
+    private function buildIsdoc(array $ids, ExportPeriod $period, ?int $userId): array
     {
-        $r = $this->isdoc->export($ids, $period->label);
+        $r = $this->isdoc->export(
+            $ids,
+            $period->label,
+            fn (string $xml, array $invoice): string => $this->pdfSigning->signIsdocIfEnabled(
+                $xml,
+                ['id' => (int) ($invoice['supplier_id'] ?? 0)],
+                (int) $invoice['id'],
+                $userId,
+            ),
+        );
         return [$r['filename'], $r['content'], $r['mime']];
     }
 

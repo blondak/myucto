@@ -140,6 +140,24 @@ final class IsdocExporterSchemaTest extends TestCase
         self::assertStringNotContainsString('DurationMinutes', $xml);
     }
 
+    public function testExportAppliesFinalizerToEveryInvoiceXml(): void
+    {
+        $repo = $this->createStub(InvoiceRepository::class);
+        $repo->method('find')->willReturnCallback(fn (int $id): array => $this->invoice([
+            'id' => $id, 'varsymbol' => "2026{$id}",
+        ]));
+        $exporter = new IsdocExporter($repo, $this->createStub(Connection::class));
+        $seen = [];
+        $finalize = function (string $xml, array $invoice) use (&$seen): string {
+            $seen[] = (int) $invoice['id'];
+            return $xml . '<!-- finalized -->';
+        };
+
+        self::assertStringEndsWith('<!-- finalized -->', $exporter->export([1], '', $finalize)['content']);
+        $exporter->export([2, 3], '', $finalize);
+        self::assertSame([1, 2, 3], $seen);
+    }
+
     public function testExportFilenamesCannotEscapeArchiveDirectory(): void
     {
         $repo = $this->createStub(InvoiceRepository::class);
