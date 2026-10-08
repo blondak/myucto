@@ -117,6 +117,32 @@ final class PayrollJmhzSpecialFormsFlowTest extends TestCase
     }
 
     /**
+     * Formulář jiného příjmu vykonávanou pozici nemá (matice scénáře 5 nevede
+     * místo výkonu práce 10229 až 10231): neuvolněný zastupitel nebo provize
+     * od cizího plátce pracoviště nemají a hlášení na něm stát nesmí.
+     */
+    public function testOtherIncomeDoesNotNeedAWorkplace(): void
+    {
+        $person = $this->hire('Kamil Zastupitel', 'male', '1970-09-09');
+        $this->classify($person['employment_id'], '14', '1');
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms
+                SET work_place = NULL, jmhz_workplace_municipality_code = NULL,
+                    jmhz_workplace_country_code = NULL,
+                    jmhz_external_codebook_overlay_key = NULL,
+                    jmhz_external_codebook_manifest_sha256 = NULL
+              WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([$this->supplierId, $person['employment_id']]);
+        $this->approveMonth($person['employment_id'], []);
+        $this->pay($person, 250_000);
+
+        $xml = $this->submission('jiny-prijem-bez-pracoviste');
+
+        self::assertStringContainsString('<form:jinyPrijem><form:identifikace>', $xml);
+        self::assertStringNotContainsString('<form:vykonavanaPozice>', $xml);
+    }
+
+    /**
      * Scénář 6: druh činnosti 12 - mezinárodní pronájem pracovní síly. Formulář
      * nese jen identifikaci, zúžený souhrn daně a daňový základ.
      */
