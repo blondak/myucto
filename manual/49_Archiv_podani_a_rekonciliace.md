@@ -268,7 +268,7 @@ Technické struktury a rozhraní popisuje
 
 Postup:
 
-1. V **Systém → E-maily a certifikáty → Elektronické podpisy** nahraj P12/PFX, zadej
+1. V **Systém → E-maily a certifikáty → Certifikáty a elektronické podpisy** nahraj P12/PFX, zadej
    jeho heslo a potvrď se, buď přístupovým klíčem, nebo heslem do MyÚčta
    a případným TOTP. V **Certifikáty EPO** zkontroluj vlastníka, vydavatele
    a platnost certifikátu a povol ho pro firmu.

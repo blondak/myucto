@@ -441,7 +441,7 @@ Viz [95. Více dodavatelů](95_Multi_supplier.md).
   trvání i chyba jsou na jedné obrazovce.
 - **Externí integrace** a **API tokeny s omezením rozsahu**
 - **Branding** — logo, barva a šablony PDF pro každou firmu zvlášť
-- **Elektronické podpisy** PDF dokladů i odchozích e-mailů
+- **Certifikáty a elektronické podpisy** PDF dokladů i odchozích e-mailů
 - **Zálohování** databáze, dokladů i dokumentů, volitelně šifrované
 
 Viz [96. Nastavení](96_Nastaveni.md),

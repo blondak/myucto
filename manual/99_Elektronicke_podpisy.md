@@ -6,7 +6,7 @@ PDF výstupy a vybrané odchozí e-maily.
 
 Kde funkci najdeš, závisí na roli:
 
-- **admin** — správu podpisů najdeš jako záložku **Elektronické podpisy**
+- **admin** — správu podpisů najdeš jako záložku **Certifikáty a elektronické podpisy**
   uvnitř stránky **Systém -> E-maily** (vedle záložek Odeslané, Šablony,
   Profily, SMTP log).
 - **accountant** (účetní) — pokud admin zapnul přepínač **Povolit uživatelům
@@ -99,12 +99,12 @@ U vlastního profilu jsou dostupné dva zdroje:
 
 | Zdroj | Kdy použít |
 |---|---|
-| **Použít osobní certifikát EPO** | Certifikát už máš uložený v osobním šifrovaném trezoru (**Systém → Elektronické podpisy → Certifikáty**). PFX ani heslo se neukládají podruhé. |
+| **Použít osobní certifikát EPO** | Certifikát už máš uložený v osobním šifrovaném trezoru (**Systém → Certifikáty a elektronické podpisy → Certifikáty**). PFX ani heslo se neukládají podruhé. |
 | **Nahrát samostatný certifikát** | Profil dodavatele, profil jiného uživatele nebo certifikát, který nechceš používat pro EPO. |
 
 ### 99.4.1 Použití osobního certifikátu EPO
 
-1. V **Systém → Elektronické podpisy → Certifikáty** nahraj P12/PFX a v
+1. V **Systém → Certifikáty a elektronické podpisy → Certifikáty** nahraj P12/PFX a v
    **Daně → EPO podání a archív → Certifikáty EPO** ho povol pro aktuální firmu.
 2. Založ nebo uprav profil s vlastníkem **Můj profil**.
 3. V části **Certifikát profilu** zvol **Použít osobní certifikát EPO** a vyber
@@ -204,7 +204,7 @@ v příslušném nastavení té firmy.
 
 Certifikát, který už nepotřebujete (například po obnově), smažete takto:
 
-1. Otevřete **Systém → E-maily a certifikáty**, záložku **Elektronické podpisy**.
+1. Otevřete **Systém → E-maily a certifikáty**, záložku **Certifikáty a elektronické podpisy**.
 2. V sekci **Certifikáty** se ověřte stejně jako při nahrání: **Ověřit
    passkey**, nebo **Heslo do MyÚčta** a případně **Kód z autentikátoru**.
 3. U certifikátu klikněte na **Smazat** a smazání potvrďte v dialogu
