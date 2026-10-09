@@ -229,6 +229,77 @@ final class MyuctoImportTest extends TestCase
 
     private function targetCount(string $table): int { return (int) $this->pdo->query('SELECT COUNT(*) FROM `' . $table . '` WHERE supplier_id = ' . $this->target)->fetchColumn(); }
 
+    public function testLargeEncryptedZipUsesSharedJobsAndPreservesNativeGraphs(): void
+    {
+        $password = bin2hex(random_bytes(16));
+        $padding = $this->root . '/synthetic-padding.bin';
+        $fp = fopen($padding, 'wb');
+        for ($i = 0; $i < 65; $i++) {
+            fwrite($fp, str_repeat('S', 1024 * 1024));
+        }
+        fclose($fp);
+        $zip = new ZipArchive();
+        self::assertTrue($zip->open($this->archive));
+        $manifest = json_decode($zip->getFromName('manifest.json'), true, 512, JSON_THROW_ON_ERROR);
+        $entry = 'outside-scope/synthetic-padding.bin';
+        $manifest['checksums'][$entry] = ['size' => filesize($padding), 'sha256' => hash_file('sha256', $padding)];
+        $zip->addFile($padding, $entry);
+        $zip->setCompressionName($entry, ZipArchive::CM_STORE);
+        $zip->addFromString('manifest.json', json_encode($manifest, JSON_THROW_ON_ERROR));
+        $zip->setEncryptionName('manifest.json', ZipArchive::EM_AES_256, $password);
+        self::assertTrue($zip->close());
+        self::assertGreaterThan(64 * 1024 * 1024, filesize($this->archive));
+
+        $oldDataDir = getenv('MYINVOICE_DATA_DIR');
+        putenv('MYINVOICE_DATA_DIR=' . $this->root);
+        try {
+            $config = new Config(['app' => ['secret_encryption_key' => base64_encode(random_bytes(32))]]);
+            $workflow = new \MyInvoice\Service\Migration\Myucto\MyuctoImportWorkflow(new MyuctoExportReader(), $this->importer, $config);
+            $jobs = new \MyInvoice\Repository\ImportJobRepository($this->db);
+            $service = new \MyInvoice\Service\Migration\Myucto\MyuctoImportJobService(
+                $jobs, $workflow, new \MyInvoice\Service\Auth\SecretEncryption($config),
+                new \MyInvoice\Service\Migration\Shared\MigrationCompanyLock($this->db),
+                new \MyInvoice\Service\ActivityLogger($this->db), new \Psr\Log\NullLogger(),
+            );
+            $upload = $workflow->init($this->target, $this->actor, 'synthetic-export.zip', filesize($this->archive));
+            $token = $upload['token'];
+            $fp = fopen($this->archive, 'rb');
+            $offset = 0;
+            while (!feof($fp)) {
+                $chunk = fread($fp, $upload['chunk_size']);
+                if ($chunk === '') break;
+                $workflow->chunk($this->target, $this->actor, $token, $offset, (new \Slim\Psr7\Factory\StreamFactory())->createStream($chunk));
+                $offset += strlen($chunk);
+            }
+            fclose($fp);
+            $workflow->complete($this->target, $this->actor, $token);
+            $started = $service->start($this->target, $this->actor, $token, 'synthetic-jobs', $password, false, false);
+            $id = $started['job_id'];
+            $queued = $jobs->find($id, $this->target);
+            self::assertSame('queued', $queued['status']);
+            self::assertStringNotContainsString($password, json_encode($queued));
+            self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM invoices WHERE supplier_id = ' . $this->target)->fetchColumn());
+            $service->run($id);
+            $preview = $service->status($this->target, $this->actor, $id);
+            self::assertSame('completed', $preview['status'], $preview['last_error'] ?? '');
+            self::assertTrue($preview['result']['report']['dry_run']);
+            self::assertArrayNotHasKey('password_enc', $jobs->find($id, $this->target)['params']);
+            self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM invoices WHERE supplier_id = ' . $this->target)->fetchColumn());
+            $applied = $service->start($this->target, $this->actor, $token, 'synthetic-jobs', $password, true, true);
+            $service->run($applied['job_id']);
+            $result = $service->status($this->target, $this->actor, $applied['job_id']);
+            self::assertSame('completed', $result['status'], $result['last_error'] ?? '');
+            self::assertFalse($result['result']['report']['dry_run']);
+            self::assertSame(1, $result['result']['report']['reconciliation']['invoices']);
+            self::assertSame(1, $result['result']['report']['reconciliation']['recurring_invoice_templates']);
+            self::assertCount(2, $service->history($this->target, $this->actor)['runs']);
+            self::assertSame('0', (string) $this->pdo->query('SELECT auto_issue FROM recurring_invoice_templates WHERE supplier_id = ' . $this->target)->fetchColumn());
+        } finally {
+            putenv($oldDataDir === false ? 'MYINVOICE_DATA_DIR' : 'MYINVOICE_DATA_DIR=' . $oldDataDir);
+            $this->pdo->prepare('DELETE FROM import_jobs WHERE supplier_id = ?')->execute([$this->target]);
+        }
+    }
+
     private function makeArchive(): string
     {
         $path = $this->root . '/synthetic-export.zip'; $zip = new ZipArchive(); self::assertTrue($zip->open($path, ZipArchive::CREATE));

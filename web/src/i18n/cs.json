@@ -33398,17 +33398,17 @@
     "rights": "Potřebujete právo zápisu pro import, účetní deník a nastavení firmy.",
     "input": "1. Export a původní instance",
     "file": "ZIP s exportem",
-    "file_hint": "Systém → Kompletní export dat → Úplný obnovitelný archiv, bez omezení období. Nejvýše 64 MiB.",
+    "file_hint": "Úplný obnovitelný ZIP pro jednu firmu, nejvýše 2 GiB. Vybraná data a přílohy: nejvýše 64 MiB / 100 000 řádků.",
     "source": "Název původní instance",
     "source_hint": "Stabilní jedinečný název. Při opakování použijte stejný. Povolené jsou písmena, číslice, tečka, pomlčka a podtržítko.",
     "password": "Heslo ZIPu (volitelné)",
-    "password_hint": "Prázdné pole použije heslo záloh cílové instalace. Zadané heslo se neukládá.",
+    "password_hint": "Pro šifrovaný ZIP. Heslo se workeru předá dočasně zašifrované a po převzetí se odstraní. Prázdné pole použije heslo záloh cílové instance.",
     "check": "Zkontrolovat nanečisto",
     "uploading": "Nahrávání: {percent} %",
     "applying": "Přenáším data do aktuální firmy. Vyčkejte na výsledek.",
     "processing": "Kontroluji data a vazby. Vyčkejte na výsledek.",
     "failed": "Požadavek se nepodařilo dokončit. Opakujte kontrolu nanečisto, která ověří také případný dokončený import.",
-    "invalid_file": "Vyberte neprázdný ZIP o velikosti nejvýše 64 MiB.",
+    "invalid_file": "Vyberte neprázdný ZIP do 2 GiB.",
     "checked": "2. Kontrola prošla",
     "completed": "Import dokončen",
     "company": "Zdroj: {name}, IČO {ic}",
@@ -33474,6 +33474,19 @@
       "stereo_nx_import_map": "Historie importu Stereo NX",
       "client_revenue_cache": "Mezipaměť příjmů kontaktů",
       "units": "Měrné jednotky"
+    },
+    "background_hint": "Kontrola i obnova běží na pozadí. Stránku můžete zavřít a průběh nebo protokol později otevřít v historii běhů.",
+    "history": "Historie běhů",
+    "run_label": "#{id} · {mode}",
+    "mode_import": "Obnova",
+    "mode_dry_run": "Kontrola",
+    "run_status": {
+      "queued": "Čeká",
+      "running": "Běží",
+      "completed": "Hotovo",
+      "completed_with_warnings": "Hotovo s upozorněním",
+      "failed": "Selhalo",
+      "cancelled": "Zrušeno"
     }
   }
 }

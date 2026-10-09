@@ -962,7 +962,8 @@
         "1978_payroll_health_and_discount_exceptions_2026.sql",
         "1979_payroll_pension_requests.sql",
         "1980_payroll_absence_invalid_termination.sql",
-        "1981_client_email_subject_attachment_name.sql"
+        "1981_client_email_subject_attachment_name.sql",
+        "1982_import_jobs_myucto.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -5443,7 +5444,7 @@
                 "result_path": "varchar(255) NULL DEFAULT NULL",
                 "result_size": "bigint(20) unsigned NULL DEFAULT NULL",
                 "skipped_count": "int(10) unsigned NOT NULL DEFAULT 0",
-                "source": "enum('idoklad','fakturoid','pdf_isdoc_inbox','pdf_ai','monthly_export','document_zip_import','document_zip_export','document_folder_import','closing_package','file_import','document_backfill','accounting_setup_analysis','accounting_history_reclassification','automation_recommendations','scan_attach','money_s3_import','pohoda_import','premier_import','stereo_nx_import','money_s3_batch','abra_flexi_import') NOT NULL",
+                "source": "enum('idoklad','fakturoid','pdf_isdoc_inbox','pdf_ai','monthly_export','document_zip_import','document_zip_export','document_folder_import','closing_package','file_import','document_backfill','accounting_setup_analysis','accounting_history_reclassification','automation_recommendations','scan_attach','money_s3_import','pohoda_import','premier_import','stereo_nx_import','money_s3_batch','abra_flexi_import','myucto_import') NOT NULL",
                 "started_at": "timestamp NULL DEFAULT NULL",
                 "status": "enum('queued','running','completed','failed','cancelled','completed_with_warnings') NOT NULL DEFAULT 'queued'",
                 "supplier_id": "int(10) unsigned NOT NULL",

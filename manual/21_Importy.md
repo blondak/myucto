@@ -951,10 +951,19 @@ včetně oblastí mimo rozsah. Potvrďte cílovou firmu a klikněte na
 změna firmy zruší výběr souboru i výsledek kontroly. Potřebujete právo zápisu
 pro import, účetní deník a nastavení firmy.
 
-Průvodce přijímá ZIP do **64 MiB**, nahrává jej po částech a používá stejný
-importér jako CLI. Prázdné heslo použije heslo záloh cílové instalace; zadané
-heslo se neukládá. Během kontroly a importu vyčkejte na výsledek. Pokud se
-odpověď ztratí, zopakujte kontrolu: dokončený import se ověří bez duplicit.
+Průvodce přijímá ZIP do **2 GiB**, nahrává jej po částech a používá stejný
+importér jako CLI. Vybraná data a přílohy mají společný limit **64 MiB / 100 000
+řádků**. Kontrola i obnova běží na pozadí ve společném workeru importů. Stránku
+můžete zavřít: po návratu se připojí k rozpracovanému běhu. V **Historii běhů**
+uvidíte průběh, protokol i výsledek dokončených kontrol a obnov. Nahrané ZIPy
+se čistí po týdnu bez práce s nimi; protokoly zůstávají v historii.
+
+Prázdné heslo použije heslo záloh cílové instalace. Zadané heslo se pro předání
+workeru dočasně uloží zašifrované, vázané na firmu a nahraný ZIP; worker je po
+převzetí odstraní. Po návratu na stránku heslo zadejte znovu, pokud je potřeba.
+Obnova probíhá v jedné transakci, během běhu ji nelze přerušit. Pokud se
+odpověď ztratí, výsledek najdete v historii; opakovaná kontrola ověří dokončený
+import bez duplicit.
 
 Import spouští správce instalace z příkazové řádky. Cílovou firmu vyberte
 pomocí jejího ID; musí již existovat a mít stejné IČO, zemi, výchozí měnu, účetní režim, typ poplatníka, období DPH,
