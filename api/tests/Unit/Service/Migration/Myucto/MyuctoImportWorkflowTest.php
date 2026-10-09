@@ -97,6 +97,22 @@ final class MyuctoImportWorkflowTest extends TestCase
         $this->workflow->run(4, 1, $token, 'different', null, true, true);
     }
 
+    public function testPreviewFromOldProfileCannotAuthorizeQueuedOrDirectApply(): void
+    {
+        $token = $this->upload();
+        $this->importer->expects(self::once())->method('import')->willReturn(['dry_run' => true]);
+        $this->workflow->run(4, 1, $token, 'synthetic', null, false, false);
+        $this->workflow->uploads()->updateState(4, $token, ['checked_profile' => null]);
+        try {
+            $this->workflow->validateStart(4, 1, $token, 'synthetic', true, true);
+            self::fail('Starší kontrola nesmí povolit nový profil.');
+        } catch (MyuctoImportException $e) {
+            self::assertStringContainsString('Nejprve proveďte', $e->getMessage());
+        }
+        $this->expectExceptionMessage('Nejprve proveďte');
+        $this->workflow->run(4, 1, $token, 'synthetic', null, true, true);
+    }
+
     public function testChangedFileIsRejected(): void
     {
         $token = $this->upload();

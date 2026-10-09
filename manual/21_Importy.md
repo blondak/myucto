@@ -984,13 +984,28 @@ obsahuje počty vytvořených, použitých a již převzatých řádků, rekonci
 po tabulkách a `outside_scope` — nepřenesené neprázdné tabulky.
 
 První profil přenáší partnery a jejich účty, měny, kategorie, střediska,
-účtovou osnovu, účetní období, zakázky a výkazy práce, faktury a jejich položky,
+účtovou osnovu, firemní předkontace, účetní období, zakázky a výkazy práce, faktury a jejich položky,
 pravidelné šablony, jednoduchý ceník, pokladnu, bankovní výpisy a transakce,
-úhrady, vypořádání a zápočty, majetek s odpisy a účetní deník. Uložené částky,
+úhrady, vypořádání a zápočty, majetek s odpisy a účetní deník. Přenáší také ruční
+klasifikace bankovních a pokladních pohybů daňové evidence a jejich historii,
+včetně zrušených klasifikací. Uložené částky,
 řádkové součty, daňová data a režim cen včetně DPH se zachovávají. Původní PDF
 přijatých faktur, jejich zdrojové soubory a importovaná PDF vydaných faktur se
 kopírují do nových cest; binární výpisy se obnovují k přemapovaným řádkům.
 PDF vydaných faktur vytvořená aplikací se mohou v cíli vygenerovat znovu.
+
+Firemní předkontace zachovají účty, priority a aktivitu; neúčtují doklady znovu.
+Globální instalační předkontace se nepřenášejí, proto se jejich výchozí pravidla
+mohou mezi instalacemi lišit. Nenulové kódy účtů předkontací musí být obsažené
+v exportované účtové osnově. Existující firemní pravidlo se stejným klíčem
+a prioritou se použije jen při shodném významu, jinak se obnova odmítne.
+Historie klasifikací zachová původní časy a změny kategorií; odkazy na autory
+se stejně jako ostatní uživatelské odkazy převedou na importujícího uživatele.
+Zdrojové uživatelské účty se neobnovují.
+
+Firmu obnovenou starším profilem bez předkontací a klasifikací nelze tímto
+importem dodatečně rozšířit. Pro úplný přenos použijte prázdnou cílovou firmu;
+opakování obnovy provedené současným profilem zůstává bez duplicit.
 
 Mzdy, skladové grafy, DMS, přístupové a komunikační profily ani další tabulky
 mimo tento seznam první profil nepřenáší. Doklad s živou vazbou na nepodporovaný

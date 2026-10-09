@@ -37,12 +37,17 @@ final class MyuctoImporter
             throw new RuntimeException('Import vyžaduje vlastní transakci.');
         }
         $tables = $package['tables'];
+        // Preserve the source history order, including entries with identical timestamps.
+        if (isset($tables['de_movement_classification_history'])) {
+            ksort($tables['de_movement_classification_history'], SORT_NUMERIC);
+        }
         $sourceSupplier = MyuctoExportReader::id($package['manifest']['supplier']['id']);
         $root = $tables['supplier'][$sourceSupplier];
         $schema = SchemaMetadataProvider::load($pdo);
         $this->validateRows($tables, $sourceSupplier, $schema);
+        MyuctoAccountingGraph::validate($tables);
         $sourceKey = 'myucto:' . hash('sha256', $source . ':' . $sourceSupplier);
-        $digest = hash('sha256', serialize([$tables, $package['assets'] ?? []]));
+        $digest = MyuctoImportProfile::VERSION . ':' . hash('sha256', serialize([$tables, $package['assets'] ?? []]));
         $pdo->exec('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
         $pdo->beginTransaction();
         try {
@@ -84,6 +89,9 @@ final class MyuctoImporter
             $stmt = $pdo->prepare("SELECT external_id FROM external_entity_map WHERE supplier_id = ? AND source_key = ? AND entity_type = 'myucto_import'");
             $stmt->execute([$supplierId, $sourceKey]);
             $previous = $stmt->fetchColumn();
+            if ($previous !== false && !str_starts_with($previous, MyuctoImportProfile::VERSION . ':')) {
+                throw new RuntimeException('Firma již byla obnovena starším importním profilem. Doplnění předkontací a klasifikací vyžaduje novou obnovu do prázdné firmy.');
+            }
             if ($previous !== false && $previous !== $digest) {
                 throw new RuntimeException('Tento zdroj již byl importován s jinými daty. Opakovaný import nesmí přepsat existující doklady.');
             }
@@ -167,13 +175,14 @@ final class MyuctoImporter
                         $write = $prepared[$table][$id];
                         $wait = false;
                         $late = [];
-                        foreach ($this->references($table, $schema) as $column => $reference) {
+                        foreach ($this->references($table, $schema, $row) as $column => $reference) {
                             $sourceId = $row[$column] ?? null;
                             if ($sourceId === null || $reference === 'users') {
                                 continue;
                             }
                             if (!isset($ready[$reference][MyuctoExportReader::id($sourceId)])) {
-                                if (($schema['columns'][$table][$column]['IS_NULLABLE'] ?? '') === 'YES') {
+                                if (($schema['columns'][$table][$column]['IS_NULLABLE'] ?? '') === 'YES'
+                                    && $table !== 'de_movement_classification') {
                                     $late[$column] = $write[$column];
                                     $write[$column] = null;
                                 } else {
@@ -231,7 +240,7 @@ final class MyuctoImporter
                     } else {
                         foreach ($expected as $column => $value) {
                             // ON UPDATE timestamps may change when deferred references are attached.
-                            if ($column === 'updated_at') {
+                            if ($column === 'updated_at' && $table !== 'de_movement_classification') {
                                 continue;
                             }
                             if (!$this->same($value, $actual[$column] ?? null, $schema['columns'][$table][$column]['DATA_TYPE'])) {
@@ -305,7 +314,7 @@ final class MyuctoImporter
                         throw new RuntimeException('Neplatná hodnota řádku exportu.');
                     }
                     if ($value !== null && $column !== 'id' && (str_ends_with($column, '_id') || str_ends_with($column, '_by'))
-                        && !isset($this->references($table, $schema)[$column])
+                        && !isset($this->references($table, $schema, $row)[$column])
                         && !in_array($column, MyuctoImportProfile::PRESERVED_IDS, true)
                         && !in_array($column, ['source_id', 'doc_id'], true)) {
                         throw new RuntimeException('Nepodporovaná vazba ' . $table . '.' . $column . '; data se nebudou tiše zahazovat.');
@@ -357,9 +366,12 @@ final class MyuctoImporter
         }
     }
 
-    private function references(string $table, array $schema): array
+    private function references(string $table, array $schema, array $row = []): array
     {
         $refs = MyuctoImportProfile::EXTRA_REFERENCES[$table] ?? [];
+        if ($table === 'de_movement_classification_history') {
+            $refs['source_id'] = MyuctoAccountingGraph::movementTable($row['source_type'] ?? null);
+        }
         if (isset($schema['columns'][$table]['supplier_id'])) {
             $refs['supplier_id'] = 'supplier';
         }
@@ -378,7 +390,7 @@ final class MyuctoImporter
     {
         $out = $row;
         $out['id'] = $map[$table][MyuctoExportReader::id($row['id'])];
-        foreach ($this->references($table, $schema) as $column => $target) {
+        foreach ($this->references($table, $schema, $row) as $column => $target) {
             if (!array_key_exists($column, $row) || $row[$column] === null) {
                 continue;
             }
@@ -495,9 +507,18 @@ final class MyuctoImporter
             'currencies' => ['code', 'decimals'], 'chart_of_accounts' => ['account_code', 'account_type', 'normal_side', 'is_synthetic', 'tax_deductibility', 'is_clearing'],
             'vat_classifications' => ['code', 'direction', 'dphdp3_line', 'dphdp3_line_secondary', 'kh_section', 'vat_rate', 'is_reverse_charge', 'kod_pred_pl', 'kh_regime_code', 'kh_bad_debt', 'archived'],
             'cash_registers' => ['currency_code', 'account_code'], 'supplier_bank_accounts' => ['account_number', 'bank_code', 'currency'],
+            'posting_rules' => ['rule_key', 'priority', 'description', 'debit_account_code', 'credit_account_code', 'is_active'],
             default => ['code', 'label'],
         };
         foreach ($fields as $field) {
+            if ($table === 'posting_rules') {
+                $type = in_array($field, ['priority', 'is_active'], true) ? 'int' : 'varchar';
+                if (!array_key_exists($field, $expected)
+                    || !$this->same($expected[$field], $actual[$field] ?? null, $type)) {
+                    throw new RuntimeException('Cílový číselník má jiný význam: ' . $table . '.' . $field . '.');
+                }
+                continue;
+            }
             if (
                 array_key_exists($field, $expected)
                 && (string) $expected[$field] !== (string) ($actual[$field] ?? null)

@@ -117,13 +117,15 @@ final class MyuctoImportWorkflow
                 $apply
                 && (!$confirmed
                 || ($state['checked_source'] ?? null) !== $source
-                || ($state['checked_sha256'] ?? null) !== $sha)
+                || ($state['checked_sha256'] ?? null) !== $sha
+                || ($state['checked_profile'] ?? null) !== MyuctoImportProfile::VERSION)
             ) {
                 throw new MyuctoImportException('preview_required', 'Nejprve proveďte úspěšnou kontrolu a potvrďte import do aktuální firmy.', [], 409);
             }
             $this->uploads->updateState($supplier, $token, ['sha256' => $sha]);
             if (!$apply) {
-                $this->uploads->updateState($supplier, $token, ['checked_source' => null, 'checked_sha256' => null, 'result' => null]);
+                $this->uploads->updateState($supplier, $token, ['checked_source' => null, 'checked_sha256' => null,
+                    'checked_profile' => null, 'result' => null]);
             }
             try {
                 $package = $this->reader->read($path, $password ?? BackupEncryption::passwordFromConfig($this->config));
@@ -137,7 +139,8 @@ final class MyuctoImportWorkflow
             }
             $root = reset($package['tables']['supplier']);
             $result = ['token' => $token, 'company_name' => $root['company_name'], 'ic' => $root['ic'], 'report' => $report];
-            $this->uploads->updateState($supplier, $token, ['checked_source' => $source, 'checked_sha256' => $sha, 'result' => $result]);
+            $this->uploads->updateState($supplier, $token, ['checked_source' => $source, 'checked_sha256' => $sha,
+                'checked_profile' => MyuctoImportProfile::VERSION, 'result' => $result]);
             return $result;
         } finally {
             $this->uploads->releaseJobLock($lock);
@@ -165,6 +168,7 @@ final class MyuctoImportWorkflow
                 !$confirmed
                 || ($state['checked_source'] ?? null) !== $source
                 || empty($state['sha256'])
+                || ($state['checked_profile'] ?? null) !== MyuctoImportProfile::VERSION
                 || ($state['checked_sha256'] ?? null) !== $state['sha256']
             )
         ) {

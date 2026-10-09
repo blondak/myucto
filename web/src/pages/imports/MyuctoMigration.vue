@@ -167,6 +167,7 @@ onBeforeUnmount(() => { revision++; stopPolling() })
       <RouterLink to="/imports" class="text-sm text-primary-700 hover:underline">{{ t('myucto_import.back') }}</RouterLink>
       <h1 class="mt-2 text-2xl font-semibold text-neutral-900">{{ t('myucto_import.title') }}</h1>
       <p class="mt-1 text-sm text-neutral-500">{{ t('myucto_import.intro') }}</p>
+      <p class="mt-2 text-sm text-neutral-500">{{ t('myucto_import.accounting_hint') }}</p>
     </div>
     <div class="rounded-xl border border-warning-500/30 bg-warning-50 p-4 text-sm text-warning-700">
       {{ t('myucto_import.requirements') }}
