@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Bank\Match;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\BankNoticeConfirmationScope;
+use MyInvoice\Service\Bank\BankNoticeConfirmationService;
+use MyInvoice\Service\Bank\BankNoticeConfirmationException;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
@@ -74,7 +77,7 @@ final class MatchSuggestionService
                 $pdo->exec('SAVEPOINT ' . $savepoint);
             }
             try {
-                $lock = $pdo->prepare('SELECT match_status FROM bank_transactions WHERE id = ? FOR UPDATE');
+                $lock = $pdo->prepare('SELECT match_status FROM bank_transactions bt WHERE id = ? AND ' . BankNoticeConfirmationScope::activeSql('bt') . ' FOR UPDATE');
                 $lock->execute([$transactionId]);
                 if ($lock->fetchColumn() !== 'unmatched') {
                     if ($ownTx) {
@@ -124,7 +127,7 @@ final class MatchSuggestionService
                FROM bank_match_suggestions s
                JOIN bank_transactions bt ON bt.id = s.bank_transaction_id
                JOIN bank_statements bs ON bs.id = bt.statement_id
-              WHERE " . \MyInvoice\Service\Bank\StatementTransactionScope::sql($statementId) . " AND s.supplier_id = ? AND s.status = 'pending'
+              WHERE " . BankNoticeConfirmationScope::activeSql('bt') . " AND " . \MyInvoice\Service\Bank\StatementTransactionScope::sql($statementId) . " AND s.supplier_id = ? AND s.status = 'pending'
                 AND " . \MyInvoice\Repository\BankStatementOwnershipResolver::sqlForColumn('s.supplier_id') . "
               ORDER BY s.created_at, s.id"
         );
@@ -146,6 +149,8 @@ final class MatchSuggestionService
     public function accept(int $suggestionId, int $supplierId, int $userId, int $candidateIndex): array
     {
         $pdo = $this->db->pdo();
+        $confirmations = new BankNoticeConfirmationService($this->db);
+        $noticeLock = $confirmations->lockSupplier($supplierId);
         $pdo->beginTransaction();
         try {
             $stmt = $pdo->prepare('SELECT * FROM bank_match_suggestions WHERE id = ? AND supplier_id = ? FOR UPDATE');
@@ -161,6 +166,11 @@ final class MatchSuggestionService
             if ($tx === null || (int) $tx['supplier_id'] !== $supplierId) throw new MatchSuggestionException('not_found', 'Návrh nebyl nalezen.', 404);
             $txLock = $pdo->prepare('SELECT match_status FROM bank_transactions WHERE id = ? FOR UPDATE');
             $txLock->execute([(int) $suggestion['bank_transaction_id']]);
+            try {
+                $confirmations->assertMutable($supplierId, (int) $suggestion['bank_transaction_id']);
+            } catch (BankNoticeConfirmationException $exception) {
+                throw new MatchSuggestionException($exception->errorCode, $exception->getMessage(), $exception->httpStatus);
+            }
             if ($txLock->fetchColumn() !== 'unmatched') {
                 $pdo->prepare("UPDATE bank_match_suggestions SET status = 'superseded', updated_at = NOW() WHERE id = ?")
                     ->execute([$suggestionId]);
@@ -193,6 +203,8 @@ final class MatchSuggestionService
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
             throw $e;
+        } finally {
+            $confirmations->unlockSupplier($noticeLock);
         }
     }
 

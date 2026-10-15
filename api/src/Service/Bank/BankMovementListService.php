@@ -46,6 +46,8 @@ final class BankMovementListService
             ($page - 1) * $perPage,
             [
                 'scope' => $scope,
+                'show_confirmed' => filter_var($query['show_confirmed'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                'confirmation_state' => $query['confirmation_state'] ?? null,
                 'status' => $matchStatus,
                 // Filtr i řazení podle zápisu v deníku dávají smysl jen v podvojném účetnictví.
                 'posting_status' => $doubleEntry ? ($query['posting_status'] ?? null) : null,
@@ -63,6 +65,9 @@ final class BankMovementListService
             ->headerDimensionsIfEnabled($supplierId, 'bank_transaction', $txIds);
         $items = array_map(function (array $item) use ($supplierId, $postingByTx, $dimensionsByTx, $doubleEntry): array {
             $item['posting'] = $postingByTx[$item['id']] ?? null;
+            if ($item['source'] === 'email_notice') {
+                $item += (new BankNoticeConfirmationService($this->db))->inspectNotice($supplierId, (int) $item['id']);
+            }
             // Uzavřené účetní období existuje jen v podvojném účetnictví.
             $item['period_closed'] = $doubleEntry && $item['period_closed'];
             if ($dimensionsByTx !== null) {

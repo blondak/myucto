@@ -7,6 +7,7 @@ namespace MyInvoice\Repository;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\DbErrorLogger;
 use MyInvoice\Service\Bank\BankTransactionPostingScope;
+use MyInvoice\Service\Bank\BankNoticeConfirmationScope;
 use MyInvoice\Service\Bank\BankTransactionSort;
 use MyInvoice\Service\Bank\NonInvoiceBankTransactionScope;
 use MyInvoice\Service\Bank\PurchasePaymentMatchReader;
@@ -697,6 +698,17 @@ final class BankPostingSuggestionRepository
     {
         $unpostedOnly = ($filters['scope'] ?? 'unposted') !== 'all';
         [$scopeSql, $scopeParams] = $this->transactionScope($supplierId, $unpostedOnly);
+        if (!$unpostedOnly) {
+            $confirmationState = $filters['confirmation_state'] ?? null;
+            if (in_array($confirmationState, ['pending', 'review', 'confirmed'], true)) {
+                $scopeSql .= " AND bt.source = 'email_notice' AND " . BankNoticeConfirmationScope::stateSql($confirmationState, 'bt');
+            } elseif (empty($filters['show_confirmed'])) {
+                $scopeSql .= ' AND NOT ' . BankNoticeConfirmationScope::confirmedSql('bt');
+            }
+        }
+        if (!empty($filters['active_only'])) {
+            $scopeSql .= ' AND ' . BankNoticeConfirmationScope::activeSql('bt');
+        }
 
         $status = $unpostedOnly ? null : ($filters['status'] ?? null);
         if (in_array($status, ['unmatched', 'auto_exact', 'auto_partial', 'manual', 'ignored'], true)) {
@@ -938,7 +950,7 @@ final class BankPostingSuggestionRepository
      */
     private function transactionScope(int $supplierId, bool $unpostedOnly): array
     {
-        $scopeSql = "bt.source = 'statement'
+        $scopeSql = ($unpostedOnly ? "bt.source = 'statement'" : "bt.source IN ('statement','email_notice')") . "
             " . ($unpostedOnly ? "AND bt.match_status <> 'ignored'
             AND NOT " . BankTransactionPostingScope::existsSql($supplierId, 'bt.id') : '') . "
             AND (
@@ -969,7 +981,7 @@ final class BankPostingSuggestionRepository
             "SELECT DISTINCT YEAR(bt.posted_at) y
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
-              WHERE bs.supplier_id = ? AND bt.source = 'statement' AND bt.posted_at IS NOT NULL
+              WHERE bs.supplier_id = ? AND bt.source IN ('statement','email_notice') AND bt.posted_at IS NOT NULL
               ORDER BY y DESC"
         );
         $stmt->execute([$supplierId]);

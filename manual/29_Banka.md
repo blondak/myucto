@@ -277,7 +277,7 @@ Záložka **Bankovní výpisy** ukáže historii. Nad seznamem lze hledat také 
 - podle zákazníka nebo dodavatele, a to přes spárovanou vydanou či přijatou fakturu nebo evidovaný účet obchodního partnera,
 - podle přesné částky bez ohledu na znaménko, takže například `1 500` najde příchozí `1 500` i odchozí `-1 500`.
 
-Filtry prohledávají všechny příchozí i odchozí platby a kombinují se; výsledkem jsou výpisy obsahující alespoň jednu transakci, která splňuje všechna zadaná kritéria. V podvojném účetnictví lze navíc zvolit **Výpisy s nezaúčtovanými pohyby**. Seznam u každého výpisu ukáže jejich počet. Ignorované položky a provizorní e-mailová avíza se do tohoto počtu nezahrnují.
+Filtry prohledávají všechny příchozí i odchozí platby a kombinují se; výsledkem jsou výpisy obsahující alespoň jednu transakci, která splňuje všechna zadaná kritéria. V podvojném účetnictví lze navíc zvolit **Výpisy s nezaúčtovanými pohyby**. Seznam u každého výpisu ukáže jejich počet. Ignorované položky a e-mailová avíza se do tohoto počtu nezahrnují. U měsíčního přehledu avíz seznam ukáže také souhrn stavů **Čeká na výpis**, **Vyžaduje kontrolu** a **Nahrazeno výpisem**; potvrzená avíza lze zobrazit v detailu přehledu.
 
 | Sloupec | Význam |
 |---|---|
@@ -299,17 +299,19 @@ Protistranu lze vyhledat psaním do filtru. Nabídka ukazuje nejvýše 50 shod; 
 - výpis slouží jako doklad o vyplacení mezd,
 - jde o měsíční výpis bankovního API (průběžně se doplňuje z banky).
 
+Měsíční přehled **e-mailových avíz** má zvláštní podmínku: odstranit jej lze až po potvrzení všech avíz konkrétními pohyby výpisu a vyřešení jejich návazností. V detailu se zobrazí, kolik položek čeká na výpis nebo vyžaduje kontrolu a proč; postup kontroly a její bezpečnostní podmínky popisuje [§ 30.11.15](30_Bankovni_ucty.md#301115-potvrzeni-e-mailovych-aviz-bankovnim-vypisem). Odstranění avíz nemaže potvrzující výpisy, jejich pohyby, převzaté úhrady ani zprávy v e-mailové schránce.
+
 Měsíční výpis API skládá pohyby z jednotlivých stažení. Jejich **zdrojové výpisy** najdete v detailu měsíčního výpisu v nabídce **…**. Zdrojový výpis, který přinesl duplicitu (například po opětovném připojení banky), smažete tlačítkem **Smazat zdrojový výpis**. Výpis se odpojí od měsíce, jeho vlastní pohyby se uvolní a smažou a měsíční výpis se přepočítá. Ostatní zdrojové výpisy zůstanou beze změny. Smazání se odmítne, když pohyb dokládá ještě jiný import.
 
 ### 29.13.3 Všechny pohyby
 
-Záložka **Všechny pohyby** je společný přehled transakcí napříč výpisy, účty a roky. Má ji každá firma bez ohledu na způsob vedení účetnictví, stačí nahrané výpisy. Ukazuje i již spárované a ignorované pohyby. U každého řádku vidíte náš zdrojový účet, účet protistrany, výpis a párování. Firma s podvojným účetnictvím navíc vidí stav zaúčtování a protiúčet a na rozdíl od fronty **K zaúčtování** i zaúčtované pohyby. Filtr **Stav** nabízí stejné stavy párování jako detail výpisu. Pod **Nespárováno** jsou pouze pohyby čekající na fakturu; vlastní převody, mzdy a pohyby zaúčtované mimo saldokonto se vynechají. Filtr **Ignorováno** ukáže i dříve ignorované položky.
+Záložka **Všechny pohyby** je společný přehled transakcí napříč výpisy, účty a roky. Má ji každá firma bez ohledu na způsob vedení účetnictví, stačí nahrané výpisy. Ukazuje i již spárované a ignorované pohyby. U každého řádku vidíte náš zdrojový účet, účet protistrany, výpis a párování. Firma s podvojným účetnictvím navíc vidí stav zaúčtování a protiúčet a na rozdíl od fronty **K zaúčtování** i zaúčtované pohyby. Filtr **Stav** nabízí stejné stavy párování jako detail výpisu. Pod **Nespárováno** jsou pouze pohyby čekající na fakturu; vlastní převody, mzdy a pohyby zaúčtované mimo saldokonto se vynechají. Filtr **Ignorováno** ukáže i dříve ignorované položky. Potvrzená e-mailová avíza jsou ve výchozím zobrazení skrytá; v detailu bankovních výpisů je zobrazíte přepínačem **Zobrazit nahrazená avíza**. Jejich historie je pouze pro čtení a odkazuje na potvrzující výpis.
 
 Akce jsou stejné jako v detailu konkrétního výpisu: otevření nebo zrušení párování, rozdělené párování, vytvoření dokladu, přiložení podkladu, vyžádání dokladu, ignorování a v podvojném účetnictví i ruční zaúčtování. Po provedené akci se aktualizuje tentýž řádek; není nutné dohledávat původní výpis. Filtry podle našeho účtu, data, částky, protistrany, párování a v podvojném účetnictví i zaúčtování lze kombinovat.
 
 ### 29.13.4 Výpis s nezpracovanými pohyby
 
-Načtení výpisu probíhá ve dvou krocích. Nejdřív se uloží výpis a jeho pohyby, potom se pohyby zpracují: převezmou párování z e-mailových avíz, spárují se na faktury a zaúčtují. Když druhý krok selže (chyba při párování, zaúčtování nebo výpadek databáze), pohyby zůstanou v evidenci nezpracované. Platí to pro ruční nahrání, stažení z napojené banky, skenování adresáře i PDF výpis z e-mailu. Upozornění viz [§ 29.10](#2910-krok-za-krokem-vypis-s-nezpracovanymi-pohyby).
+Načtení výpisu probíhá ve dvou krocích. Nejdřív se uloží výpis a jeho pohyby, potom se pohyby zpracují: bezpečně spárovatelná avíza potvrdí výpis, platby se spárují na faktury a pohyby se zaúčtují. Starší avíza, která zůstala nevyhodnocená, zkontrolujte v jejich měsíčním přehledu podle [§ 30.11.15](30_Bankovni_ucty.md#301115-potvrzeni-e-mailovych-aviz-bankovnim-vypisem). Když zpracování výpisu selže (chyba při párování, zaúčtování nebo výpadek databáze), pohyby zůstanou v evidenci nezpracované. Platí to pro ruční nahrání, stažení z napojené banky, skenování adresáře i PDF výpis z e-mailu. Upozornění viz [§ 29.10](#2910-krok-za-krokem-vypis-s-nezpracovanymi-pohyby).
 
 ### 29.13.5 Zůstatky z API a export GPC
 

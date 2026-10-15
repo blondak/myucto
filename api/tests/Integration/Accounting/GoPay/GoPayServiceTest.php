@@ -248,7 +248,10 @@ final class GoPayServiceTest extends TestCase
 
         $notice = $this->db->pdo()->prepare('SELECT match_status FROM bank_transactions WHERE id=?');
         $notice->execute([$noticeTransactionId]);
-        self::assertSame('unmatched', $notice->fetchColumn());
+        self::assertSame('ignored', $notice->fetchColumn());
+        $confirmation = $this->db->pdo()->prepare('SELECT state, authoritative_transaction_id FROM bank_notice_confirmations WHERE notice_transaction_id=?');
+        $confirmation->execute([$noticeTransactionId]);
+        self::assertSame(['state'=>'confirmed','authoritative_transaction_id'=>$officialTransactionId], $confirmation->fetch(\PDO::FETCH_ASSOC));
     }
 
     public function testPdfLifecycleAndMonthlyExportPreserveXmlAndAccounting(): void

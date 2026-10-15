@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\BankNoticeConfirmationScope;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Vat\VatStatusService;
 use PDO;
@@ -302,7 +303,7 @@ final class CashJournalRepository
                    LEFT JOIN purchase_invoices bpi ON bpi.id = bexp.any_pi_id AND bpi.supplier_id = {$sid}
                    LEFT JOIN de_movement_classification bcls
                           ON bcls.supplier_id = {$sid} AND bcls.source_type = 'bank' AND bcls.bank_transaction_id = bt.id
-                  WHERE bt.statement_id IN ({$inList})
+                  WHERE " . BankNoticeConfirmationScope::activeSql('bt') . " AND bt.statement_id IN ({$inList})
                     AND NOT (
                           binc.btid IS NULL AND bexp.btid IS NULL AND bt.matched_invoice_id IS NOT NULL
                           AND EXISTS (SELECT 1 FROM invoice_payments y
@@ -543,7 +544,7 @@ final class CashJournalRepository
             $inList = implode(',', array_map('intval', $stmtIds));
             $sources[] = "SELECT COALESCE(NULLIF(bt.currency, ''), 'CZK') AS c, bt.posted_at AS d
                             FROM bank_transactions bt
-                           WHERE bt.statement_id IN ({$inList}) AND bt.posted_at <= '{$toDate}'";
+                           WHERE " . BankNoticeConfirmationScope::activeSql('bt') . " AND bt.statement_id IN ({$inList}) AND bt.posted_at <= '{$toDate}'";
         }
 
         $sql = 'SELECT k.c AS currency, k.d AS `date`,

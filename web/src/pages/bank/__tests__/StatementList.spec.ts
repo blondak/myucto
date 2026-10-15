@@ -13,6 +13,7 @@ import type { BankReconciliationCandidate } from '@/types/bankReconciliation'
 //     ne jen tichá součást jednořádkového souhrnu.
 
 const m = vi.hoisted(() => ({
+  admin: false,
   list: vi.fn(),
   clientsList: vi.fn(),
   clientGet: vi.fn(),
@@ -82,6 +83,7 @@ vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     canWrite: () => true,
     isSuperadmin: false,
+    get isCompanyAdminRole() { return m.admin },
     hasCommercialFeatures: false,
   }),
 }))
@@ -602,4 +604,25 @@ describe('StatementList counterparty lookup', () => {
     wrapper.unmount()
   })
 
+})
+
+
+describe('email notice deletion eligibility', () => {
+  it('blocks deletion despite zero invoice matches when confirmation is incomplete', async () => {
+    m.admin = true
+    m.list.mockResolvedValue({ ...emptyPage(), total: 1, items: [{
+      id: 96, source: 'email_notice', file_name: 'synthetic-notices', account_number: '1000000005',
+      bank_code: '0100', currency: 'CZK', statement_date: '2026-09-01', transaction_count: 4,
+      matched_count: 0, unposted_count: 0, has_file: false, has_pdf: false, can_delete_notices: false,
+      confirmation_summary: { pending: 1, review: 1, confirmed: 2, total: 4 },
+    }] })
+    const wrapper = mount(StatementList, { global: { stubs } })
+    await flushPromises()
+    const deletes = wrapper.findAll('button').filter(button => button.attributes('title') === 'bank.notice_confirmation.delete_blocked' || button.text() === 'bank.delete')
+    expect(deletes).toHaveLength(2)
+    expect(deletes.every(button => button.attributes('disabled') !== undefined)).toBe(true)
+    expect(wrapper.findAll('[data-testid="notice-summary"]')).toHaveLength(2)
+    wrapper.unmount()
+    m.admin = false
+  })
 })

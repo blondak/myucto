@@ -473,7 +473,7 @@ final class PayrollPaymentSettlementRecognizer
                FROM bank_statements bank_statement
                JOIN bank_transactions bank_transaction
                  ON bank_transaction.statement_id = bank_statement.id
-              WHERE bank_statement.supplier_id = ?
+              WHERE ' . \MyInvoice\Service\Bank\BankNoticeConfirmationScope::activeSql('bank_transaction') . ' AND bank_statement.supplier_id = ?
                 AND bank_transaction.amount < 0
                 AND bank_transaction.posted_at >= ?
                 AND bank_transaction.posted_at <= ?

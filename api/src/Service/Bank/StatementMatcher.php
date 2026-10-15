@@ -86,6 +86,7 @@ final class StatementMatcher
         // Jistý převod mezi vlastními účty se spáruje dřív, než by se pohyb nabídl
         // k úhradě dokladu (i bez VS). Nullable kvůli izolovaným konstrukcím v testech.
         private readonly ?\MyInvoice\Service\Accounting\Bank\TransferPairService $ownTransfers = null,
+        private readonly ?BankNoticeConfirmationService $noticeConfirmations = null,
     ) {}
 
     /**
@@ -456,6 +457,13 @@ final class StatementMatcher
         if (!$row) {
             return ['status' => 'unmatched', 'reason' => 'transaction_not_found'];
         }
+        $noticeSupplierId = (int) ($row['statement_supplier_id'] ?? 0);
+        if ($noticeSupplierId > 0 && ($this->noticeConfirmations ?? new BankNoticeConfirmationService($this->db))->blocksMatching($noticeSupplierId, $transactionId)) {
+            return ['status' => $row['source'] === 'email_notice' ? 'ignored' : (string) $row['match_status'], 'reason' => 'notice_confirmation', 'already_recorded' => true, 'notice_replaced' => $row['source'] === 'email_notice', 'requires_review' => $row['source'] !== 'email_notice'];
+        }
+        // Převzetí mohlo přepojit platbu na tento pohyb; načti jeho aktuální metadata.
+        $tx->execute([$transactionId]);
+        $row = $tx->fetch(PDO::FETCH_ASSOC);
         $storedStatus = (string) ($row['match_status'] ?? 'unmatched');
         if (in_array($storedStatus, ['auto_exact', 'manual', 'ignored'], true)) {
             $repaired = $storedStatus === 'auto_exact' && ($this->paymentRepair?->repair($transactionId) ?? false);

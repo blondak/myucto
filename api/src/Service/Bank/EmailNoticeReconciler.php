@@ -91,6 +91,7 @@ final class EmailNoticeReconciler
     public function __construct(
         private readonly Connection $db,
         private readonly GoPayService $gopay,
+        private readonly ?BankNoticeConfirmationService $noticeConfirmations = null,
     ) {}
 
     /**
@@ -108,6 +109,19 @@ final class EmailNoticeReconciler
             return null;
         }
         [$gpc, $supplierId] = $context;
+        $confirmed = ($this->noticeConfirmations ?? new BankNoticeConfirmationService($this->db, $this->gopay))->reconcileAuthoritative($supplierId, $gpcTxId);
+        foreach ($confirmed as $noticeId => $inspection) {
+            if ($inspection['confirmation_state'] !== 'confirmed' || $inspection['authoritative_transaction_id'] !== $gpcTxId) continue;
+            $target = $pdo->prepare('SELECT match_status FROM bank_transactions WHERE id=?');
+            $target->execute([$gpcTxId]);
+            $status = (string) $target->fetchColumn();
+            if (in_array($status, ['auto_exact','auto_partial','manual'], true)) {
+                $source = $pdo->prepare('SELECT statement_id FROM bank_transactions WHERE id=?');
+                $source->execute([$noticeId]);
+                $statementId = (int) $source->fetchColumn();
+                return ['email_tx_id'=>(int)$noticeId, 'email_statement_id'=>$statementId, 'secondary_tx_id'=>(int)$noticeId, 'secondary_statement_id'=>$statementId, 'secondary_source'=>'email_notice', 'match_status'=>$status];
+            }
+        }
 
         $amount      = (float) $gpc['amount'];
         $gpcVsDigits = VariableSymbolNormalizer::digits((string) ($gpc['variable_symbol'] ?? ''));
@@ -131,7 +145,7 @@ final class EmailNoticeReconciler
                     bs.account_number AS stmt_account, bs.bank_code AS stmt_bank, bs.currency AS stmt_currency
                FROM bank_transactions bt
                JOIN bank_statements   bs ON bs.id = bt.statement_id
-              WHERE bt.source IN ('email_notice','idoklad')
+              WHERE bt.source = 'idoklad'
                 AND bs.source IN ('email_notice','idoklad')
                 AND ((bt.source = 'email_notice' AND bs.source = 'email_notice')
                   OR (bt.source = 'idoklad' AND bs.source = 'idoklad'))
@@ -227,83 +241,13 @@ final class EmailNoticeReconciler
      */
     public function supersedeUnmatchedEmailNotice(int $authoritativeTxId): ?int
     {
-        $pdo = $this->db->pdo();
-
-        $context = $this->authoritativeContext($pdo, $authoritativeTxId);
-        if ($context === null) {
-            return null;
+        $context = $this->authoritativeContext($this->db->pdo(), $authoritativeTxId);
+        if ($context === null) return null;
+        [, $supplierId] = $context;
+        foreach (($this->noticeConfirmations ?? new BankNoticeConfirmationService($this->db, $this->gopay))->reconcileAuthoritative($supplierId, $authoritativeTxId) as $noticeId => $inspection) {
+            if ($inspection['confirmation_state'] === 'confirmed' && $inspection['authoritative_transaction_id'] === $authoritativeTxId) return (int) $noticeId;
         }
-        [$authoritative, $supplierId] = $context;
-
-        $amount = (float) $authoritative['amount'];
-        $vsDigits = VariableSymbolNormalizer::digits((string) ($authoritative['variable_symbol'] ?? ''));
-
-        // Období pokryté autoritativním výpisem. Bez něj nemá smysl tvrdit, že tentýž
-        // pohyb ve výpisu JE — a nahrazení je pak tichá ztráta řádku, ne deduplikace.
-        $period = $pdo->prepare(
-            'SELECT MIN(bt.posted_at) AS covered_from, MAX(bt.posted_at) AS covered_to
-               FROM bank_transactions bt WHERE bt.statement_id = ?'
-        );
-        $period->execute([(int) $authoritative['statement_id']]);
-        $covered = $period->fetch(PDO::FETCH_ASSOC) ?: [];
-        if (empty($covered['covered_from']) || empty($covered['covered_to'])) {
-            return null;
-        }
-
-        $unused = implode(' ', array_map(
-            static fn (array $link): string => sprintf(
-                'AND NOT EXISTS (SELECT 1 FROM %s x WHERE x.%s = bt.id)',
-                $link[0],
-                $link[1],
-            ),
-            self::NOTICE_STATE_LINKS,
-        ));
-
-        $cand = $pdo->prepare(
-            "SELECT bt.id, bt.variable_symbol, bt.counterparty_account, bt.currency,
-                    bt.amount, bt.posted_at, bt.statement_id,
-                    bs.account_number AS stmt_account, bs.bank_code AS stmt_bank, bs.currency AS stmt_currency
-               FROM bank_transactions bt
-               JOIN bank_statements   bs ON bs.id = bt.statement_id
-              WHERE bt.source = 'email_notice' AND bs.source = 'email_notice'
-                AND bs.supplier_id = ?
-                AND bt.id <> ?
-                AND bt.match_status = 'unmatched'
-                AND bt.matched_invoice_id IS NULL
-                AND ABS(bt.amount - ?) <= ?
-                AND bt.posted_at BETWEEN DATE_SUB(?, INTERVAL ? DAY) AND DATE_ADD(?, INTERVAL ? DAY)
-                AND bt.posted_at BETWEEN ? AND ?
-                " . $unused
-        );
-        $cand->execute([
-            $supplierId,
-            $authoritativeTxId,
-            number_format($amount, 2, '.', ''),
-            self::AMOUNT_TOLERANCE,
-            $authoritative['posted_at'], self::DATE_WINDOW_DAYS,
-            $authoritative['posted_at'], self::DATE_WINDOW_DAYS,
-            $covered['covered_from'], $covered['covered_to'],
-        ]);
-
-        $matches = [];
-        foreach ($cand->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
-            if (!$this->sameOwnAccount($authoritative, $row) || !$this->sameCurrency($authoritative, $row)) {
-                continue;
-            }
-            if (self::twinIdentity($authoritative, $row, $vsDigits) === null) {
-                continue;
-            }
-            $matches[] = (int) $row['id'];
-        }
-        if (count($matches) !== 1) {
-            return null;
-        }
-
-        $pdo->prepare(
-            "UPDATE bank_transactions SET match_status = 'ignored', ignore_note = ? WHERE id = ?"
-        )->execute([self::SUPERSEDED_NOTE, $matches[0]]);
-
-        return $matches[0];
+        return null;
     }
 
     /**

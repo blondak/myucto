@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Tests\Support\BankSqlitePdo;
 use PDO;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -34,26 +35,17 @@ final class BankIgnoreNoteTest extends TestCase
     #[DataProvider('notes')]
     public function testIgnorePersistsAndReturnsValidatedNote(mixed $note, ?string $expected, int $status): void
     {
-        $sqlite = new PDO('sqlite::memory:');
+        $sqlite = new BankSqlitePdo();
         $sqlite->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $sqlite->exec('CREATE TABLE bank_transactions (id INTEGER, statement_id INTEGER, match_status TEXT, matched_invoice_id INTEGER, ignore_note TEXT, ignore_origin TEXT)');
         $sqlite->exec("INSERT INTO bank_transactions VALUES (1, 2, 'unmatched', NULL, NULL, NULL)");
+        $sqlite->exec('CREATE TABLE bank_notice_confirmations (supplier_id INTEGER, notice_transaction_id INTEGER, state TEXT, reason TEXT)');
         $sqlite->exec('CREATE TABLE bank_statements (id INTEGER, matched_count INTEGER)');
         $sqlite->exec('INSERT INTO bank_statements VALUES (2, 0)');
         $sqlite->exec('CREATE TABLE activity_log (supplier_id, user_id, action, entity_type, entity_id, payload, ip, user_agent)');
 
         // MariaDB ownership SQL is covered separately; all writes execute against SQLite.
-        $scope = $this->createStub(\PDOStatement::class);
-        $scope->method('execute')->willReturn(true);
-        $scope->method('fetchColumn')->willReturn(1);
-        $pdo = $this->createStub(PDO::class);
-        $pdo->method('prepare')->willReturnCallback(static function (string $sql) use ($scope, $sqlite) {
-            return str_contains($sql, 'CASE WHEN bs.supplier_id') ? $scope : $sqlite->prepare($sql);
-        });
-        $pdo->method('beginTransaction')->willReturnCallback(fn () => $sqlite->beginTransaction());
-        $pdo->method('commit')->willReturnCallback(fn () => $sqlite->commit());
-        $pdo->method('rollBack')->willReturnCallback(fn () => $sqlite->rollBack());
-        $pdo->method('inTransaction')->willReturnCallback(fn () => $sqlite->inTransaction());
+        $pdo = $this->scopedPdo($sqlite);
         $db = $this->createStub(Connection::class);
         $db->method('pdo')->willReturn($pdo);
         $reflection = new \ReflectionClass(BankStatementAction::class);
@@ -101,25 +93,16 @@ final class BankIgnoreNoteTest extends TestCase
     #[DataProvider('reignoreBodies')]
     public function testReignoreWithoutNoteKeyKeepsStoredNote(array $body, ?string $expected): void
     {
-        $sqlite = new PDO('sqlite::memory:');
+        $sqlite = new BankSqlitePdo();
         $sqlite->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $sqlite->exec('CREATE TABLE bank_transactions (id INTEGER, statement_id INTEGER, match_status TEXT, matched_invoice_id INTEGER, ignore_note TEXT, ignore_origin TEXT)');
         $sqlite->exec("INSERT INTO bank_transactions VALUES (1, 2, 'ignored', NULL, 'Uložená poznámka', 'manual')");
+        $sqlite->exec('CREATE TABLE bank_notice_confirmations (supplier_id INTEGER, notice_transaction_id INTEGER, state TEXT, reason TEXT)');
         $sqlite->exec('CREATE TABLE bank_statements (id INTEGER, matched_count INTEGER)');
         $sqlite->exec('INSERT INTO bank_statements VALUES (2, 0)');
         $sqlite->exec('CREATE TABLE activity_log (supplier_id, user_id, action, entity_type, entity_id, payload, ip, user_agent)');
 
-        $scope = $this->createStub(\PDOStatement::class);
-        $scope->method('execute')->willReturn(true);
-        $scope->method('fetchColumn')->willReturn(1);
-        $pdo = $this->createStub(PDO::class);
-        $pdo->method('prepare')->willReturnCallback(static function (string $sql) use ($scope, $sqlite) {
-            return str_contains($sql, 'CASE WHEN bs.supplier_id') ? $scope : $sqlite->prepare($sql);
-        });
-        $pdo->method('beginTransaction')->willReturnCallback(fn () => $sqlite->beginTransaction());
-        $pdo->method('commit')->willReturnCallback(fn () => $sqlite->commit());
-        $pdo->method('rollBack')->willReturnCallback(fn () => $sqlite->rollBack());
-        $pdo->method('inTransaction')->willReturnCallback(fn () => $sqlite->inTransaction());
+        $pdo = $this->scopedPdo($sqlite);
         $db = $this->createStub(Connection::class);
         $db->method('pdo')->willReturn($pdo);
         $reflection = new \ReflectionClass(BankStatementAction::class);
@@ -150,10 +133,11 @@ final class BankIgnoreNoteTest extends TestCase
     #[DataProvider('unmatchCases')]
     public function testUnmatchClearsPersistedIgnoreNote(bool $closed): void
     {
-        $sqlite = new PDO('sqlite::memory:');
+        $sqlite = new BankSqlitePdo();
         $sqlite->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $sqlite->exec('CREATE TABLE bank_transactions (id INTEGER, statement_id INTEGER, match_status TEXT, matched_invoice_id INTEGER, ignore_note TEXT, posted_at TEXT, matched_at TEXT, matched_by INTEGER, ignore_origin TEXT)');
         $sqlite->exec("INSERT INTO bank_transactions VALUES (1, 2, 'ignored', NULL, 'Test note', '2099-01-01', NULL, NULL, 'manual')");
+        $sqlite->exec('CREATE TABLE bank_notice_confirmations (supplier_id INTEGER, notice_transaction_id INTEGER, state TEXT, reason TEXT)');
         $sqlite->exec('CREATE TABLE bank_statements (id INTEGER, matched_count INTEGER)');
         $sqlite->exec('INSERT INTO bank_statements VALUES (2, 0)');
         $sqlite->exec('CREATE TABLE activity_log (supplier_id, user_id, action, entity_type, entity_id, payload, ip, user_agent)');
@@ -163,17 +147,7 @@ final class BankIgnoreNoteTest extends TestCase
         $sqlite->exec('CREATE TABLE payment_matches (bank_transaction_id INTEGER, supplier_id INTEGER, purchase_invoice_id INTEGER, invoice_id INTEGER)');
 
         // MariaDB ownership SQL is covered separately; all writes execute against SQLite.
-        $scope = $this->createStub(\PDOStatement::class);
-        $scope->method('execute')->willReturn(true);
-        $scope->method('fetchColumn')->willReturn(1);
-        $pdo = $this->createStub(PDO::class);
-        $pdo->method('prepare')->willReturnCallback(static function (string $sql) use ($scope, $sqlite) {
-            return str_contains($sql, 'CASE WHEN bs.supplier_id') ? $scope : $sqlite->prepare($sql);
-        });
-        $pdo->method('beginTransaction')->willReturnCallback(fn () => $sqlite->beginTransaction());
-        $pdo->method('commit')->willReturnCallback(fn () => $sqlite->commit());
-        $pdo->method('rollBack')->willReturnCallback(fn () => $sqlite->rollBack());
-        $pdo->method('inTransaction')->willReturnCallback(fn () => $sqlite->inTransaction());
+        $pdo = $this->scopedPdo($sqlite);
         $db = $this->createStub(Connection::class);
         $db->method('pdo')->willReturn($pdo);
         $reflection = new \ReflectionClass(BankStatementAction::class);
@@ -207,6 +181,31 @@ final class BankIgnoreNoteTest extends TestCase
         $row = $sqlite->query('SELECT match_status, ignore_note FROM bank_transactions')->fetch(PDO::FETCH_ASSOC);
         self::assertSame($closed ? 'ignored' : 'unmatched', $row['match_status']);
         self::assertSame($closed ? 'Test note' : null, $row['ignore_note']);
+    }
+
+    /** Ownership resolver SQL is covered on MariaDB; mutation SQL runs on real fixture rows. */
+    private function scopedPdo(BankSqlitePdo $sqlite): PDO
+    {
+        $scope = $this->createStub(\PDOStatement::class);
+        $scope->method('execute')->willReturn(true);
+        $scope->method('fetchColumn')->willReturn(1);
+        $pdo = $this->createStub(PDO::class);
+        $pdo->method('prepare')->willReturnCallback(static function (string $sql) use ($scope, $sqlite) {
+            if (str_contains($sql, 'CASE WHEN bs.supplier_id')) {
+                if (str_contains($sql, 'SELECT bt.id, bt.statement_id, bt.matched_invoice_id')) {
+                    return $sqlite->prepare('SELECT id, statement_id, matched_invoice_id, posted_at, match_status FROM bank_transactions WHERE id=? AND ?=?');
+                }
+                return $scope;
+            }
+            return $sqlite->prepare($sql);
+        });
+        $pdo->method('query')->willReturnCallback(fn (string $sql) => $sqlite->query($sql));
+        $pdo->method('exec')->willReturnCallback(fn (string $sql) => $sqlite->exec($sql));
+        $pdo->method('beginTransaction')->willReturnCallback(fn () => $sqlite->beginTransaction());
+        $pdo->method('commit')->willReturnCallback(fn () => $sqlite->commit());
+        $pdo->method('rollBack')->willReturnCallback(fn () => $sqlite->rollBack());
+        $pdo->method('inTransaction')->willReturnCallback(fn () => $sqlite->inTransaction());
+        return $pdo;
     }
 
     public function testMovementListSerializesIgnoreNote(): void

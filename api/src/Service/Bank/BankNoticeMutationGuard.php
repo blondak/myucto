@@ -1,0 +1,70 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Bank;
+
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\NamedLockName;
+use PDO;
+
+/** Zápis nové vazby sdílí zámek s potvrzením avíza a jeho smazáním. */
+final class BankNoticeMutationGuard
+{
+    private static int $savepointSequence = 0;
+
+    public function __construct(private readonly Connection|PDO $db) {}
+
+    /**
+     * @template T
+     * @param callable():T $mutation
+     * @return T
+     */
+    public function mutate(int $supplierId, ?int $transactionId, callable $mutation): mixed
+    {
+        if ($transactionId === null || $transactionId <= 0) {
+            return $mutation();
+        }
+        if ($supplierId <= 0) throw new BankNoticeConfirmationException('unknown_supplier', 'Chybí firma bankovního pohybu.');
+        $pdo = $this->db instanceof Connection ? $this->db->pdo() : $this->db;
+        $lock = NamedLockName::compose('bank-import', (string) $pdo->query('SELECT DATABASE()')->fetchColumn(), $supplierId);
+        $statement = $pdo->prepare('SELECT GET_LOCK(?, 30)');
+        $statement->execute([$lock]);
+        if ((int) $statement->fetchColumn() !== 1) throw new BankNoticeConfirmationException('bank_busy', 'Probíhá jiná změna bankovních pohybů. Opakujte akci později.');
+        $ownsTransaction = !$pdo->inTransaction();
+        $savepoint = 'bank_notice_mutation_' . ++self::$savepointSequence;
+        try {
+            if ($ownsTransaction) $pdo->beginTransaction();
+            else $pdo->exec('SAVEPOINT ' . $savepoint);
+            // Zůstává zamčené i po návratu do transakce volajícího.
+            $statement = $pdo->prepare('SELECT id FROM bank_transactions WHERE id = ? FOR UPDATE');
+            $statement->execute([$transactionId]);
+            if ($statement->fetchColumn() === false) throw new BankNoticeConfirmationException('transaction_not_found', 'Bankovní pohyb nebyl nalezen.', 404);
+            // Vlastní locking read vidí i potvrzení commitnuté po snapshotu volajícího.
+            $statement = $pdo->prepare('SELECT state, reason FROM bank_notice_confirmations WHERE notice_transaction_id = ? FOR UPDATE');
+            $statement->execute([$transactionId]);
+            $confirmation = $statement->fetch(PDO::FETCH_ASSOC);
+            if ($confirmation !== false && ($confirmation['state'] === 'confirmed' || $confirmation['reason'] === 'authoritative_removed')) {
+                throw new BankNoticeConfirmationException('notice_read_only', 'Nahrazené avízo nelze samostatně měnit.');
+            }
+            $result = $mutation();
+            if ($ownsTransaction) $pdo->commit();
+            else $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
+            return $result;
+        } catch (\Throwable $exception) {
+            // MariaDB snapshot isolation může novější řádek odmítnout a zrušit celou
+            // transakci (1020); deadlock dělá totéž. Původní savepoint už neexistuje.
+            $transactionConflict = $exception instanceof \PDOException
+                && in_array((int) ($exception->errorInfo[1] ?? 0), [1020, 1213], true);
+            if (($ownsTransaction || $transactionConflict) && $pdo->inTransaction()) $pdo->rollBack();
+            elseif (!$ownsTransaction && $pdo->inTransaction()) {
+                $pdo->exec('ROLLBACK TO SAVEPOINT ' . $savepoint);
+                $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
+            }
+            if ($transactionConflict) throw new BankNoticeConfirmationException('bank_busy', 'Stav bankovního pohybu se mezitím změnil. Opakujte akci.');
+            throw $exception;
+        } finally {
+            $pdo->prepare('SELECT RELEASE_LOCK(?)')->execute([$lock]);
+        }
+    }
+}

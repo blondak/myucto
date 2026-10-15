@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { apiErrorMessage } from '@/api/errors'
+import { isBankNoticeReadOnly } from '@/utils/bankNotice'
 import {
   bankApi,
   type BankTransaction,
@@ -246,6 +247,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   })
 
   function startMatch(tx: BankTransaction) {
+    if (isBankNoticeReadOnly(tx)) return
     if (anchorSearchTimer) clearTimeout(anchorSearchTimer)
     anchorSearchVersion++
     anchorLoading.value = false
@@ -518,6 +520,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   const creatingPi = ref(false)
 
   function openCreate(tx: BankTransaction) {
+    if (isBankNoticeReadOnly(tx)) return
     createTx.value = tx
     createVendorId.value = null
   }
@@ -552,6 +555,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   const requestDocDeadline = ref('')
   const requestingDoc = ref(false)
   function openRequestDoc(tx: BankTransaction) {
+    if (isBankNoticeReadOnly(tx)) return
     requestDocTx.value = tx
     requestDocDeadline.value = ''
   }
@@ -594,6 +598,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   const ignoreError = ref('')
 
   function ignoreTx(tx: BankTransaction) {
+    if (isBankNoticeReadOnly(tx)) return
     ignoreTarget.value = tx
     ignoreNote.value = tx.ignore_note ?? ''
     ignoreError.value = ''
@@ -629,6 +634,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   const unmatchError = ref('')
 
   function unmatchTx(tx: BankTransaction) {
+    if (isBankNoticeReadOnly(tx)) return
     unmatchTarget.value = tx
     unmatchError.value = ''
   }

@@ -151,6 +151,8 @@ final class RoutePermissionMap
         ['GET', '#^/api/projects(/|$)#', 'projects', AccessLevel::READ],
         ['*', '#^/api/projects(/|$)#', 'projects', AccessLevel::WRITE],
 
+        ['POST', '#^/api/bank-statements/[0-9]+/notice-confirmations$#', 'bank.match', AccessLevel::WRITE],
+        ['POST', '#^/api/bank-transactions/[0-9]+/notice-confirmation$#', 'bank.match', AccessLevel::WRITE],
         ['*', '#^/api/bank-transactions/[0-9]+/match(?:-document)?(/|$)#', 'bank.match', AccessLevel::WRITE],
         ['*', '#^/api/bank-match-suggestions/[0-9]+/(accept|reject)$#', 'bank.match', AccessLevel::WRITE],
         ['POST', '#^/api/bank-transactions/[0-9]+/post$#', 'bank.post', AccessLevel::WRITE],

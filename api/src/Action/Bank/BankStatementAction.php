@@ -16,6 +16,9 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Service\Bank\GpcParser;
+use MyInvoice\Service\Bank\BankNoticeConfirmationService;
+use MyInvoice\Service\Bank\BankNoticeConfirmationScope;
+use MyInvoice\Service\Bank\BankNoticeConfirmationException;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Bank\FxPaymentSettlement;
 use MyInvoice\Service\Bank\PurchasePaymentMatchReader;
@@ -125,7 +128,44 @@ final class BankStatementAction
         // Výpis k účtu jiné firmy, kam smí uživatel importovat banku, se naimportuje tam.
         private readonly \MyInvoice\Security\CrossSupplierAuthorization $crossSupplier,
         private readonly ?SubsetSumSolver $subsetSolver = null,
+        private readonly ?BankNoticeConfirmationService $noticeConfirmations = null,
     ) {}
+
+    /** Počet již odstraněných avíz, která dokládají vlastní pohyby tohoto výpisu. */
+    private function deletedNoticeCount(int $supplierId, int $statementId): int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM bank_notice_confirmations c
+            JOIN bank_transactions bt ON bt.id = c.authoritative_transaction_id
+            WHERE c.supplier_id = ? AND c.deleted_at IS NOT NULL AND bt.statement_id = ?');
+        $stmt->execute([$supplierId, $statementId]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    private function confirmations(): BankNoticeConfirmationService
+    {
+        return $this->noticeConfirmations ?? new BankNoticeConfirmationService($this->db);
+    }
+
+    /** Stejný tenantový zámek jako import a potvrzení, ještě před zahájením mutace. */
+    private function withNoticeLock(Request $request, Response $response, callable $operation, ?int $transactionId = null): Response
+    {
+        $supplierId = SupplierGuard::currentId($request);
+        if ($supplierId <= 0) return Json::error($response, 'no_supplier', 'Není zvolena firma.', 400);
+        $service = $this->confirmations();
+        $lock = null;
+        try {
+            $lock = $service->lockSupplier($supplierId);
+            if ($transactionId !== null && $this->ownership->transactionOwned($transactionId, $supplierId)) {
+                return (new \MyInvoice\Service\Bank\BankNoticeMutationGuard($this->db))
+                    ->mutate($supplierId, $transactionId, $operation);
+            }
+            return $operation();
+        } catch (BankNoticeConfirmationException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } finally {
+            if ($lock !== null) $service->unlockSupplier($lock);
+        }
+    }
 
     /**
      * Atomický blok, který respektuje otevřenou transakci volajícího (savepoint).
@@ -790,6 +830,9 @@ final class BankStatementAction
         // Filtr WHERE fragment + parametry (sdílený mezi COUNT a výběrem řádků). Účet
         // porovnáváme normalizovaně (stejně jako scope), ať padding/lomítko nevadí.
         $filterSql = ' AND ' . \MyInvoice\Service\Bank\BankApiMonthlyStatements::visibleSql();
+        if (!filter_var($qp['show_confirmed'] ?? $filter['show_confirmed'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+            $filterSql .= ' AND ' . BankNoticeConfirmationScope::visibleStatementSql();
+        }
         $filterParams = [];
         if ($year !== null)  { $filterSql .= ' AND YEAR(bs.statement_date) = ?';  $filterParams[] = $year; }
         if ($month !== null) { $filterSql .= ' AND MONTH(bs.statement_date) = ?'; $filterParams[] = $month; }
@@ -943,6 +986,7 @@ final class BankStatementAction
         foreach ($rows as &$r) {
             $r['id'] = (int) $r['id'];
             $r['api_month'] = isset($monthIds[$r['id']]);
+            $r['deleted_notice_confirmations'] = $this->deletedNoticeCount($sid, $r['id']);
             $r['transaction_count'] = (int) $r['transaction_count'];
             $r['matched_count'] = (int) $r['matched_count'];
             $r['non_invoice_count'] = (int) $r['non_invoice_count'];
@@ -955,6 +999,11 @@ final class BankStatementAction
             $r['has_file'] = (bool) $r['has_file'];
             $r['has_pdf'] = (bool) $r['has_pdf'];
             $r['balance_calculation'] = $balanceSummaries[$r['id']] ?? null;
+            if ($r['source'] === 'email_notice') {
+                $inspection = $this->confirmations()->inspectStatement($sid, $r['id']);
+                unset($inspection['items']);
+                $r = array_merge($r, $inspection);
+            }
         }
         unset($r);
 
@@ -1126,6 +1175,7 @@ final class BankStatementAction
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
               WHERE bs.source = 'email_notice'
+                AND " . BankNoticeConfirmationScope::activeSql() . "
                 AND $scopeSql
                 AND bt.balance IS NOT NULL
                 AND TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''), '[^0-9]', ''))
@@ -1365,6 +1415,12 @@ final class BankStatementAction
      */
     public function delete(Request $request, Response $response, array $args): Response
     {
+        return $this->withNoticeLock($request, $response,
+            fn (): Response => $this->deleteLocked($request, $response, $args));
+    }
+
+    private function deleteLocked(Request $request, Response $response, array $args): Response
+    {
         $id = (int) ($args['id'] ?? 0);
         $sid = SupplierGuard::currentId($request);
         if ($sid <= 0 || $id <= 0) {
@@ -1390,6 +1446,9 @@ final class BankStatementAction
         $ownedRow = $owned->fetch(\PDO::FETCH_ASSOC);
         if ($ownedRow === false) {
             return Json::error($response, 'not_found', 'Výpis nenalezen.', 404);
+        }
+        if ($ownedRow['source'] === 'email_notice' && !RequestAuthorization::isCompanyAdmin($request)) {
+            return Json::error($response, 'forbidden', 'Pouze správce firmy smí trvale mazat avíza.', 403);
         }
         $fileName = (string) $ownedRow['file_name'];
 
@@ -1442,6 +1501,9 @@ final class BankStatementAction
         $savepoint = 'bank_statement_delete';
         $own = self::beginAtomic($pdo, $savepoint);
         try {
+            if ($ownedRow['source'] === 'email_notice') {
+                $this->confirmations()->prepareNoticeDeletion($sid, $id, $userId ?: null);
+            }
             $months = [];
             if ($isApiEvidence) {
                 $months = $monthly->detachEvidence($id, $sid);
@@ -1451,6 +1513,10 @@ final class BankStatementAction
                     return Json::error($response, $conflict->code, $conflict->message, 409, $conflict->toErrorExtra());
                 }
             }
+            $deletedNoticeConfirmations = $this->deletedNoticeCount($sid, $id);
+            $deleting = $pdo->prepare('SELECT id FROM bank_transactions WHERE statement_id = ? ORDER BY id FOR UPDATE');
+            $deleting->execute([$id]);
+            $this->confirmations()->invalidateAuthoritativeTransactions($sid, array_map('intval', $deleting->fetchAll(\PDO::FETCH_COLUMN)), $userId ?: null);
             $released = 0;
             foreach ($this->release->releasableTransactionIds($sid, $id) as $txId) {
                 $this->release->release($sid, $txId, BankTransactionReleaseService::MODE_DELETE, $userId ?: null);
@@ -1461,6 +1527,7 @@ final class BankStatementAction
             $this->logger->log('bank.statement_deleted', $userId ?: null, 'bank_statement', $id, [
                 'file_name'             => $fileName,
                 'released_transactions' => $released,
+                'deleted_notice_confirmations' => $deletedNoticeConfirmations,
                 'api_months'            => $months,
             ], $ip, $request->getHeaderLine('User-Agent'), $sid);
             self::commitAtomic($pdo, $own, $savepoint);
@@ -1481,7 +1548,7 @@ final class BankStatementAction
             throw $e;
         }
 
-        return Json::ok($response, ['deleted' => true, 'released_transactions' => $released]);
+        return Json::ok($response, ['deleted' => true, 'released_transactions' => $released, 'deleted_notice_confirmations' => $deletedNoticeConfirmations]);
     }
 
     /**
@@ -1744,6 +1811,12 @@ final class BankStatementAction
         // Filtr dle stavu spárování (server-side — viz FE statusFilter) + stránkování.
         // total (transactions_meta.total) je COUNT přes STEJNÝ filtr, bez LIMIT.
         $txWhere = StatementTransactionScope::sql($id);
+        $confirmationFilter = (string) ($qp['confirmation_state'] ?? '');
+        if (in_array($confirmationFilter, ['pending', 'review', 'confirmed'], true)) {
+            $txWhere .= " AND bt.source = 'email_notice' AND " . BankNoticeConfirmationScope::stateSql($confirmationFilter);
+        } elseif (!filter_var($qp['show_confirmed'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+            $txWhere .= ' AND NOT ' . BankNoticeConfirmationScope::confirmedSql();
+        }
         $txParams = [];
         if ($statusFilter !== '') {
             $txWhere .= ' AND bt.match_status = ?';
@@ -1856,12 +1929,26 @@ final class BankStatementAction
         }
         unset($t);
         $s['id'] = (int) $s['id'];
+        $s['deleted_notice_confirmations'] = $this->deletedNoticeCount($sid, $id);
         $s['has_file'] = (bool) ($s['has_file'] ?? false);
         $s['has_pdf'] = (bool) ($s['has_pdf'] ?? false);
         $monthlyEvidence = new \MyInvoice\Service\Bank\BankApiMonthlyStatements($this->db->pdo());
         $s['evidence_pdfs'] = $monthlyEvidence->evidencePdfs($id, $sid);
         $s['evidence_statements'] = $monthlyEvidence->evidenceStatements($id, $sid);
         $s['api_evidence'] = $monthlyEvidence->isEvidence($id);
+        if ($s['source'] === 'email_notice') {
+            $inspection = $this->confirmations()->inspectStatement($sid, $id);
+            $byId = [];
+            foreach ($inspection['items'] as $item) $byId[(int) $item['id']] = $item;
+            foreach ($transactions as &$transaction) {
+                $transaction = array_merge($transaction, array_intersect_key($byId[$transaction['id']] ?? [], array_flip([
+                    'confirmation_state', 'confirmation_reason', 'authoritative_transaction_id',
+                    'authoritative_statement_id', 'authoritative_statement_ids', 'candidates', 'blockers',
+                ])));
+            }
+            unset($transaction, $inspection['items']);
+            $s = array_merge($s, $inspection);
+        }
         $s['transactions'] = $transactions;
         $summary = $this->db->pdo()->query(
             "SELECT COUNT(*) AS total, SUM(bt.match_status IN ('auto_exact', 'auto_partial', 'manual')) AS matched
@@ -1903,14 +1990,14 @@ final class BankStatementAction
         $sums = $pdo->prepare(
             "SELECT COALESCE(SUM(CASE WHEN amount >= 0 THEN amount ELSE 0 END), 0) AS credit,
                     COALESCE(SUM(CASE WHEN amount <  0 THEN -amount ELSE 0 END), 0) AS debit
-               FROM bank_transactions WHERE statement_id = ?"
+               FROM bank_transactions bt WHERE statement_id = ? AND " . BankNoticeConfirmationScope::activeSql()
         );
         $sums->execute([$statementId]);
         $sumRow = $sums->fetch(\PDO::FETCH_ASSOC) ?: ['credit' => 0, 'debit' => 0];
 
         $last = $pdo->prepare(
-            "SELECT balance, posted_at FROM bank_transactions
-              WHERE statement_id = ? AND balance IS NOT NULL
+            "SELECT balance, posted_at FROM bank_transactions bt
+              WHERE statement_id = ? AND balance IS NOT NULL AND " . BankNoticeConfirmationScope::activeSql() . "
            ORDER BY posted_at DESC, id DESC LIMIT 1"
         );
         $last->execute([$statementId]);
@@ -1960,6 +2047,12 @@ final class BankStatementAction
      * automatické párování ani placení — jen draft k revizi + nahrání PDF.
      */
     public function createPurchaseInvoice(Request $request, Response $response, array $args): Response
+    {
+        return $this->withNoticeLock($request, $response,
+            fn (): Response => $this->createPurchaseInvoiceLocked($request, $response, $args), (int) ($args['id'] ?? 0));
+    }
+
+    private function createPurchaseInvoiceLocked(Request $request, Response $response, array $args): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         if (!RequestAuthorization::allows($request, 'purchase_invoices.create', AccessLevel::WRITE)) {
@@ -2057,7 +2150,8 @@ final class BankStatementAction
 
         // Spáruj platbu na nově vzniklou přijatou fakturu (manuální, user-initiated klikem).
         // Draft fakturu neoznačujeme jako paid — to udělá uživatel po finalizaci; jen vazba.
-        $pdo->beginTransaction();
+        $savepoint = 'bank_notice_create_purchase';
+        $own = self::beginAtomic($pdo, $savepoint);
         try {
             $pdo->prepare(
                 "INSERT INTO payment_matches
@@ -2067,9 +2161,9 @@ final class BankStatementAction
             $pdo->prepare(
                 "UPDATE bank_transactions SET match_status = 'manual', matched_at = NOW(), matched_by = ? WHERE id = ?"
             )->execute([$userId ?: null, $txId]);
-            $pdo->commit();
+            self::commitAtomic($pdo, $own, $savepoint);
         } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
+            if ($pdo->inTransaction()) self::rollbackAtomic($pdo, $own, $savepoint);
             throw $e;
         }
         $this->clientBankAccounts->captureForPurchaseInvoiceTransaction($piId, $txId);
@@ -2093,6 +2187,12 @@ final class BankStatementAction
      * 2026-07) — popis se předvyplní z částky/data transakce, účetní ho může upravit.
      */
     public function createDocumentRequest(Request $request, Response $response, array $args): Response
+    {
+        return $this->withNoticeLock($request, $response,
+            fn (): Response => $this->createDocumentRequestLocked($request, $response, $args), (int) ($args['id'] ?? 0));
+    }
+
+    private function createDocumentRequestLocked(Request $request, Response $response, array $args): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         if (!RequestAuthorization::allows($request, 'documents.requests', AccessLevel::WRITE)) {
@@ -3027,6 +3127,12 @@ final class BankStatementAction
     }
 
     public function manualMatch(Request $request, Response $response, array $args): Response
+    {
+        return $this->withNoticeLock($request, $response,
+            fn (): Response => $this->manualMatchLocked($request, $response, $args), (int) ($args['id'] ?? 0));
+    }
+
+    private function manualMatchLocked(Request $request, Response $response, array $args): Response
     {
         $txId = (int) ($args['id'] ?? 0);
         if (!$this->txBelongsToCurrentSupplier($request, $txId)) {
@@ -4222,6 +4328,12 @@ final class BankStatementAction
 
     public function unmatch(Request $request, Response $response, array $args): Response
     {
+        return $this->withNoticeLock($request, $response,
+            fn (): Response => $this->unmatchLocked($request, $response, $args), (int) ($args['id'] ?? 0));
+    }
+
+    private function unmatchLocked(Request $request, Response $response, array $args): Response
+    {
         $txId = (int) ($args['id'] ?? 0);
         if (!$this->txBelongsToCurrentSupplier($request, $txId)) {
             return Json::error($response, 'not_found', 'Transakce nenalezena.', 404);
@@ -4296,6 +4408,12 @@ final class BankStatementAction
 
     public function ignore(Request $request, Response $response, array $args): Response
     {
+        return $this->withNoticeLock($request, $response,
+            fn (): Response => $this->ignoreLocked($request, $response, $args), (int) ($args['id'] ?? 0));
+    }
+
+    private function ignoreLocked(Request $request, Response $response, array $args): Response
+    {
         $txId = (int) ($args['id'] ?? 0);
         if (!$this->txBelongsToCurrentSupplier($request, $txId)) {
             return Json::error($response, 'not_found', 'Transakce nenalezena.', 404);
@@ -4327,21 +4445,22 @@ final class BankStatementAction
 
         // Automatizace: zaúčtovanou tx nelze ignorovat (409); pending návrh → superseded (M3c).
         // V jedné transakci s UPDATE — jinak by selhaný UPDATE nechal návrhy superseded bez ignore.
-        $pdo->beginTransaction();
+        $savepoint = 'bank_notice_ignore';
+        $own = self::beginAtomic($pdo, $savepoint);
         try {
             if ($this->bankPosting !== null) {
                 try {
                     $this->bankPosting->onIgnore(SupplierGuard::currentId($request), $txId);
                 } catch (\MyInvoice\Service\Accounting\PostingException $pe) {
-                    $pdo->rollBack();
+                    self::rollbackAtomic($pdo, $own, $savepoint);
                     return Json::error($response, $pe->errorCode, $pe->getMessage(), $pe->httpStatus);
                 }
             }
             $pdo->prepare("UPDATE bank_transactions SET match_status = 'ignored', ignore_origin = 'manual', ignore_note = ? WHERE id = ?")->execute([$note, $txId]);
-            $pdo->commit();
+            self::commitAtomic($pdo, $own, $savepoint);
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) {
-                $pdo->rollBack();
+                self::rollbackAtomic($pdo, $own, $savepoint);
             }
             throw $e;
         }
@@ -4380,6 +4499,12 @@ final class BankStatementAction
      */
     public function rematch(Request $request, Response $response, array $args): Response
     {
+        return $this->withNoticeLock($request, $response,
+            fn (): Response => $this->rematchLocked($request, $response, $args));
+    }
+
+    private function rematchLocked(Request $request, Response $response, array $args): Response
+    {
         $statementId = (int) ($args['id'] ?? 0);
         $sid = SupplierGuard::currentId($request);
         if ($sid <= 0 || $statementId <= 0) {
@@ -4393,7 +4518,7 @@ final class BankStatementAction
 
         $txs = $pdo->prepare(
             "SELECT bt.id FROM bank_transactions bt
-              WHERE " . StatementTransactionScope::sql($statementId) . "
+              WHERE " . StatementTransactionScope::sql($statementId) . " AND " . BankNoticeConfirmationScope::activeSql() . "
                 AND (bt.match_status IN ('unmatched', 'auto_partial')
                     OR (bt.match_status = 'auto_exact' AND EXISTS (
                         SELECT 1 FROM invoices i WHERE i.id = bt.matched_invoice_id

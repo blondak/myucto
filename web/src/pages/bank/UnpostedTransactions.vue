@@ -49,6 +49,7 @@ const search = ref('')
 const accounts = ref<BankAccountOption[]>([])
 const accountFilter = ref<string>('')
 const statusFilter = ref<'' | 'unmatched' | 'auto_exact' | 'auto_partial' | 'manual' | 'ignored'>('')
+const showConfirmed = ref(false)
 const postingFilter = ref<'' | 'unposted' | 'posted'>('')
 const STATUS_OPTIONS = ['unmatched', 'auto_exact', 'auto_partial', 'manual', 'ignored'] as const
 function statusLabel(status: string): string {
@@ -134,6 +135,7 @@ async function load(silent = false, append = false) {
     const params = {
       page: append ? page.value + 1 : page.value,
       per_page: perPage.value,
+      show_confirmed: showConfirmed.value ? 1 as const : undefined,
       ...(props.scope === 'all' && statusFilter.value ? { status: statusFilter.value } : {}),
       ...(year.value ? { year: year.value } : {}),
       ...(search.value.trim() ? { q: search.value.trim() } : {}),
@@ -182,7 +184,7 @@ async function changed(silent = false) {
 
 // Změna filtru vždy zpět na první stranu — jinak by uživatel skončil na prázdné stránce.
 let searchTimer: ReturnType<typeof setTimeout> | undefined
-watch([search, year, accountFilter, statusFilter, postingFilter, isDoubleEntry, () => props.scope, () => supplierStore.currentSupplierId, txSort.sort], () => { loadGeneration++ }, { flush: 'sync' })
+watch([showConfirmed, search, year, accountFilter, statusFilter, postingFilter, isDoubleEntry, () => props.scope, () => supplierStore.currentSupplierId, txSort.sort], () => { loadGeneration++ }, { flush: 'sync' })
 watch(page, () => { if (!internalPageChange) loadGeneration++ }, { flush: 'sync' })
 function resetAndLoad() {
   if (page.value !== 1) { page.value = 1; return } // watch(page) načte sám
@@ -196,6 +198,7 @@ watch(year, resetAndLoad)
 watch(accountFilter, resetAndLoad)
 watch(statusFilter, resetAndLoad)
 watch(postingFilter, resetAndLoad)
+watch(showConfirmed, resetAndLoad)
 watch(isDoubleEntry, resetAndLoad)
 watch(() => supplierStore.currentSupplierId, () => { items.value = []; resetAndLoad() })
 watch(txSort.sort, resetAndLoad)
@@ -235,6 +238,7 @@ watch(page, () => {
         <option value="">{{ t('bank.all_own_accounts') }}</option>
         <option v-for="a in accounts" :key="a.account_number" :value="a.account_number">{{ accountLabel(a) }}</option>
       </select>
+      <label v-if="scope === 'all'" class="flex items-center gap-2 text-sm"><input v-model="showConfirmed" type="checkbox" />{{ t('bank.notice_confirmation.show_confirmed') }}</label>
       <select v-if="scope === 'all'" v-model="statusFilter" :aria-label="t('bank.filter_status')"
         class="h-9 px-2 border border-neutral-300 rounded-md text-sm max-w-full">
         <option value="">{{ t('bank.filter_all') }}</option>

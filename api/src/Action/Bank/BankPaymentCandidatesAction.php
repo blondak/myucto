@@ -12,6 +12,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Bank\BankMatchSearch;
+use MyInvoice\Service\Bank\BankNoticeConfirmationService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -69,6 +70,8 @@ final class BankPaymentCandidatesAction
         $transactionId = (int) ($args['id'] ?? 0);
         $pdo = $this->db->pdo();
         $own = !$pdo->inTransaction();
+        $confirmations = new BankNoticeConfirmationService($this->db);
+        $noticeLock = $own ? $confirmations->lockSupplier($supplierId) : null;
         if ($own) $pdo->beginTransaction();
         else $pdo->exec('SAVEPOINT bank_document_match');
         try {
@@ -108,6 +111,8 @@ final class BankPaymentCandidatesAction
                 return Json::error($response, 'payment_unavailable', $exception->getMessage(), $exception->getCode());
             }
             throw $exception;
+        } finally {
+            if ($noticeLock !== null) $confirmations->unlockSupplier($noticeLock);
         }
     }
 }

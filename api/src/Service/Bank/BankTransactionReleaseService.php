@@ -134,18 +134,29 @@ final class BankTransactionReleaseService
     {
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
+        $confirmations = new BankNoticeConfirmationService($this->db);
+        $noticeLock = $ownTx ? $confirmations->lockSupplier($supplierId) : null;
         if ($ownTx) {
             $pdo->beginTransaction();
         }
         try {
             $stmt = $pdo->prepare(
-                'SELECT id, statement_id, matched_invoice_id, posted_at, match_status
-                   FROM bank_transactions WHERE id = ?'
+                'SELECT bt.id, bt.statement_id, bt.matched_invoice_id, bt.posted_at, bt.match_status
+                   FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id
+                  WHERE bt.id = ? AND ' . \MyInvoice\Repository\BankStatementOwnershipResolver::sql('bs') . ' FOR UPDATE'
             );
-            $stmt->execute([$txId]);
+            $stmt->execute([$txId, ...\MyInvoice\Repository\BankStatementOwnershipResolver::params($supplierId)]);
             $tx = $stmt->fetch(PDO::FETCH_ASSOC);
             if ($tx === false) {
                 throw new BankTransactionReleaseException('not_found', 'Transakce nenalezena.', 404);
+            }
+
+            if ($mode !== self::MODE_DELETE) {
+                try {
+                    $confirmations->assertMutable($supplierId, $txId);
+                } catch (BankNoticeConfirmationException $exception) {
+                    throw new BankTransactionReleaseException($exception->errorCode, $exception->getMessage(), $exception->httpStatus, $exception);
+                }
             }
 
             // Guard (#89): nestornovaný daňový doklad k přijaté platbě — zrušení platby
@@ -167,6 +178,8 @@ final class BankTransactionReleaseService
                 $pdo->rollBack();
             }
             throw $e;
+        } finally {
+            if ($noticeLock !== null) $confirmations->unlockSupplier($noticeLock);
         }
     }
 
