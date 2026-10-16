@@ -372,7 +372,7 @@ final class InvoicePdfRenderer
         }
 
         $invoice['items'] = TimeBillingPdfPresenter::invoiceItems(
-            $this->withBaseQuantity($invoice),
+            $this->withTrackingLines($this->withBaseQuantity($invoice), (int) ($invoice['supplier_id'] ?? 0), (string) $locale),
             !empty($invoice['prices_include_vat']),
         );
         $workReport = $includeWorkReport
@@ -707,6 +707,62 @@ final class InvoicePdfRenderer
         $hasCzk = !empty($row['account_number']) && !empty($row['bank_code']);
         $hasIban = !empty($row['iban']);
         return ($hasCzk || $hasIban) ? $row : null;
+    }
+
+    /**
+     * Vybraná sériová čísla a šarže řádku (migrace 2016) pod popisem položky:
+     * „Výr. č.: VIN1, VIN2“ a „Šarže: L1 (exp. 31. 12. 2027): 2 ks, L2: 1 ks“.
+     * Tiskne se vždy, když řádek výběr má: VIN na faktuře za vozidlo potřebuje
+     * kupující k registraci, šarže slouží k dohledání při stažení zboží.
+     *
+     * Množství šarže je vždy v základní jednotce karty, i když řádek fakturuje balení
+     * a firma rozpis balení na PDF netiskne (`base_unit` z withBaseQuantity pak chybí).
+     *
+     * @param array<int|string,mixed> $items
+     * @return array<int|string,mixed>
+     */
+    private function withTrackingLines(array $items, int $supplierId, string $locale): array
+    {
+        $en = $locale === 'en';
+        $lotLines = [];
+        foreach ($items as $i => $item) {
+            if (is_array($item) && !empty($item['stock_item_id']) && is_array($item['tracking_allocations'] ?? null)
+                && array_filter($item['tracking_allocations'], static fn ($a): bool => is_array($a) && !empty($a['lot_code'])) !== []) {
+                $lotLines[$i] = ['stock_item_id' => (int) $item['stock_item_id'], 'unit' => (string) ($item['unit'] ?? '')];
+            }
+        }
+        $baseUnits = $lotLines !== [] && $supplierId > 0
+            ? array_map(static fn (array $ratio): string => $ratio['base_unit'], (new \MyInvoice\Service\Stock\StockUnitConverter($this->db))->ratios($supplierId, $lotLines))
+            : [];
+        foreach ($items as $i => $item) {
+            $allocations = is_array($item) ? ($item['tracking_allocations'] ?? []) : [];
+            if (!is_array($allocations) || $allocations === []) {
+                continue;
+            }
+            $unit = (string) ($baseUnits[$i] ?? $item['base_unit'] ?? $item['unit'] ?? '');
+            $serials = [];
+            $lots = [];
+            foreach ($allocations as $a) {
+                if (!empty($a['serial_number'])) {
+                    $serials[] = (string) $a['serial_number'];
+                } elseif (!empty($a['lot_code'])) {
+                    $expires = !empty($a['expires_on'])
+                        ? ' (exp. ' . date($en ? 'M j, Y' : 'j. n. Y', (int) strtotime((string) $a['expires_on'])) . ')'
+                        : '';
+                    $qty = rtrim(rtrim(number_format((float) $a['quantity'], 3, $en ? '.' : ',', ''), '0'), '.,');
+                    $lots[] = $a['lot_code'] . $expires . ': ' . $qty . ($unit !== '' ? ' ' . $unit : '');
+                }
+            }
+            $lines = [];
+            if ($serials !== []) {
+                $lines[] = ($en ? 'Serial no.: ' : 'Výr. č.: ') . implode(', ', $serials);
+            }
+            if ($lots !== []) {
+                $lines[] = ($en ? 'Lot: ' : 'Šarže: ') . implode(', ', $lots);
+            }
+            $items[$i]['tracking_lines'] = $lines;
+        }
+        return $items;
     }
 
     /**
