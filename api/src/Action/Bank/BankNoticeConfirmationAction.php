@@ -9,14 +9,20 @@ use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Bank\BankNoticeConfirmationException;
 use MyInvoice\Service\Bank\BankNoticeConfirmationService;
+use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 final class BankNoticeConfirmationAction
 {
-    public function __construct(private readonly BankNoticeConfirmationService $confirmations) {}
+    public function __construct(
+        private readonly BankNoticeConfirmationService $confirmations,
+        private readonly ActivityLogger $logger,
+        private readonly IpMatcher $ipMatcher,
+    ) {}
 
     public function check(Request $request, Response $response, array $args): Response
     {
@@ -43,6 +49,14 @@ final class BankNoticeConfirmationAction
             return $this->confirmations->confirmManually(
                 $supplierId, (int) ($args['id'] ?? 0),
                 (int) ($body['authoritative_transaction_id'] ?? 0), $userId, $reason,
+                fn () => $this->logger->log(
+                    'bank_notice.confirmed', $userId, 'bank_transaction', (int) ($args['id'] ?? 0),
+                    ['notice_transaction_id' => (int) ($args['id'] ?? 0),
+                        'authoritative_transaction_id' => (int) ($body['authoritative_transaction_id'] ?? 0),
+                        'reason' => $reason],
+                    $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+                    $request->getHeaderLine('User-Agent'), $supplierId,
+                ),
             );
         });
     }

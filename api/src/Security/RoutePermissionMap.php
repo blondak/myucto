@@ -155,6 +155,8 @@ final class RoutePermissionMap
         ['POST', '#^/api/bank-statements/[0-9]+/notice-confirmations$#', 'bank.match', AccessLevel::WRITE],
         ['POST', '#^/api/bank-transactions/[0-9]+/notice-confirmation$#', 'bank.match', AccessLevel::WRITE],
         ['*', '#^/api/bank-transactions/[0-9]+/match(?:-document)?(/|$)#', 'bank.match', AccessLevel::WRITE],
+        ['POST', '#^/api/bank-transactions/[0-9]+/unmatch$#', 'bank', AccessLevel::WRITE],
+        ['POST', '#^/api/bank-transactions/[0-9]+/(ignore|unignore)$#', 'bank.ignore', AccessLevel::WRITE],
         ['*', '#^/api/bank-match-suggestions/[0-9]+/(accept|reject)$#', 'bank.match', AccessLevel::WRITE],
         ['POST', '#^/api/bank-transactions/[0-9]+/post$#', 'bank.post', AccessLevel::WRITE],
         ['GET', '#^/api/bank-transactions/[0-9]+/posting-preview$#', 'bank.post', AccessLevel::WRITE],
@@ -945,9 +947,9 @@ final class RoutePermissionMap
         ['*', '#^/api/admin/imports/(idoklad|fakturoid)/credentials$#', 'utilities.import', AccessLevel::WRITE],
         // AI extrakce z PDF — sdílí oprávnění s tou stranou dokladů, do které zapisuje
         // (AiExtractPdfAction = přijaté, AiExtractPdfIssuedAction = vystavené).
-        ['POST', '#^/api/admin/imports/ai-extract-pdf$#', 'purchase_invoices.scan', AccessLevel::WRITE],
+        ['POST', '#^/api/admin/imports/ai-extract-pdf$#', 'purchase_invoices.extract', AccessLevel::WRITE],
         ['POST', '#^/api/admin/imports/ai-extract-pdf-issued$#', 'invoices.create', AccessLevel::WRITE],
-        ['GET', '#^/api/admin/imports/ai-extract-pdf/status$#', 'purchase_invoices.scan', AccessLevel::WRITE],
+        ['GET', '#^/api/admin/imports/ai-extract-pdf/status$#', 'purchase_invoices.extract', AccessLevel::WRITE],
         ['GET', '#^/api/admin/imports/ai-extract-pdf-issued/status$#', 'invoices.create', AccessLevel::WRITE],
         // Klíče k AI poskytovatelům sem vědomě NEPATŘÍ — zůstávají superadmin-only
         // (F7, viz F7NestedRbacTest). Guard `settings.ai_provider` v akcích je druhá

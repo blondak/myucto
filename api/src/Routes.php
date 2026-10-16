@@ -246,6 +246,7 @@ use MyInvoice\Action\Invoice\PdfAction;
 use MyInvoice\Action\Invoice\PublicInvoiceAttachmentAction;
 use MyInvoice\Action\Invoice\PublicInvoiceGetAction;
 use MyInvoice\Action\Invoice\PublicInvoicePdfAction;
+use MyInvoice\Action\Invoice\PublicInvoiceIsdocAction;
 use MyInvoice\Action\Invoice\PublicLinkAction;
 use MyInvoice\Action\Invoice\ListPdfsAction;
 use MyInvoice\Action\Invoice\DownloadArchivedPdfAction;
@@ -362,6 +363,8 @@ use MyInvoice\Action\License\TierQuoteAction;
 use MyInvoice\Action\License\TierChangeAction;
 use MyInvoice\Action\License\PayrollQuoteAction;
 use MyInvoice\Action\License\PayrollChangeAction;
+use MyInvoice\Action\License\PerformanceQuoteAction;
+use MyInvoice\Action\License\PerformanceChangeAction;
 use MyInvoice\Action\License\ChangeStatusAction;
 use MyInvoice\Action\License\PurchaseStartAction;
 use MyInvoice\Action\License\PurchaseCompleteAction;
@@ -533,6 +536,8 @@ final class Routes
         $app->post('/api/license/period',       AnnualSwitchAction::class);
         $app->post('/api/license/payroll/quote', PayrollQuoteAction::class);
         $app->post('/api/license/payroll',       PayrollChangeAction::class);
+        $app->post('/api/license/performance/quote', PerformanceQuoteAction::class);
+        $app->post('/api/license/performance',       PerformanceChangeAction::class);
         $app->post('/api/license/change-status', ChangeStatusAction::class);
         // Nový nákup: PKCE session a serverový claim bez licenčního klíče v URL.
         $app->post('/api/license/purchase/start', PurchaseStartAction::class);
@@ -874,6 +879,7 @@ final class Routes
         // Web faktura — veřejný náhled + PDF + přílohy (bez auth, jen token)
         $app->get    ('/api/public/invoice/{token:[a-f0-9]{32,128}}',     PublicInvoiceGetAction::class);
         $app->get    ('/api/public/invoice/{token:[a-f0-9]{32,128}}/pdf', PublicInvoicePdfAction::class);
+        $app->get    ('/api/public/invoice/{token:[a-f0-9]{32,128}}/isdoc', PublicInvoiceIsdocAction::class);
         $app->get    ('/api/public/invoice/{token:[a-f0-9]{32,128}}/attachment/{attId:[0-9]+}', PublicInvoiceAttachmentAction::class);
 
         // Public náhled na výkaz práce (bez auth; token + e-mailová autorizace kódem)
@@ -3087,7 +3093,7 @@ final class Routes
         // Prodejní zrcadlo — AI import vydané faktury (ISDOC priorita, AI fallback → draft vydané faktury).
         $app->post   ('/api/admin/imports/ai-extract-pdf-issued', AiExtractPdfIssuedAction::class);
         $app->get    ('/api/admin/imports/ai-extract-pdf/status',        [AiProviderCredentialsAction::class, 'extractionStatus']);
-        $app->get    ('/api/admin/imports/ai-extract-pdf-issued/status', [AiProviderCredentialsAction::class, 'extractionStatus']);
+        $app->get    ('/api/admin/imports/ai-extract-pdf-issued/status', [AiProviderCredentialsAction::class, 'issuedExtractionStatus']);
 
         // CRM dashboard (fáze 5)
         $app->get    ('/api/crm/overview',     [CrmDashboardAction::class, 'overview']);
@@ -3686,6 +3692,7 @@ final class Routes
         $app->post ('/api/bank-transactions/{id:[0-9]+}/match',   [BankStatementAction::class, 'manualMatch']);
         $app->post ('/api/bank-transactions/{id:[0-9]+}/unmatch', [BankStatementAction::class, 'unmatch']);
         $app->post ('/api/bank-transactions/{id:[0-9]+}/ignore',  [BankStatementAction::class, 'ignore']);
+        $app->post ('/api/bank-transactions/{id:[0-9]+}/unignore', [BankStatementAction::class, 'unignore']);
         $app->post ('/api/bank-transactions/{id:[0-9]+}/create-purchase-invoice', [BankStatementAction::class, 'createPurchaseInvoice']);
         $app->post ('/api/bank-transactions/{id:[0-9]+}/document-request', [BankStatementAction::class, 'createDocumentRequest']);
         // Automatizace (mini-epic) — ruční zaúčtování / storno transakce.

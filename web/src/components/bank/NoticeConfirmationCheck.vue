@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 import { bankApi, type NoticeConfirmationSummary as Summary } from '@/api/bank'
 import { useToast } from '@/composables/useToast'
@@ -11,13 +12,15 @@ const props = defineProps<{ statementId: number }>()
 const emit = defineEmits<{ changed: [] }>()
 const { t } = useI18n()
 const toast = useToast()
+const auth = useAuthStore()
+const canConfirm = computed(() => !auth.isClientRole && auth.canWrite('bank.match'))
 const open = ref(false)
 const busy = ref(false)
 const preview = ref<Summary | null>(null)
 const processed = ref(0)
 const ready = ref(0)
 async function run(dryRun: boolean) {
-  if (busy.value) return
+  if (!canConfirm.value || busy.value) return
   open.value = true
   busy.value = true
   preview.value = null
@@ -48,8 +51,8 @@ async function run(dryRun: boolean) {
 }
 </script>
 <template>
-  <button type="button" :class="btnOutline('primary')" :disabled="busy" @click="run(true)"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t('bank.notice_confirmation.check') }}</button>
-  <Modal v-if="open" :title="t('bank.notice_confirmation.preview_title')" @close="!busy && (open = false)">
+  <button v-if="canConfirm" type="button" :class="btnOutline('primary')" :disabled="busy" @click="run(true)"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t('bank.notice_confirmation.check') }}</button>
+  <Modal v-if="canConfirm && open" :title="t('bank.notice_confirmation.preview_title')" @close="!busy && (open = false)">
     <p class="text-sm mb-4">{{ t('bank.notice_confirmation.preview_hint') }}</p>
     <p v-if="busy" role="status" class="mb-3">{{ t('bank.notice_confirmation.progress', { count: processed }) }}</p>
     <NoticeConfirmationSummary v-if="preview" :summary="preview" />

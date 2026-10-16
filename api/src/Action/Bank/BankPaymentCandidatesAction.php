@@ -12,7 +12,8 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Bank\BankMatchSearch;
-use MyInvoice\Service\Bank\BankNoticeConfirmationService;
+use MyInvoice\Service\Bank\BankNoticeMutationGuard;
+use MyInvoice\Service\Bank\BankNoticeConfirmationException;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -68,10 +69,23 @@ final class BankPaymentCandidatesAction
         }
         $supplierId = SupplierGuard::currentId($request);
         $transactionId = (int) ($args['id'] ?? 0);
+        if (!(new BankStatementOwnershipResolver($this->db))->transactionOwned($transactionId, $supplierId)) {
+            return Json::error($response, 'not_found', 'Bankovní pohyb nebyl nalezen.', 404);
+        }
+        try {
+            return (new BankNoticeMutationGuard($this->db))->mutate($supplierId, $transactionId,
+                fn (): Response => $this->matchLocked($request, $response, $args, $type, $document, $body));
+        } catch (BankNoticeConfirmationException $exception) {
+            return Json::error($response, $exception->errorCode, $exception->getMessage(), $exception->httpStatus);
+        }
+    }
+
+    private function matchLocked(Request $request, Response $response, array $args, string $type, array $document, array $body): Response
+    {
+        $supplierId = SupplierGuard::currentId($request);
+        $transactionId = (int) ($args['id'] ?? 0);
         $pdo = $this->db->pdo();
         $own = !$pdo->inTransaction();
-        $confirmations = new BankNoticeConfirmationService($this->db);
-        $noticeLock = $own ? $confirmations->lockSupplier($supplierId) : null;
         if ($own) $pdo->beginTransaction();
         else $pdo->exec('SAVEPOINT bank_document_match');
         try {
@@ -111,8 +125,6 @@ final class BankPaymentCandidatesAction
                 return Json::error($response, 'payment_unavailable', $exception->getMessage(), $exception->getCode());
             }
             throw $exception;
-        } finally {
-            if ($noticeLock !== null) $confirmations->unlockSupplier($noticeLock);
         }
     }
 }

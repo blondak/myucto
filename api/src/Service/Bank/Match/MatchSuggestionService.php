@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Bank\BankNoticeConfirmationScope;
 use MyInvoice\Service\Bank\BankNoticeConfirmationService;
 use MyInvoice\Service\Bank\BankNoticeConfirmationException;
+use MyInvoice\Service\Bank\BankNoticeMutationGuard;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
@@ -146,69 +147,77 @@ final class MatchSuggestionService
     }
 
     /** @return array<string,mixed> */
-    public function accept(int $suggestionId, int $supplierId, int $userId, int $candidateIndex): array
+    public function accept(int $suggestionId, int $supplierId, int $userId, int $candidateIndex, ?callable $authorizeCandidate = null): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT bank_transaction_id FROM bank_match_suggestions WHERE id=? AND supplier_id=?');
+        $stmt->execute([$suggestionId, $supplierId]);
+        $transactionId = $stmt->fetchColumn();
+        if ($transactionId === false) throw new MatchSuggestionException('not_found', 'Návrh nebyl nalezen.', 404);
+        $transaction = $this->loadTransaction((int) $transactionId);
+        if ($transaction === null || (int) $transaction['supplier_id'] !== $supplierId) throw new MatchSuggestionException('not_found', 'Návrh nebyl nalezen.', 404);
+        try {
+            $result = (new BankNoticeMutationGuard($this->db))->mutate($supplierId, (int) $transactionId,
+                fn (): array|MatchSuggestionException => $this->acceptLocked($suggestionId, $supplierId, $userId, $candidateIndex, $authorizeCandidate, (int) $transactionId));
+        } catch (BankNoticeConfirmationException $exception) {
+            throw new MatchSuggestionException($exception->errorCode, $exception->getMessage(), $exception->httpStatus);
+        }
+        // Superseded musí zůstat uložené, i když žadateli vrátíme already_reviewed.
+        if ($result instanceof MatchSuggestionException) throw $result;
+        return $result;
+    }
+
+    private function acceptLocked(int $suggestionId, int $supplierId, int $userId, int $candidateIndex, ?callable $authorizeCandidate, int $transactionId): array|MatchSuggestionException
     {
         $pdo = $this->db->pdo();
         $confirmations = new BankNoticeConfirmationService($this->db);
-        $noticeLock = $confirmations->lockSupplier($supplierId);
-        $pdo->beginTransaction();
-        try {
-            $stmt = $pdo->prepare('SELECT * FROM bank_match_suggestions WHERE id = ? AND supplier_id = ? FOR UPDATE');
-            $stmt->execute([$suggestionId, $supplierId]);
-            $suggestion = $stmt->fetch(PDO::FETCH_ASSOC);
-            if ($suggestion === false) throw new MatchSuggestionException('not_found', 'Návrh nebyl nalezen.', 404);
-            if ((string) $suggestion['status'] !== 'pending') throw new MatchSuggestionException('already_reviewed', 'Návrh už byl vyřízen.', 409);
-            $candidates = json_decode((string) $suggestion['candidates_json'], true, 512, JSON_THROW_ON_ERROR);
-            if (!isset($candidates[$candidateIndex]) || !is_array($candidates[$candidateIndex])) {
-                throw new MatchSuggestionException('candidate_out_of_range', 'Vybraný kandidát neexistuje.', 422);
-            }
-            $tx = $this->loadTransaction((int) $suggestion['bank_transaction_id']);
-            if ($tx === null || (int) $tx['supplier_id'] !== $supplierId) throw new MatchSuggestionException('not_found', 'Návrh nebyl nalezen.', 404);
-            $txLock = $pdo->prepare('SELECT match_status FROM bank_transactions WHERE id = ? FOR UPDATE');
-            $txLock->execute([(int) $suggestion['bank_transaction_id']]);
-            try {
-                $confirmations->assertMutable($supplierId, (int) $suggestion['bank_transaction_id']);
-            } catch (BankNoticeConfirmationException $exception) {
-                throw new MatchSuggestionException($exception->errorCode, $exception->getMessage(), $exception->httpStatus);
-            }
-            if ($txLock->fetchColumn() !== 'unmatched') {
-                $pdo->prepare("UPDATE bank_match_suggestions SET status = 'superseded', updated_at = NOW() WHERE id = ?")
-                    ->execute([$suggestionId]);
-                $pdo->commit();
-                throw new MatchSuggestionException('already_reviewed', 'Transakce už byla spárována jiným způsobem.', 409);
-            }
-            if ($this->payrollEvidence?->isUsedByPayrollSafely((int) $suggestion['bank_transaction_id']) === true) {
-                $pdo->prepare("UPDATE bank_match_suggestions SET status = 'superseded', updated_at = NOW() WHERE id = ?")
-                    ->execute([$suggestionId]);
-                $pdo->commit();
-                throw new MatchSuggestionException('already_reviewed', 'Bankovní pohyb už použila mzdová platba.', 409);
-            }
-            $candidate = $candidates[$candidateIndex];
-            $result = $this->applyCandidate($supplierId, $tx, $candidate, $userId, true);
-            $pdo->prepare(
-                "UPDATE bank_match_suggestions SET status = 'accepted', accepted_candidate = ?,
-                        reviewed_by = ?, reviewed_at = NOW(), updated_at = NOW()
-                  WHERE id = ? AND supplier_id = ? AND status = 'pending'"
-            )->execute([$candidateIndex, $userId ?: null, $suggestionId, $supplierId]);
-            $margin = $suggestion['margin'] === null ? null : (float) $suggestion['margin'];
-            $this->audit($supplierId, (int) $suggestion['bank_transaction_id'], 'accept', $candidate, $margin, $suggestionId, $userId);
-            $fee = isset($candidate['fee_amount']) && $candidate['fee_amount'] !== null ? (float) $candidate['fee_amount'] : null;
-            $feePct = $fee !== null && (float) ($candidate['display']['amount'] ?? 0) > 0
-                ? $fee / (float) $candidate['display']['amount'] : null;
-            $this->recordTargets($supplierId, $tx, $result, true, $feePct, $userId);
-            if ($fee !== null) $this->createFeePostingSuggestion($supplierId, (int) $suggestion['bank_transaction_id'], $fee);
-            $pdo->commit();
-            $result['bank_transaction_id'] = (int) $suggestion['bank_transaction_id'];
-            return $result;
-        } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
-            throw $e;
-        } finally {
-            $confirmations->unlockSupplier($noticeLock);
+        $stmt = $pdo->prepare('SELECT * FROM bank_match_suggestions WHERE id = ? AND supplier_id = ? AND bank_transaction_id = ? FOR UPDATE');
+        $stmt->execute([$suggestionId, $supplierId, $transactionId]);
+        $suggestion = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($suggestion === false) throw new MatchSuggestionException('not_found', 'Návrh nebyl nalezen.', 404);
+        if ((string) $suggestion['status'] !== 'pending') throw new MatchSuggestionException('already_reviewed', 'Návrh už byl vyřízen.', 409);
+        $candidates = json_decode((string) $suggestion['candidates_json'], true, 512, JSON_THROW_ON_ERROR);
+        if (!isset($candidates[$candidateIndex]) || !is_array($candidates[$candidateIndex])) {
+            throw new MatchSuggestionException('candidate_out_of_range', 'Vybraný kandidát neexistuje.', 422);
         }
+        $tx = $this->loadTransaction((int) $suggestion['bank_transaction_id']);
+        if ($tx === null || (int) $tx['supplier_id'] !== $supplierId) throw new MatchSuggestionException('not_found', 'Návrh nebyl nalezen.', 404);
+        $txLock = $pdo->prepare('SELECT match_status FROM bank_transactions WHERE id = ? FOR UPDATE');
+        $txLock->execute([(int) $suggestion['bank_transaction_id']]);
+        try {
+            $confirmations->assertMutable($supplierId, (int) $suggestion['bank_transaction_id']);
+        } catch (BankNoticeConfirmationException $exception) {
+            throw new MatchSuggestionException($exception->errorCode, $exception->getMessage(), $exception->httpStatus);
+        }
+        if ($txLock->fetchColumn() !== 'unmatched') {
+            $pdo->prepare("UPDATE bank_match_suggestions SET status = 'superseded', updated_at = NOW() WHERE id = ?")
+                ->execute([$suggestionId]);
+            return new MatchSuggestionException('already_reviewed', 'Transakce už byla spárována jiným způsobem.', 409);
+        }
+        if ($this->payrollEvidence?->isUsedByPayrollSafely((int) $suggestion['bank_transaction_id']) === true) {
+            $pdo->prepare("UPDATE bank_match_suggestions SET status = 'superseded', updated_at = NOW() WHERE id = ?")
+                ->execute([$suggestionId]);
+            return new MatchSuggestionException('already_reviewed', 'Bankovní pohyb už použila mzdová platba.', 409);
+        }
+        $candidate = $candidates[$candidateIndex];
+        if ($authorizeCandidate !== null) $authorizeCandidate($candidate, $tx);
+        $result = $this->applyCandidate($supplierId, $tx, $candidate, $userId, true);
+        $pdo->prepare(
+            "UPDATE bank_match_suggestions SET status = 'accepted', accepted_candidate = ?,
+                    reviewed_by = ?, reviewed_at = NOW(), updated_at = NOW()
+              WHERE id = ? AND supplier_id = ? AND status = 'pending'"
+        )->execute([$candidateIndex, $userId ?: null, $suggestionId, $supplierId]);
+        $margin = $suggestion['margin'] === null ? null : (float) $suggestion['margin'];
+        $this->audit($supplierId, (int) $suggestion['bank_transaction_id'], 'accept', $candidate, $margin, $suggestionId, $userId);
+        $fee = isset($candidate['fee_amount']) && $candidate['fee_amount'] !== null ? (float) $candidate['fee_amount'] : null;
+        $feePct = $fee !== null && (float) ($candidate['display']['amount'] ?? 0) > 0
+            ? $fee / (float) $candidate['display']['amount'] : null;
+        $this->recordTargets($supplierId, $tx, $result, true, $feePct, $userId);
+        if ($fee !== null) $this->createFeePostingSuggestion($supplierId, (int) $suggestion['bank_transaction_id'], $fee);
+        $result['bank_transaction_id'] = (int) $suggestion['bank_transaction_id'];
+        return $result;
     }
 
-    public function reject(int $suggestionId, int $supplierId, int $userId, ?string $reason): void
+    public function reject(int $suggestionId, int $supplierId, int $userId, ?string $reason, ?callable $authorizeCandidate = null): void
     {
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
@@ -223,6 +232,9 @@ final class MatchSuggestionService
                   WHERE id = ? AND supplier_id = ? AND status = 'pending'"
             )->execute([$userId ?: null, $suggestionId, $supplierId]);
             $candidates = json_decode((string) $suggestion['candidates_json'], true, 512, JSON_THROW_ON_ERROR);
+            if ($authorizeCandidate !== null) {
+                foreach ($candidates as $candidate) $authorizeCandidate($candidate);
+            }
             $top = is_array($candidates[0] ?? null) ? $candidates[0] : [];
             if ($reason !== null && trim($reason) !== '') $top['signals']['reject_reason'] = mb_substr(trim($reason), 0, 190);
             $this->audit($supplierId, (int) $suggestion['bank_transaction_id'], 'reject', $top,

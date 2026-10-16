@@ -25,7 +25,7 @@ const explanation = computed(() => {
   return te(key) ? t(key) : t('bank.notice_confirmation.reason_fallback')
 })
 async function confirm() {
-  if (!selected.value || !reason.value.trim() || busy.value) return
+  if (auth.isClientRole || !auth.canWrite('bank.match') || !selected.value || !reason.value.trim() || busy.value) return
   busy.value = true
   try {
     await bankApi.confirmNotice(props.tx.id, selected.value, reason.value.trim())
@@ -36,7 +36,7 @@ async function confirm() {
 }
 </script>
 <template>
-  <div v-if="tx.source === 'email_notice'" class="space-y-1 text-xs mt-1" data-testid="notice-confirmation-status">
+  <div v-if="!auth.isClientRole && tx.source === 'email_notice'" class="space-y-1 text-xs mt-1" data-testid="notice-confirmation-status">
     <span class="inline-flex rounded px-2 py-0.5 font-medium" :class="state === 'confirmed' ? 'bg-success-50 text-success-700' : state === 'review' ? 'bg-danger-50 text-danger-600' : 'bg-warning-50 text-warning-700'">{{ t(`bank.notice_confirmation.states.${state}`) }}</span>
     <p v-if="state !== 'confirmed'" class="text-neutral-500 max-w-xs">{{ explanation }}</p>
     <p v-else class="text-neutral-500">{{ t('bank.notice_confirmation.history_readonly') }}</p>

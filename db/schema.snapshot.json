@@ -991,7 +991,13 @@
         "2007_payroll_takeover_benefit_baskets.sql",
         "2008_payroll_deduction_agreement_taken_over_withheld.sql",
         "2009_supplier_email_templates.sql",
-        "2010_bank_notice_confirmations.sql"
+        "2010_variable_symbol_match_keys.sql",
+        "2011_stock_price_level_markup.sql",
+        "2012_supplier_standalone_isdoc.sql",
+        "2013_client_email_isdoc_override.sql",
+        "2014_client_ai_extraction.sql",
+        "2015_client_bank_permissions.sql",
+        "2016_bank_notice_confirmations.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -3569,6 +3575,23 @@
             },
             "checks": []
         },
+        "client_ai_extraction_usage": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "period": "char(7) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "used": "int(10) unsigned NOT NULL DEFAULT 0"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id, period)"
+            },
+            "foreign_keys": {
+                "fk_client_ai_extraction_usage_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
         "client_bank_accounts": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -3675,6 +3698,7 @@
                 "default_payment_method": "enum('bank_transfer','direct_debit','card','cash','cash_on_delivery','offset','other') NULL DEFAULT NULL",
                 "default_revenue_category_id": "int(10) unsigned NULL DEFAULT NULL",
                 "dic": "varchar(20) NULL DEFAULT NULL",
+                "email_attach_isdoc": "tinyint(1) NULL DEFAULT NULL",
                 "email_attachment_name_format": "varchar(120) NULL DEFAULT NULL",
                 "email_subject_format": "varchar(200) NULL DEFAULT NULL",
                 "fakturoid_id": "bigint(20) unsigned NULL DEFAULT NULL",
@@ -6317,6 +6341,7 @@
                 "payment_thanks_sent_at": "timestamp NULL DEFAULT NULL",
                 "payment_thanks_sent_to": "varchar(512) NULL DEFAULT NULL",
                 "payment_variable_symbol": "varchar(10) NULL DEFAULT NULL",
+                "payment_variable_symbol_match_key": "varchar(10) NULL DEFAULT NULL STORED GENERATED AS (nullif(trim(leading '0' from regexp_replace(`payment_variable_symbol`,'[^0-9]','')),''))",
                 "pdf_generated_at": "timestamp NULL DEFAULT NULL",
                 "pdf_path": "varchar(255) NULL DEFAULT NULL",
                 "penalty_covered_through": "date NULL DEFAULT NULL",
@@ -6344,6 +6369,7 @@
                 "total_without_vat": "decimal(12,2) NOT NULL DEFAULT 0.00",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
                 "varsymbol": "varchar(20) NULL DEFAULT NULL",
+                "varsymbol_match_key": "varchar(20) NULL DEFAULT NULL STORED GENERATED AS (nullif(trim(leading '0' from regexp_replace(`varsymbol`,'[^0-9]','')),''))",
                 "vat_classification_code": "varchar(8) NULL DEFAULT NULL"
             },
             "indexes": {
@@ -6364,10 +6390,12 @@
                 "idx_inv_supplier": "BTREE (supplier_id)",
                 "idx_inv_supplier_efftax": "BTREE (supplier_id, effective_tax_date)",
                 "idx_inv_supplier_payment_vs": "BTREE (supplier_id, payment_variable_symbol)",
+                "idx_inv_supplier_payment_vs_key": "BTREE (supplier_id, payment_variable_symbol_match_key)",
                 "idx_inv_supplier_status_due": "BTREE (supplier_id, status, due_date)",
                 "idx_inv_supplier_status_issue": "BTREE (supplier_id, status, issue_date)",
                 "idx_inv_supplier_status_type_efftax": "BTREE (supplier_id, status, invoice_type, effective_tax_date)",
                 "idx_inv_supplier_status_type_tax": "BTREE (supplier_id, status, invoice_type, tax_date)",
+                "idx_inv_supplier_vs_key": "BTREE (supplier_id, varsymbol_match_key)",
                 "idx_inv_type_month": "BTREE (invoice_type, issue_date)",
                 "idx_invoices_approval_receipt_hash": "BTREE (approval_receipt_hash)",
                 "idx_invoices_import_batch": "BTREE (supplier_id, import_batch_id)",
@@ -18527,6 +18555,7 @@
                 "payment_method_source": "enum('default','vendor','ai','manual') NOT NULL DEFAULT 'default'",
                 "payment_ordered_at": "timestamp NULL DEFAULT NULL",
                 "payment_variable_symbol": "varchar(20) NULL DEFAULT NULL",
+                "payment_variable_symbol_match_key": "varchar(20) NULL DEFAULT NULL STORED GENERATED AS (nullif(trim(leading '0' from regexp_replace(`payment_variable_symbol`,'[^0-9]','')),''))",
                 "pdf_hash": "char(64) NULL DEFAULT NULL",
                 "pdf_original_name": "varchar(255) NULL DEFAULT NULL",
                 "pdf_path": "varchar(255) NULL DEFAULT NULL",
@@ -18553,12 +18582,14 @@
                 "total_without_vat": "decimal(12,2) NOT NULL DEFAULT 0.00",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
                 "varsymbol": "varchar(20) NULL DEFAULT NULL",
+                "varsymbol_match_key": "varchar(20) NULL DEFAULT NULL STORED GENERATED AS (nullif(trim(leading '0' from regexp_replace(`varsymbol`,'[^0-9]','')),''))",
                 "vat_classification_code": "varchar(10) NULL DEFAULT NULL",
                 "vat_deduction": "enum('full','none','proportional','reduced') NOT NULL DEFAULT 'full'",
                 "vat_deduction_percent": "decimal(5,2) NOT NULL DEFAULT 100.00",
                 "vat_overrides": "longtext NULL DEFAULT NULL COLLATE utf8mb4_bin",
                 "vendor_id": "bigint(20) unsigned NOT NULL",
                 "vendor_invoice_number": "varchar(50) NOT NULL",
+                "vendor_invoice_number_match_key": "varchar(50) NULL DEFAULT NULL STORED GENERATED AS (nullif(trim(leading '0' from regexp_replace(`vendor_invoice_number`,'[^0-9]','')),''))",
                 "vendor_is_vat_payer": "tinyint(1) NULL DEFAULT NULL",
                 "vendor_number_seq": "smallint(5) unsigned NOT NULL DEFAULT 0",
                 "vendor_snapshot": "longtext NOT NULL COLLATE utf8mb4_bin"
@@ -18585,7 +18616,10 @@
                 "idx_pi_supplier_approval": "BTREE (supplier_id, approval_status)",
                 "idx_pi_supplier_external_barcode": "BTREE (supplier_id, external_barcode)",
                 "idx_pi_supplier_issue": "BTREE (supplier_id, issue_date)",
+                "idx_pi_supplier_payment_vs_key": "BTREE (supplier_id, payment_variable_symbol_match_key)",
                 "idx_pi_supplier_status_effcost": "BTREE (supplier_id, status, effective_cost_date)",
+                "idx_pi_supplier_vendor_no_key": "BTREE (supplier_id, vendor_invoice_number_match_key)",
+                "idx_pi_supplier_vs_key": "BTREE (supplier_id, varsymbol_match_key)",
                 "idx_pi_tax_date": "BTREE (supplier_id, tax_date)",
                 "idx_pi_vendor": "BTREE (vendor_id, issue_date)",
                 "uq_pi_advance_link": "UNIQUE BTREE (advance_purchase_invoice_id)",
@@ -20879,7 +20913,7 @@
                 "fk_splr_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": {
-                "chk_splr_value": "`rule_type` = 'fixed' and `match_type` = 'product' and `fixed_price` is not null and `fixed_price` >= 0 and `currency_code` is not null or `rule_type` = 'discount_pct' and `discount_pct` is not null and `discount_pct` >= 0 and `discount_pct` <= 100"
+                "chk_splr_value": "`rule_type` = 'fixed' and `match_type` = 'product' and `fixed_price` is not null and `fixed_price` >= 0 and `currency_code` is not null or `rule_type` = 'discount_pct' and `discount_pct` is not null and `discount_pct` >= -999.999 and `discount_pct` <= 100"
             }
         },
         "stock_price_levels": {
@@ -20906,7 +20940,7 @@
                 "fk_spl_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": {
-                "chk_spl_default_discount": "`default_discount_pct` >= 0 and `default_discount_pct` <= 100"
+                "chk_spl_default_discount": "`default_discount_pct` >= -999.999 and `default_discount_pct` <= 100"
             }
         },
         "stock_pricing_exchange_rates": {
@@ -21775,6 +21809,8 @@
                 "azure_openai_endpoint": "varchar(255) NULL DEFAULT NULL",
                 "branding_profiles_enabled": "tinyint(1) NOT NULL DEFAULT 0",
                 "city": "varchar(120) NOT NULL",
+                "client_ai_extraction_enabled": "tinyint(1) NOT NULL DEFAULT 0",
+                "client_ai_extraction_monthly_limit": "int(10) unsigned NOT NULL DEFAULT 100",
                 "commercial_register": "varchar(255) NULL DEFAULT NULL",
                 "company_name": "varchar(190) NOT NULL",
                 "country_id": "smallint(5) unsigned NOT NULL",
@@ -21800,6 +21836,7 @@
                 "display_name": "varchar(190) NULL DEFAULT NULL",
                 "email": "varchar(190) NOT NULL",
                 "email_accent_color": "varchar(7) NOT NULL DEFAULT '#3B2D83'",
+                "email_attach_isdoc": "tinyint(1) NOT NULL DEFAULT 0",
                 "email_branding_enabled": "tinyint(1) NOT NULL DEFAULT 1",
                 "embed_isdoc": "tinyint(1) NOT NULL DEFAULT 1",
                 "epo_taxpayer_code": "varchar(1) NULL DEFAULT NULL",
@@ -21865,6 +21902,7 @@
                 "pohoda_contract_code": "varchar(20) NULL DEFAULT NULL",
                 "proforma_number_format": "varchar(60) NULL DEFAULT NULL",
                 "proforma_payment_document": "enum('final_on_full_payment','always_tax_document','manual') NOT NULL DEFAULT 'always_tax_document'",
+                "public_isdoc_enabled": "tinyint(1) NOT NULL DEFAULT 0",
                 "purchase_advance_number_format": "varchar(60) NULL DEFAULT NULL",
                 "purchase_credit_note_number_format": "varchar(60) NULL DEFAULT NULL",
                 "purchase_import_received_at": "enum('issue_date','import_date') NOT NULL DEFAULT 'issue_date'",

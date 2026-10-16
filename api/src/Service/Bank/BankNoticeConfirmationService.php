@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Bank;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\NamedLockName;
+use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Service\Accounting\GoPay\GoPayService;
 use PDO;
 
@@ -32,6 +33,30 @@ final class BankNoticeConfirmationService
     public static function blockingLinks(): array
     {
         return self::LINKS;
+    }
+
+    /** Stejné vazby používá dávkový souhrn i aktuální kontrola před DELETE. */
+    public static function deletionDependencies(string $transactionId = '?'): array
+    {
+        $conditions = [];
+        foreach ([...self::LINKS, ['invoice_payments', 'bank_transaction_id'], ['payment_matches', 'bank_transaction_id'], ['gopay_clearings', 'payout_match_transaction_id'], ['client_bank_accounts', 'last_bank_transaction_id'], ['bank_counterparty_observations', 'bank_transaction_id']] as [$table, $column]) {
+            $conditions[$table][] = "{$column}={$transactionId}";
+        }
+        foreach (['journal_entries' => "source_type IN ('bank','card_settlement','card_writeoff') AND source_id={$transactionId}", 'cash_journal_notes' => "source_type='bank' AND source_id={$transactionId} AND deleted_at IS NULL", 'de_movement_classification_history' => "source_type='bank' AND source_id={$transactionId}", 'document_links' => "entity_type='bank_transaction' AND entity_id={$transactionId}", 'document_dimensions' => "doc_type='bank_transaction' AND doc_id={$transactionId}", 'document_dimension_splits' => "doc_type='bank_transaction' AND doc_id={$transactionId}"] as $table => $where) $conditions[$table][] = $where;
+        $conditions['bank_transactions'][] = "id={$transactionId} AND (match_status IN ('auto_exact','auto_partial','manual') OR matched_invoice_id IS NOT NULL)";
+        return $conditions;
+    }
+
+    private function deletionBlockers(int $noticeId): array
+    {
+        $blockers = [];
+        foreach (self::deletionDependencies() as $table => $conditions) {
+            $where = implode(' OR ', array_map(static fn (string $condition): string => '(' . $condition . ')', $conditions));
+            $stmt = $this->db->pdo()->prepare("SELECT 1 FROM {$table} WHERE {$where} LIMIT 1" . $this->lockingRead());
+            $stmt->execute(array_fill(0, count($conditions), $noticeId));
+            if ($stmt->fetchColumn() !== false) $blockers[] = 'dependency_' . $table;
+        }
+        return $blockers;
     }
 
     /** Volat před otevřením transakce; stejný zámek drží import autoritativního výpisu. */
@@ -127,9 +152,7 @@ final class BankNoticeConfirmationService
     /** @return array<string,mixed> */
     public function inspectStatement(int $supplierId, int $statementId): array
     {
-        $stmt = $this->db->pdo()->prepare("SELECT id FROM bank_statements WHERE id=? AND supplier_id=? AND source='email_notice'");
-        $stmt->execute([$statementId, $supplierId]);
-        if ($stmt->fetchColumn() === false) throw new BankNoticeConfirmationException('notice_statement_not_found', 'Přehled avíz nebyl nalezen.', 404);
+        $this->assertNoticeStatement($supplierId, $statementId);
         $stmt = $this->db->pdo()->prepare('SELECT id FROM bank_transactions WHERE statement_id=? ORDER BY id');
         $stmt->execute([$statementId]);
         $summary = ['pending' => 0, 'review' => 0, 'confirmed' => 0, 'total' => 0];
@@ -143,46 +166,73 @@ final class BankNoticeConfirmationService
             $items[] = $item;
             $summary[$item['confirmation_state']]++;
             $summary['total']++;
-            if ($item['confirmation_state'] !== 'confirmed' || $item['blockers'] !== []) {
-                $code = $item['confirmation_reason'] ?? 'not_confirmed';
-                $counts[$code] = ($counts[$code] ?? 0) + 1;
-            }
+            foreach ($this->deletionBlockers((int) $id) as $code) $counts[$code] = ($counts[$code] ?? 0) + 1;
         }
         $blockers = [];
         foreach ($counts as $code => $count) $blockers[] = ['code' => $code, 'count' => $count];
-        return ['confirmation_summary' => $summary, 'can_delete_notices' => $summary['total'] > 0 && $summary['confirmed'] === $summary['total'] && $blockers === [], 'deletion_blockers' => $blockers, 'items' => $items];
+        return ['confirmation_summary' => $summary, 'can_delete_notices' => $blockers === [], 'deletion_blockers' => $blockers, 'items' => $items];
+    }
+
+    /** Uložený souhrn a kandidáti jen pro zobrazenou stránku; živá kontrola patří do změnových akcí. */
+    public function statementDetail(int $supplierId, int $statementId, array $transactionIds): array
+    {
+        $this->assertNoticeStatement($supplierId, $statementId);
+        $reader = new BankNoticeConfirmationReader($this->db);
+        $result = $reader->statements($supplierId, [$statementId])[$statementId];
+        $ids = array_values(array_unique(array_filter(array_map('intval', $transactionIds), static fn (int $id): bool => $id > 0)));
+        $result['items'] = [];
+        if ($ids === []) return $result;
+        $stmt = $this->db->pdo()->prepare('SELECT * FROM bank_transactions WHERE statement_id=? AND id IN (' . implode(',', array_fill(0, count($ids), '?')) . ') ORDER BY id');
+        $stmt->execute([$statementId, ...$ids]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $states = $reader->notices($supplierId, array_column($rows, 'id'));
+        foreach ($rows as $row) {
+            $id = (int) $row['id'];
+            $result['items'][] = ($states[$id] ?? []) + $this->displayTransaction($row) + ['transaction_id' => $id, 'blockers' => []];
+        }
+        return $result;
+    }
+
+    private function assertNoticeStatement(int $supplierId, int $statementId): void
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT bs.id FROM bank_statements bs WHERE bs.id=? AND bs.source='email_notice' AND " . BankStatementOwnershipResolver::sql() . $this->lockingRead());
+        $stmt->execute([$statementId, ...BankStatementOwnershipResolver::params($supplierId)]);
+        if ($stmt->fetchColumn() === false) throw new BankNoticeConfirmationException('notice_statement_not_found', 'Přehled avíz nebyl nalezen.', 404);
     }
 
     /** Dávkovaná rekonstrukce je opakovatelná a náhled nic nepřevádí. */
     public function reconcileStatement(int $supplierId, int $statementId, ?int $userId = null, bool $dryRun = false, int $limit = 100, int $afterId = 0): array
     {
         return $this->atomic($supplierId, function () use ($supplierId, $statementId, $userId, $dryRun, $limit, $afterId): array {
-            $this->inspectStatement($supplierId, $statementId);
+            $this->assertNoticeStatement($supplierId, $statementId);
             $limit = max(1, min(500, $limit));
             $stmt = $this->db->pdo()->prepare('SELECT id FROM bank_transactions WHERE statement_id=? AND id>? ORDER BY id LIMIT ' . ($limit + 1));
             $stmt->execute([$statementId, $afterId]);
             $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
             $hasMore = count($ids) > $limit;
             $ids = array_slice($ids, 0, $limit);
-            $proposals = [];
+            $assessments = [];
             $proposedSummary = ['pending' => 0, 'review' => 0, 'confirmed' => 0, 'total' => 0];
             foreach ($ids as $id) {
-                if (!$dryRun) {
-                    $this->reconcileNoticeLocked($supplierId, $id, $userId);
-                } else {
-                    $assessment = $this->evaluateNotice($supplierId, $id);
+                $assessment = $dryRun ? $this->evaluateNotice($supplierId, $id) : $this->reconcileNoticeLocked($supplierId, $id, $userId);
+                $assessments[$id] = $assessment;
+                if ($dryRun) {
                     $state = $assessment['confirmation_reason'] === 'ready' ? 'confirmed' : $assessment['confirmation_state'];
-                    $proposals[$id] = ['proposed_state' => $state, 'proposed_reason' => $assessment['confirmation_reason']];
+                    $assessments[$id] += ['proposed_state' => $state, 'proposed_reason' => $assessment['confirmation_reason']];
                     $proposedSummary[$state]++;
                     $proposedSummary['total']++;
                 }
             }
-            $result = $this->inspectStatement($supplierId, $statementId) + ['processed' => count($ids), 'next_after_id' => $ids === [] ? $afterId : end($ids), 'has_more' => $hasMore, 'dry_run' => $dryRun];
-            if ($dryRun) {
-                $result['proposed_summary'] = $proposedSummary;
-                foreach ($result['items'] as &$item) $item += $proposals[$item['id']] ?? [];
-                unset($item);
+            $result = $this->statementDetail($supplierId, $statementId, $ids) + ['processed' => count($ids), 'next_after_id' => $ids === [] ? $afterId : end($ids), 'has_more' => $hasMore, 'dry_run' => $dryRun];
+            // Stav filtru zůstává uložený; živé posouzení a návrh jsou omezeny na tuto dávku.
+            foreach ($result['items'] as &$item) {
+                $assessment = $assessments[$item['id']];
+                foreach (['candidates', 'blockers', 'proposed_state', 'proposed_reason'] as $key) {
+                    if (array_key_exists($key, $assessment)) $item[$key] = $assessment[$key];
+                }
             }
+            unset($item);
+            if ($dryRun) $result['proposed_summary'] = $proposedSummary;
             return $result;
         });
     }
@@ -199,8 +249,8 @@ final class BankNoticeConfirmationService
         return $this->atomic($supplierId, function () use ($supplierId, $transactionId): array {
             $target = $this->transaction($supplierId, $transactionId);
             if ($target === null || !$this->isAuthoritative($target)) return [];
-            $stmt = $this->db->pdo()->prepare("SELECT bt.*,bs.supplier_id,bs.account_number AS stmt_account,bs.bank_code AS stmt_bank,bs.currency AS stmt_currency FROM bank_transactions bt JOIN bank_statements bs ON bs.id=bt.statement_id LEFT JOIN bank_notice_confirmations c ON c.notice_transaction_id=bt.id WHERE bs.supplier_id=? AND bs.source='email_notice' AND bt.source='email_notice' AND bt.posted_at BETWEEN DATE_SUB(?, INTERVAL 5 DAY) AND DATE_ADD(?, INTERVAL 5 DAY) AND (c.state IS NULL OR c.state<>'confirmed' OR c.authoritative_transaction_id IS NULL OR c.authoritative_transaction_id=?) ORDER BY bt.id" . $this->lockingRead());
-            $stmt->execute([$supplierId, $target['posted_at'], $target['posted_at'], $transactionId]);
+            $stmt = $this->db->pdo()->prepare("SELECT bt.*,bs.supplier_id,bs.account_number AS stmt_account,bs.bank_code AS stmt_bank,bs.currency AS stmt_currency FROM bank_transactions bt JOIN bank_statements bs ON bs.id=bt.statement_id LEFT JOIN bank_notice_confirmations c ON c.notice_transaction_id=bt.id WHERE " . BankStatementOwnershipResolver::sql() . " AND bs.source='email_notice' AND bt.source='email_notice' AND bt.posted_at BETWEEN DATE_SUB(?, INTERVAL 5 DAY) AND DATE_ADD(?, INTERVAL 5 DAY) AND (c.state IS NULL OR c.state<>'confirmed' OR c.authoritative_transaction_id IS NULL OR c.authoritative_transaction_id=?) ORDER BY bt.id" . $this->lockingRead());
+            $stmt->execute([...BankStatementOwnershipResolver::params($supplierId), $target['posted_at'], $target['posted_at'], $transactionId]);
             $out = [];
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $notice) {
                 if (!$this->sameAccount($notice, $target) || !$this->sameCurrency($notice, $target) || !$this->sameIdentity($notice, $target)
@@ -212,11 +262,11 @@ final class BankNoticeConfirmationService
         });
     }
 
-    public function confirmManually(int $supplierId, int $noticeId, int $authoritativeId, int $userId, string $reason): array
+    public function confirmManually(int $supplierId, int $noticeId, int $authoritativeId, int $userId, string $reason, ?callable $onConfirmed = null): array
     {
         if (trim($reason) === '') throw new BankNoticeConfirmationException('manual_reason_required', 'Vyplňte důvod ručního potvrzení.', 422);
         if (mb_strlen(trim($reason)) > 500) throw new BankNoticeConfirmationException('manual_reason_too_long', 'Důvod ručního potvrzení může mít nejvýše 500 znaků.', 422);
-        return $this->atomic($supplierId, function () use ($supplierId, $noticeId, $authoritativeId, $userId, $reason): array {
+        return $this->atomic($supplierId, function () use ($supplierId, $noticeId, $authoritativeId, $userId, $reason, $onConfirmed): array {
             $notice = $this->notice($supplierId, $noticeId);
             $target = $this->transaction($supplierId, $authoritativeId);
             $record = $this->record($supplierId, $noticeId);
@@ -230,11 +280,13 @@ final class BankNoticeConfirmationService
                 || ((float) $notice['amount'] <=> 0) !== ((float) $target['amount'] <=> 0)) {
                 throw new BankNoticeConfirmationException('unsafe_confirmation', 'Pohyby nemají shodný účet, měnu nebo směr platby.');
             }
+            (new BankNoticeManualConfirmationGuard($this->db))->assertAllowed($supplierId, $notice, $target);
             if ($this->sourceBlockers($notice, $target) !== []) throw new BankNoticeConfirmationException('notice_dependencies', 'Avízo má nevyřešené vazby.');
             $stmt = $this->db->pdo()->prepare('SELECT id FROM bank_notice_confirmations WHERE authoritative_transaction_id=? AND (notice_transaction_id IS NULL OR notice_transaction_id<>?)' . $this->lockingRead());
             $stmt->execute([$authoritativeId, $noticeId]);
             if ($stmt->fetchColumn() !== false) throw new BankNoticeConfirmationException('target_reserved', 'Tento pohyb již potvrzuje jiné avízo.');
             $this->confirm($supplierId, $notice, $target, $userId, 'manual', trim($reason));
+            if ($onConfirmed !== null) $onConfirmed();
             return $this->inspectNotice($supplierId, $noticeId);
         });
     }
@@ -243,9 +295,12 @@ final class BankNoticeConfirmationService
     public function prepareNoticeDeletion(int $supplierId, int $statementId, ?int $userId = null): void
     {
         if (!$this->db->pdo()->inTransaction()) throw new \LogicException('Mazání avíz vyžaduje transakci.');
-        $this->db->pdo()->prepare('SELECT id FROM bank_statements WHERE supplier_id=? AND id=? FOR UPDATE')->execute([$supplierId, $statementId]);
-        $inspection = $this->inspectStatement($supplierId, $statementId);
-        if (!$inspection['can_delete_notices']) throw new BankNoticeConfirmationException('notices_not_confirmed', 'Všechna avíza musí mít platné potvrzení a vyřešené vazby.');
+        $this->assertNoticeStatement($supplierId, $statementId);
+        $stmt = $this->db->pdo()->prepare('SELECT id FROM bank_transactions WHERE statement_id=? ORDER BY id FOR UPDATE');
+        $stmt->execute([$statementId]);
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $id) {
+            if ($this->deletionBlockers((int) $id) !== []) throw new BankNoticeConfirmationException('notice_dependencies', 'Avíza mají úhradu nebo nevyřešené vazby.');
+        }
         $this->db->pdo()->prepare('UPDATE bank_notice_confirmations c JOIN bank_transactions bt ON bt.id=c.notice_transaction_id SET c.deleted_at=NOW() WHERE c.supplier_id=? AND bt.statement_id=? AND c.state=\'confirmed\'')->execute([$supplierId, $statementId]);
     }
 
@@ -268,15 +323,20 @@ final class BankNoticeConfirmationService
     }
 
     /** Blokuje druhou úhradu při konfliktu s existujícím avízem. */
-    public function blocksMatching(int $supplierId, int $transactionId): bool
+    public function blocksMatching(int $supplierId, int $transactionId, ?array $knownTransaction = null): bool
     {
-        $row = $this->transaction($supplierId, $transactionId);
+        $row = $knownTransaction ?? $this->transaction($supplierId, $transactionId);
         if ($row === null) return false;
         if ($row['source'] === 'email_notice') {
             $result = $this->reconcileNotice($supplierId, $transactionId);
             return $result['confirmation_state'] !== 'pending' || $result['candidates'] !== [];
         }
         if (!$this->isAuthoritative($row)) return false;
+        // Bez relevantních avíz není co přebírat. Žádná cache: i nově přijaté avízo
+        // se musí projevit v témže objektu; locking read vidí i starší RR transakci.
+        $stmt = $this->db->pdo()->prepare("SELECT bt.id FROM bank_transactions bt JOIN bank_statements bs ON bs.id=bt.statement_id WHERE " . BankStatementOwnershipResolver::sql() . " AND bs.source='email_notice' AND bt.source='email_notice' AND bt.posted_at BETWEEN DATE_SUB(?, INTERVAL 5 DAY) AND DATE_ADD(?, INTERVAL 5 DAY) LIMIT 1" . $this->lockingRead());
+        $stmt->execute([...BankStatementOwnershipResolver::params($supplierId), $row['posted_at'], $row['posted_at']]);
+        if ($stmt->fetchColumn() === false) return false;
         foreach ($this->reconcileAuthoritative($supplierId, $transactionId) as $noticeId => $result) {
             if ($result['confirmation_state'] !== 'review') continue;
             foreach ($result['candidates'] as $candidate) if ((int) $candidate['id'] === $transactionId && $this->hasPayments((int) $noticeId)) return true;
@@ -371,8 +431,9 @@ final class BankNoticeConfirmationService
             if ($stmt->fetchColumn() !== false) $blockers[] = 'dependency_' . $table;
         }
         if ($notice['balance'] !== null) {
-            $stmt = $pdo->prepare("SELECT bt.*, bs.account_number AS stmt_account, bs.bank_code AS stmt_bank, bs.currency AS stmt_currency FROM bank_transactions bt JOIN bank_statements bs ON bs.id=bt.statement_id WHERE bs.supplier_id=? AND bt.source='statement' AND bs.source IN " . BankStatementSource::sqlList() . " AND ((bt.balance IS NOT NULL AND bt.posted_at>=?) OR (bs.curr_balance IS NOT NULL AND bs.statement_date>=?))");
-            $stmt->execute([$notice['supplier_id'], $notice['posted_at'], $notice['posted_at']]);
+            $stmt = $pdo->prepare("SELECT bt.*, bs.account_number AS stmt_account, bs.bank_code AS stmt_bank, bs.currency AS stmt_currency FROM bank_transactions bt JOIN bank_statements bs ON bs.id=bt.statement_id WHERE " . BankStatementOwnershipResolver::sql() . " AND bt.source='statement' AND bs.source IN " . BankStatementSource::sqlList() . " AND ((bt.balance IS NOT NULL AND bt.posted_at BETWEEN ? AND ?) OR (bs.curr_balance IS NOT NULL AND bs.statement_date BETWEEN ? AND ?))");
+            $end = max((new \DateTimeImmutable((string) $target['posted_at']))->modify('+' . EmailNoticeReconciler::DATE_WINDOW_DAYS . ' days')->format('Y-m-d'), (string) ($target['statement_date'] ?? ''));
+            $stmt->execute([...BankStatementOwnershipResolver::params((int) $notice['supplier_id']), $notice['posted_at'], $end, $notice['posted_at'], $end]);
             $hasAnchor = false;
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $anchor) {
                 if ($this->sameAccount($notice, $anchor) && $this->sameCurrency($notice, $anchor)) { $hasAnchor = true; break; }
@@ -436,15 +497,18 @@ final class BankNoticeConfirmationService
     {
         // Mutace čeká i na zapisovatele, který drží řádkový zámek ve vnější transakci.
         // Locking read současně obchází starší REPEATABLE READ snapshot volajícího.
-        $stmt = $this->db->pdo()->prepare('SELECT bt.*,bs.supplier_id,bs.source AS statement_source,bs.account_number AS stmt_account,bs.bank_code AS stmt_bank,bs.currency AS stmt_currency FROM bank_transactions bt JOIN bank_statements bs ON bs.id=bt.statement_id WHERE bs.supplier_id=? AND bt.id=?' . $this->lockingRead());
-        $stmt->execute([$supplierId, $id]);
-        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        $stmt = $this->db->pdo()->prepare('SELECT bt.*,bs.supplier_id,bs.source AS statement_source,bs.statement_date,bs.account_number AS stmt_account,bs.bank_code AS stmt_bank,bs.currency AS stmt_currency FROM bank_transactions bt JOIN bank_statements bs ON bs.id=bt.statement_id WHERE ' . BankStatementOwnershipResolver::sql() . ' AND bt.id=?' . $this->lockingRead());
+        $stmt->execute([...BankStatementOwnershipResolver::params($supplierId), $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        // Jednoznačný legacy vlastník byl ověřen stejným resolverem jako v akcích.
+        if ($row !== false) $row['supplier_id'] = $supplierId;
+        return $row ?: null;
     }
 
     private function candidates(array $notice): array
     {
-        $stmt = $this->db->pdo()->prepare("SELECT bt.*,bs.supplier_id,bs.source AS statement_source,bs.account_number AS stmt_account,bs.bank_code AS stmt_bank,bs.currency AS stmt_currency FROM bank_transactions bt JOIN bank_statements bs ON bs.id=bt.statement_id WHERE bs.supplier_id=? AND bt.source='statement' AND bs.source IN " . BankStatementSource::sqlList() . ' AND bt.posted_at BETWEEN DATE_SUB(?, INTERVAL 5 DAY) AND DATE_ADD(?, INTERVAL 5 DAY) ORDER BY bt.id' . $this->lockingRead());
-        $stmt->execute([$notice['supplier_id'], $notice['posted_at'], $notice['posted_at']]);
+        $stmt = $this->db->pdo()->prepare("SELECT bt.*,bs.supplier_id,bs.source AS statement_source,bs.statement_date,bs.account_number AS stmt_account,bs.bank_code AS stmt_bank,bs.currency AS stmt_currency FROM bank_transactions bt JOIN bank_statements bs ON bs.id=bt.statement_id WHERE " . BankStatementOwnershipResolver::sql() . " AND bt.source='statement' AND bs.source IN " . BankStatementSource::sqlList() . ' AND bt.posted_at BETWEEN DATE_SUB(?, INTERVAL 5 DAY) AND DATE_ADD(?, INTERVAL 5 DAY) ORDER BY bt.id' . $this->lockingRead());
+        $stmt->execute([...BankStatementOwnershipResolver::params((int) $notice['supplier_id']), $notice['posted_at'], $notice['posted_at']]);
         // bank_ref nemá ověřený společný namespace: banky sem dávají i konstantu
         // nebo denní pořadí (viz StatementImporter::transactionIdentities). Proto
         // nesmí přebít VS/protiúčet ani rozhodnout mezi jinak shodnými kandidáty.

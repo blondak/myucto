@@ -783,7 +783,27 @@ real_ip_header    X-Forwarded-For;
 real_ip_recursive on;
 ```
 
+U IP omezení API tokenu aplikace zobrazuje IP aktuálního prohlížeče tak, jak
+ji vyhodnocuje při kontrole přístupu. U privátní, lokální nebo sdílené adresy
+upozorní na možné chybějící předávání IP. V interní síti může být tato adresa
+správná; integrace na jiném serveru může používat jinou IP než prohlížeč.
+
+Upravený nginx konfigurák je nutné připojit také do služby aplikace v souboru
+Docker Compose (vedle ostatních `volumes`):
+
+```yaml
+volumes:
+  - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
+```
+
+Použijte soubor odpovídající nasazenému image a po změně mountu znovu vytvořte
+kontejner aplikace. Do `set_real_ip_from` patří pouze skutečné důvěryhodné proxy,
+nikdy celý internet (`0.0.0.0/0` nebo `::/0`). Edge proxy musí příchozí klientské
+hlavičky bezpečně přepsat; postup ověření je výše.
+
 ### 101.11.5 RBAC (role-based access)
+
+Klientské role mohou mít samostatná oprávnění **Prohlížet banku**, **Nahrávat výpisy**, **Párovat platby** a **Ignorovat platby**. Administrátor je přiděluje jednotlivě, ve výchozím stavu jsou vypnutá. Zapnutí akčního oprávnění zároveň zapne čtení banky; odebrání čtení odebere i bankovní akce. Pro párování a jeho zrušení musí mít klient také čtení všech dotčených faktur a zápis do jejich úhrad: `invoices.mark_paid` u vydaných, `purchase_invoices.transition` u přijatých. Samotné čtení dokladů nestačí. Nahrávání výpisů navíc vyžaduje zápis do obou oprávnění k úhradám, jinak by automatické párování při importu obešlo kontrolu ručního párování. Párování a import mohou spustit automatické účetní zpracování podle nastavení firmy; úhrady a účetní zápisy vznikají pod přihlášeným klientským uživatelem. Tato klientská omezení nemění oprávnění interních rolí.
 
 Role se spravují v `Systém → Role a oprávnění`. Každý modul a významná akce mají jednu
 ze tří úrovní: **neviditelné**, **pouze čtení** nebo **zápis**. Zápis zahrnuje

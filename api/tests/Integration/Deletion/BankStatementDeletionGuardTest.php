@@ -165,17 +165,16 @@ final class BankStatementDeletionGuardTest extends TestCase
         self::assertSame(1, $this->rowCount('bank_statements', 'id', $statementId));
     }
 
-    public function testEmailNoticeWithoutConfirmationCannotBeDeleted(): void
+    public function testEmailNoticeWithoutMatchesIsStillDeleted(): void
     {
         $pdo = $this->db->pdo();
         $statementId = $this->seedBankStatement($pdo, $this->supplierId, 'notice-clean', 'email_notice');
-        $tx = $this->seedBankTransaction($pdo, $statementId, 'notice-clean');
-        $pdo->prepare("UPDATE bank_transactions SET source='email_notice', source_ref=? WHERE id=?")->execute(['synthetic:notice-clean-' . $tx, $tx]);
+        $this->seedBankTransaction($pdo, $statementId, 'notice-clean');
 
         $response = $this->delete($statementId);
 
-        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
-        self::assertSame(1, $this->rowCount('bank_statements', 'id', $statementId));
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(0, $this->rowCount('bank_statements', 'id', $statementId));
     }
 
     // ── Zdrojový výpis měsíční evidence API ─────────────────────────────────

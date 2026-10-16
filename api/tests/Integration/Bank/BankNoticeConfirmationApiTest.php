@@ -113,12 +113,15 @@ final class BankNoticeConfirmationApiTest extends TestCase
         self::assertTrue($history['can_delete_notices']);
     }
 
-    public function testUnconfirmedDeletionFailsAndConfirmationRequiresWritePermission(): void
+    public function testUnlinkedNoticeCanBeDeletedAndConfirmationRequiresWritePermission(): void
     {
         $notice = $this->movement('email_notice');
         $statement = $this->statement($notice);
-        self::assertSame(409, $this->call('delete', $statement)[0]);
-        self::assertSame($statement, $this->statement($notice));
+        self::assertSame(200, $this->call('delete', $statement)[0]);
+        self::assertSame(0, (int) $this->db->pdo()->query('SELECT COUNT(*) FROM bank_transactions WHERE id=' . $notice)->fetchColumn());
+        self::assertSame(0, (int) $this->db->pdo()->query('SELECT COUNT(*) FROM bank_statements WHERE id=' . $statement)->fetchColumn());
+        $notice = $this->movement('email_notice');
+        $statement = $this->statement($notice);
         self::assertSame(403, $this->call('check', $statement, role: 'readonly')[0]);
         self::assertSame(404, $this->call('check', PHP_INT_MAX)[0]);
         self::assertSame(422, $this->call('confirm', $notice, body: ['reason' => str_repeat('a', 501)])[0]);

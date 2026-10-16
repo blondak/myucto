@@ -11,6 +11,9 @@
     { "name": "admin-approvals", "path_pattern": "^/admin/approvals/?$", "kind": "permission", "permission": "invoices.approval", "access": "read" },
     { "name": "admin-support", "path_pattern": "^/admin/support/?$", "kind": "permission", "permission": "profile", "access": "read" },
 
+    { "name": "bank-statements", "path_pattern": "^/bank/?$", "kind": "permission", "permission": "bank", "access": "read" },
+    { "name": "bank-detail", "path_pattern": "^/bank/[0-9]+/?$", "kind": "permission", "permission": "bank", "access": "read" },
+
     { "name": "clients", "path_pattern": "^/clients/?$", "kind": "permission", "permission": "clients", "access": "read" },
     { "name": "client-new", "path_pattern": "^/clients/new/?$", "kind": "permission", "permission": "clients.create", "access": "write" },
     { "name": "client-detail", "path_pattern": "^/clients/[0-9]+/?$", "kind": "permission", "permission": "clients", "access": "read" },
@@ -28,6 +31,7 @@
     { "name": "purchase-invoices-export", "path_pattern": "^/purchase-invoices/export/?$", "kind": "permission", "permission": "purchase_invoices", "access": "read" },
     { "name": "purchase-invoices-import", "path_pattern": "^/purchase-invoices/import/?$", "kind": "client_redirect", "permission": "purchase_invoices", "access": "read", "redirect_to": "/purchase-invoices/export" },
     { "name": "purchase-invoices-renumber", "path_pattern": "^/purchase-invoices/renumber/?$", "kind": "client_redirect", "permission": "purchase_invoices", "access": "write", "redirect_to": "/purchase-invoices" },
+    { "name": "purchase-invoice-ai-import", "path_pattern": "^/purchase-invoices/ai-import/?$", "kind": "permission", "permission": "purchase_invoices.extract", "access": "write" },
     { "name": "purchase-invoice-new", "path_pattern": "^/purchase-invoices/new/?$", "kind": "permission", "permission": "purchase_invoices.create", "access": "write" },
     { "name": "purchase-invoice-detail", "path_pattern": "^/purchase-invoices/[0-9]+/?$", "kind": "permission", "permission": "purchase_invoices", "access": "read" },
     { "name": "purchase-invoice-edit", "path_pattern": "^/purchase-invoices/[0-9]+/edit/?$", "kind": "permission", "permission": "purchase_invoices", "access": "write" },

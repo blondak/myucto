@@ -3,17 +3,28 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { cs, en } from '../../../../tests/locales'
 import type { BankTransaction } from '@/api/bank'
-const mocks = vi.hoisted(() => ({ confirm: vi.fn(), batch: vi.fn() }))
+const mocks = vi.hoisted(() => ({ confirm: vi.fn(), batch: vi.fn(), client: false }))
 vi.mock('@/api/bank', () => ({ bankApi: { confirmNotice: mocks.confirm, noticeConfirmations: mocks.batch } }))
-vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true, get isClientRole() { return mocks.client } }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn(), success: vi.fn() }) }))
 import NoticeConfirmationStatus from '../NoticeConfirmationStatus.vue'
 import NoticeConfirmationSummary from '../NoticeConfirmationSummary.vue'
 import NoticeConfirmationCheck from '../NoticeConfirmationCheck.vue'
 const global = () => ({ plugins: [createI18n({ legacy: false, locale: 'en', messages: { cs, en } })], stubs: { Modal: { template: '<div><slot /><slot name="footer" /></div>' }, RouterLink: { props: ['to'], template: '<a><slot /></a>' } } })
 const tx = { id: 3, source: 'email_notice', posted_at: '2026-09-29', amount: -100, currency: 'CZK', confirmation_state: 'review', confirmation_reason: 'ambiguous', candidates: [{ id: 8, statement_id: 9, posted_at: '2026-09-30', amount: -100, currency: 'CZK' }] } as BankTransaction
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => { vi.clearAllMocks(); mocks.client = false })
 describe('email notice confirmation', () => {
+  it('hides manual comparison and batch confirmation for clients with bank matching rights', async () => {
+    mocks.client = true
+    const status = mount(NoticeConfirmationStatus, { props: { tx }, global: global() })
+    const batch = mount(NoticeConfirmationCheck, { props: { statementId: 4 }, global: global() })
+    expect(status.findAll('button')).toHaveLength(0)
+    expect(status.find('[data-testid="notice-confirmation-status"]').exists()).toBe(false)
+    expect(batch.findAll('button')).toHaveLength(0)
+    await flushPromises()
+    expect(mocks.confirm).not.toHaveBeenCalled()
+    expect(mocks.batch).not.toHaveBeenCalled()
+  })
   it('shows global counts independently of matching and transaction pages', () => {
     const wrapper = mount(NoticeConfirmationSummary, { props: { summary: { pending: 12, review: 3, confirmed: 47, total: 62 } }, global: global() })
     expect(wrapper.text()).toContain('12 awaiting statement')

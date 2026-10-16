@@ -92,7 +92,7 @@ const postingPanelRef = ref<InstanceType<typeof DocumentPostingPanel> | null>(nu
 const lockedForMe = computed(() => !!invoice.value?.locked?.is_locked && auth.isClientRole)
 const bankMatchTarget = ref<{ id: number; ref: string | null } | null>(null)
 const canMatchBankPayment = computed(() => !!invoice.value && !lockedForMe.value
-  && auth.canRead('bank') && auth.canWrite('bank.match')
+  && !auth.isClientRole && auth.canRead('bank') && auth.canWrite('bank.match')
   && (Number(invoice.value.amount_to_pay) > 0 || (Number(invoice.value.amount_to_pay) < 0
     && ['invoice', 'credit_note'].includes(invoice.value.invoice_type)
     && (invoice.value.invoice_type === 'credit_note' || !invoice.value.parent_invoice_id)))
@@ -739,6 +739,7 @@ function actionLabel(a: string): string {
     'invoice.public_link_regenerated': 'invoice.actions.public_link_regenerated',
     'invoice.public_viewed':           'invoice.actions.public_viewed',
     'invoice.public_pdf_downloaded':   'invoice.actions.public_pdf_downloaded',
+    'invoice.public_isdoc_downloaded': 'invoice.actions.public_isdoc_downloaded',
     'invoice.public_attachment_downloaded': 'invoice.actions.public_attachment_downloaded',
     'proforma.final_issued':          'invoice.actions.proforma_final_issued',
   }

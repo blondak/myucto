@@ -493,6 +493,13 @@ položky, součty s rozpadem DPH, platební údaje s QR kódem a poznámky z dok
 Klient si stáhne i přílohy e-mailu nahrané k faktuře. Stav úhrady se ukazuje živě
 (Uhrazeno, Částečně uhrazeno, Po splatnosti). Koncepty veřejný odkaz nemají.
 
+Je-li u dodavatele zapnuté **Umožnit stažení ISDOC na web faktuře**, nabídne stránka také
+samostatné stažení souboru ISDOC. Volba je nezávislá na vložení ISDOC přílohy do
+PDF: změna nastavení vložení do PDF nemění dostupnost samostatného souboru a
+naopak. Veřejné stažení je dostupné jen pro vystavený, nestornovaný doklad;
+koncepty a stornované faktury ho nenabízejí. U faktury v cizí měně je ISDOC
+dostupný, pokud má faktura platný směnný kurz.
+
 Odkaz obsahuje 48znakový náhodný token, nelze ho uhodnout ani odvodit.
 
 ### 16.10.12 Vypnutí web faktury na instalaci
@@ -570,6 +577,12 @@ nedostal):
 
 Variabilní symbol je neměnný, úprava ho nezmění. Chcete-li číslo změnit, vystavte
 storno nebo dobropis a fakturu znovu pod novým číslem.
+
+Pokud už faktura vydala zboží ze skladu (vznikla k ní výdejka), úprava nesmí změnit
+skladové položky: kartu, množství, jednotku ani sklad, a nesmí skladovou položku
+přidat ani odebrat. Výdej proběhl při vystavení a úprava ho znovu neprovede, takže
+by se sklad rozešel s fakturou. Popis, cenu, DPH a neskladové řádky upravíte i tak.
+Změnu zboží opravte dobropisem, případně novou fakturou.
 
 #### Nezaplacené (vrátit ze stavu paid)
 

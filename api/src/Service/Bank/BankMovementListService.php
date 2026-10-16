@@ -34,7 +34,7 @@ final class BankMovementListService
      * @param 'all'|'unposted'    $scope
      * @return array<string,mixed>
      */
-    public function list(int $supplierId, array $query, string $scope): array
+    public function list(int $supplierId, array $query, string $scope, bool $strictOwnership = false): array
     {
         $page = max(1, (int) ($query['page'] ?? 1));
         $perPage = max(1, min(self::MAX_PER_PAGE, (int) ($query['per_page'] ?? 50)));
@@ -46,8 +46,7 @@ final class BankMovementListService
             ($page - 1) * $perPage,
             [
                 'scope' => $scope,
-                'show_confirmed' => filter_var($query['show_confirmed'] ?? false, FILTER_VALIDATE_BOOLEAN),
-                'confirmation_state' => $query['confirmation_state'] ?? null,
+                'strict_ownership' => $strictOwnership,
                 'status' => $matchStatus,
                 // Filtr i řazení podle zápisu v deníku dávají smysl jen v podvojném účetnictví.
                 'posting_status' => $doubleEntry ? ($query['posting_status'] ?? null) : null,
@@ -63,12 +62,8 @@ final class BankMovementListService
         $postingByTx = $this->posting->transactionPostingInfo($supplierId, $txIds);
         $dimensionsByTx = (new DimensionAssignmentRepository($this->db))
             ->headerDimensionsIfEnabled($supplierId, 'bank_transaction', $txIds);
-        $confirmations = (new BankNoticeConfirmationReader($this->db))->notices($supplierId, array_column(array_filter($result['items'], static fn (array $item): bool => $item['source'] === 'email_notice'), 'id'));
-        $items = array_map(function (array $item) use ($supplierId, $postingByTx, $dimensionsByTx, $doubleEntry, $confirmations): array {
+        $items = array_map(function (array $item) use ($supplierId, $postingByTx, $dimensionsByTx, $doubleEntry): array {
             $item['posting'] = $postingByTx[$item['id']] ?? null;
-            if ($item['source'] === 'email_notice') {
-                $item += $confirmations[(int) $item['id']] ?? [];
-            }
             // Uzavřené účetní období existuje jen v podvojném účetnictví.
             $item['period_closed'] = $doubleEntry && $item['period_closed'];
             if ($dimensionsByTx !== null) {

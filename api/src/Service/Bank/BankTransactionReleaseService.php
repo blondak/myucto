@@ -132,10 +132,26 @@ final class BankTransactionReleaseService
      */
     public function release(int $supplierId, int $txId, string $mode, ?int $userId = null): array
     {
+        // DELETE je součást dávkového uvolnění výpisu a smí po jeho validaci
+        // odstranit i potvrzené avízo; samostatné odpárování jde přes notice guard.
+        if ($mode === self::MODE_DELETE) return $this->releaseUnderLock($supplierId, $txId, $mode, $userId);
+        if (!(new \MyInvoice\Repository\BankStatementOwnershipResolver($this->db))->transactionOwned($txId, $supplierId)) {
+            throw new BankTransactionReleaseException('not_found', 'Transakce nenalezena.', 404);
+        }
+        try {
+            return (new BankNoticeMutationGuard($this->db))->mutate($supplierId, $txId,
+                fn (): array => $this->releaseUnderLock($supplierId, $txId, $mode, $userId));
+        } catch (BankNoticeConfirmationException $exception) {
+            throw new BankTransactionReleaseException($exception->errorCode, $exception->getMessage(), $exception->httpStatus, $exception);
+        }
+    }
+
+    private function releaseUnderLock(int $supplierId, int $txId, string $mode, ?int $userId): array
+    {
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
         $confirmations = new BankNoticeConfirmationService($this->db);
-        $noticeLock = $ownTx ? $confirmations->lockSupplier($supplierId) : null;
+        $noticeLock = $ownTx && $mode === self::MODE_DELETE ? $confirmations->lockSupplier($supplierId) : null;
         if ($ownTx) {
             $pdo->beginTransaction();
         }

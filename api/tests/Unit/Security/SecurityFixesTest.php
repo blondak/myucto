@@ -118,7 +118,8 @@ final class SecurityFixesTest extends TestCase
         self::assertIsString($code);
 
         // Najdi `ignore` method
-        $wrapper = substr($code, strpos($code, 'public function ignore('), 300);
+        $wrapperStart = strpos($code, 'public function ignore(');
+        $wrapper = substr($code, $wrapperStart, strpos($code, "\n    }", $wrapperStart) - $wrapperStart);
         self::assertStringContainsString('withNoticeLock', $wrapper);
         self::assertStringContainsString('ignoreLocked', $wrapper);
         $start = strpos($code, 'private function ignoreLocked(');
@@ -128,10 +129,11 @@ final class SecurityFixesTest extends TestCase
 
         self::assertStringContainsString('bank.tx_ignore', $methodBody,
             'ignore() musí logovat bank.tx_ignore action (forensic, security #1)');
-        self::assertStringContainsString('logger->log', $methodBody,
-            'ignore() musí volat ActivityLogger (security #1)');
-        self::assertStringContainsString('txBelongsToCurrentSupplier', $methodBody,
-            'ignore() musí ověřit ownership tx (security #1 IDOR)');
+        self::assertStringContainsString('logIgnoreChange(', $methodBody);
+        $logStart = strpos($code, 'private function logIgnoreChange(');
+        $logEnd = strpos($code, "\n    }", $logStart);
+        self::assertStringContainsString('logger->log', substr($code, $logStart, $logEnd - $logStart));
+        self::assertStringContainsString('lockOwnedTransaction(', $methodBody);
     }
 
     /**
@@ -152,8 +154,18 @@ final class SecurityFixesTest extends TestCase
             self::assertNotFalse($start, "$method() metoda musí existovat");
             $end = strpos($code, "\n    }", $start);
             $body = substr($code, $start, $end - $start);
-            self::assertStringContainsString('txBelongsToCurrentSupplier', $body,
-                "$method() musí ověřit tx ownership (security #1)");
+            self::assertStringContainsString('lockOwnedTransaction(', $body,
+                "$method() musí uzamknout a ověřit vlastnictví pohybu");
+        }
+        $lockStart = strpos($code, 'private function lockOwnedTransaction(');
+        $lockEnd = strpos($code, "\n    }", $lockStart);
+        $lockBody = substr($code, $lockStart, $lockEnd - $lockStart);
+        self::assertStringContainsString('FOR UPDATE', $lockBody);
+        self::assertStringContainsString('txBelongsToCurrentSupplier(', $lockBody);
+        foreach (['performManualMatch', 'performUnmatch'] as $method) {
+            $start = strpos($code, "private function $method(");
+            $end = strpos($code, "\n    }", $start);
+            self::assertStringContainsString('txBelongsToCurrentSupplier(', substr($code, $start, $end - $start));
         }
     }
 

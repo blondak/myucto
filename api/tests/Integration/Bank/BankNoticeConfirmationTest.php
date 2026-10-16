@@ -350,7 +350,7 @@ final class BankNoticeConfirmationTest extends TestCase
         }
     }
 
-    public function testUnmatchedNoticeOutsideCoveredPeriodCannotDisappear(): void
+    public function testNoticeOutsideCoveredPeriodIsNotSupersededButCanBeExplicitlyDeletedWhenUnlinked(): void
     {
         $notice = $this->movement('email_notice', -100, '2099-06-12', ['vs'=>'']);
         $this->movement('gpc', -100, '2099-06-15', ['vs'=>'']);
@@ -358,10 +358,12 @@ final class BankNoticeConfirmationTest extends TestCase
         self::assertSame('review', $result['confirmation_state']);
         self::assertContains('notice_outside_statement_period', $result['blockers']);
         self::assertSame('unmatched', $this->db->pdo()->query('SELECT match_status FROM bank_transactions WHERE id=' . $notice)->fetchColumn());
-        self::assertFalse($this->service->inspectStatement($this->supplier, $this->statement($notice))['can_delete_notices']);
+        self::assertTrue($this->service->inspectStatement($this->supplier, $this->statement($notice))['can_delete_notices']);
+        $this->service->prepareNoticeDeletion($this->supplier, $this->statement($notice));
+        self::assertSame('unmatched', $this->db->pdo()->query('SELECT match_status FROM bank_transactions WHERE id=' . $notice)->fetchColumn(), 'Povolení ručního smazání nesmí samo avízo nahradit.');
     }
 
-    public function testBalanceMustHaveAuthoritativeAnchorBeforeNoticeCanBeDeleted(): void
+    public function testProvisionalBalanceNeedsAuthoritativeAnchorBeforeConfirmation(): void
     {
         $notice=$this->movement('email_notice',100,self::DATE,['balance'=>1000]);
         $target=$this->movement('gpc');
@@ -370,14 +372,16 @@ final class BankNoticeConfirmationTest extends TestCase
         self::assertSame('confirmed',$this->service->reconcileNotice($this->supplier,$notice)['confirmation_state']);
     }
 
-    public function testManualIgnoreIsNotProofAndMissingCandidateBlocksDeletion(): void
+    public function testManualIgnoreIsNotProofButUnlinkedNoticeCanBeDeletedWithoutCandidate(): void
     {
         $notice=$this->movement('email_notice');
         $this->db->pdo()->prepare("UPDATE bank_transactions SET match_status='ignored',ignore_note='Nahrazeno bankovním výpisem' WHERE id=?")->execute([$notice]);
         self::assertSame('pending',$this->service->reconcileNotice($this->supplier,$notice)['confirmation_state']);
-        self::assertFalse($this->service->inspectStatement($this->supplier,$this->statement($notice))['can_delete_notices']);
-        $this->expectException(BankNoticeConfirmationException::class);
-        $this->service->prepareNoticeDeletion($this->supplier,$this->statement($notice));
+        self::assertTrue($this->service->inspectStatement($this->supplier,$this->statement($notice))['can_delete_notices']);
+        $statement = $this->statement($notice);
+        $this->service->prepareNoticeDeletion($this->supplier,$statement);
+        $this->db->pdo()->prepare('DELETE FROM bank_statements WHERE id=?')->execute([$statement]);
+        self::assertSame(0, (int) $this->db->pdo()->query('SELECT COUNT(*) FROM bank_transactions WHERE id=' . $notice)->fetchColumn());
     }
 
     public function testInvalidationReturnsNoticeToVisibleReviewWithoutRestoringPayment(): void
@@ -437,7 +441,8 @@ final class BankNoticeConfirmationTest extends TestCase
         self::assertSame(2,(int)$this->db->pdo()->query('SELECT COUNT(*) FROM bank_transactions bt WHERE bt.statement_id=' . $statement . ' AND ' . BankNoticeConfirmationScope::stateSql('pending'))->fetchColumn());
         $result=$this->service->reconcileStatement($this->supplier,$statement,$this->user);
         self::assertSame(['pending'=>1,'review'=>1,'confirmed'=>0,'total'=>2],$result['confirmation_summary']);
-        self::assertFalse($result['can_delete_notices']);
+        self::assertTrue($result['can_delete_notices']);
+        $this->service->prepareNoticeDeletion($this->supplier, $statement);
         foreach (['pending','review','confirmed'] as $state) {
             self::assertSame($result['confirmation_summary'][$state],(int)$this->db->pdo()->query('SELECT COUNT(*) FROM bank_transactions bt WHERE bt.statement_id=' . $statement . ' AND ' . BankNoticeConfirmationScope::stateSql($state))->fetchColumn());
         }

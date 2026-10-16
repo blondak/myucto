@@ -12,9 +12,11 @@ final class BankNoticeConfirmationScope
         if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/D', $alias) !== 1) {
             throw new \InvalidArgumentException('Neplatný SQL alias.');
         }
-        return "NOT EXISTS (SELECT 1 FROM bank_notice_confirmations bnc_active
+        // Legacy marker sdílí životní cyklus s účetními čtečkami. Trvalé potvrzení
+        // navíc chrání převedenou úhradu i po odstranění autoritativního pohybu.
+        return "(" . BankNoticeLifecycle::activeSql($alias) . " AND NOT EXISTS (SELECT 1 FROM bank_notice_confirmations bnc_active
             WHERE bnc_active.notice_transaction_id = {$alias}.id
-              AND (bnc_active.state = 'confirmed' OR bnc_active.reason = 'authoritative_removed'))";
+              AND (bnc_active.state = 'confirmed' OR bnc_active.reason = 'authoritative_removed')))";
     }
     public static function confirmedSql(string $alias = 'bt'): string
     {

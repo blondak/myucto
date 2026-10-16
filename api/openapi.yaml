@@ -1428,7 +1428,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: Faktura už není draft (vystavená/storno) — nelze editovat
+          description: |
+            Faktura už není draft (vystavená/storno) — nelze editovat (`not_editable`). U vynucené
+            úpravy (`force=1`) faktury, ke které už existuje zaúčtovaná výdejka nebo vratka,
+            `stock_items_locked`: `items` mění skladovou kartu, sklad, jednotku nebo množství
+            skladového řádku, přidávají nebo odebírají skladový řádek. Opravuje se dobropisem.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -3607,6 +3611,12 @@ paths:
       tags: [Bank]
       summary: Ručně přiřadí transakci k faktuře a zaeviduje úhradu
       description: |
+        Klient potřebuje čtení banky, `bank.match` k zápisu a čtení každého cílového
+        dokladu. Pro vydané faktury navíc potřebuje `invoices.mark_paid` k zápisu,
+        pro přijaté `purchase_invoices.transition` k zápisu. Stejné podmínky platí
+        pro všechny doklady sloučené úhrady. Automatické účetní zpracování podle
+        nastavení firmy probíhá pod uživatelem, který párování provedl.
+
         Použij když automatický matching nezachytil platbu (variabilní symbol
         chybí nebo neodpovídá). Zaeviduje platbu v měně faktury; plné pokrytí
         ji označí jako `paid` s `paid_at = transaction.posted_at`, nižší platba
@@ -3713,6 +3723,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Chybí oprávnění k párování nebo změně úhrady dokladu.
         '404':
           description: |
             Transakce nenalezena (`not_found`), faktura nenalezena nebo patří jiné
@@ -3750,6 +3762,12 @@ paths:
       tags: [Bank]
       summary: Odpojí transakci od faktury a zruší platbu vzniklou párováním
       description: |
+        Interní role potřebuje zápis do banky. Klient potřebuje čtení banky,
+        `bank.match` k zápisu a u všech navázaných dokladů čtení i právo změnit úhradu
+        (`invoices.mark_paid`, u přijatých faktur `purchase_invoices.transition`).
+        Interní role může tímto endpointem obnovit také ignorované pohyby;
+        klient k obnovení ručního ignorování používá samostatný endpoint `unignore`.
+
         Vrátí transakci do stavu unmatched a odstraní případnou poznámku k ignorování.
         Platba vzniklá párováním se z faktury odebere a stav faktury se přepočte ze
         zbývajících plateb — fakturu, kterou kryje jiná platba, nechá zaplacenou.
@@ -3757,6 +3775,8 @@ paths:
       responses:
         '200':
           description: OK
+        '403':
+          description: Chybí oprávnění k párování nebo změně úhrady dokladu.
         '409':
           description: |
             Zrušení párování odmítnuto — zápis leží v uzavřeném nebo zamčeném období
@@ -3800,7 +3820,34 @@ paths:
         '422':
           description: Poznámka není text nebo přesahuje 1000 znaků.
         '409':
-          description: Zaúčtovanou transakci nelze ignorovat (posted_transaction_cannot_be_ignored)
+          description: Zaúčtovanou transakci nelze ignorovat (posted_transaction_cannot_be_ignored); klient smí ignorovat pouze nespárovaný pohyb.
+
+  /api/v1/bank-transactions/{id}/unignore:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    post:
+      tags: [Bank]
+      summary: Zruší ruční ignorování bankovního pohybu
+      description: |
+        Vyžaduje oprávnění bank.ignore k zápisu, u klienta také čtení banky. Obnoví pouze ručně
+        ignorovaný pohyb; systémově potlačené duplicity ani přenesená ignorování
+        tímto endpointem obnovit nelze.
+      responses:
+        '200':
+          description: Pohyb vrácen mezi nespárované.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankUnignoreResult' }
+        '403':
+          description: Chybí oprávnění.
+        '404':
+          description: Pohyb neexistuje nebo patří jiné firmě.
+        '409':
+          description: Pohyb nelze obnovit z aktuálního stavu.
 
   /api/v1/bank-transactions/{id}/post:
     parameters:
@@ -4975,6 +5022,8 @@ paths:
       description: |
         Vrátí kompletní data supplier-a v jehož scope token operuje — adresa,
         IČO/DIČ, bankovní účty, číslování faktur, default platební podmínky.
+        Pole `client_ai_extraction_enabled` informuje, zda správce firmě povolil klientské AI vytěžování.
+        Pole `client_ai_extraction_monthly_limit` udává měsíční strop klientských pokusů o vytěžení přijatých dokladů; nula jejich vytěžování blokuje.
       responses:
         '200':
           description: OK
@@ -5671,6 +5720,11 @@ paths:
     post:
       tags: [Bank]
       summary: Potvrdí vybraného kandidáta návrhu párování
+      description: |
+        Klient potřebuje čtení banky, `bank.match` k zápisu a u každého dokladu
+        kandidáta čtení i právo změnit úhradu (`invoices.mark_paid`, u přijatých
+        faktur `purchase_invoices.transition`). Práva a dostupnost pohybu se
+        kontrolují znovu při potvrzení návrhu.
       requestBody:
         required: false
         content:
@@ -5681,6 +5735,7 @@ paths:
                 candidate_index: { type: integer, minimum: 0, default: 0 }
       responses:
         '200': { description: Transakce byla spárována }
+        '403': { description: Chybí oprávnění k párování nebo změně úhrady dokladu }
         '404': { description: Návrh nebyl nalezen v aktuální firmě }
         '409': { description: Návrh už byl vyřízen }
         '422': { description: Index kandidáta je mimo rozsah }
@@ -15702,7 +15757,8 @@ paths:
         cíl shody musí patřit firmě (`invalid_match`); pro jeden cíl a měnu smí mít hladina
         jen jedno pravidlo (`price_level_rule_duplicate`). Výběr pravidla při nacenění:
         produkt > kategorie = výrobce, pak `priority` sestupně, pak pravidlo pro konkrétní
-        měnu před pravidlem bez měny, pak nižší id; jinak výchozí sleva hladiny.
+        měnu před pravidlem bez měny, pak nižší id; jinak výchozí hodnota hladiny.
+        `discount_pct` je sleva v %, záporná hodnota je přirážka (−45 = cena 145 % standardní ceny).
       requestBody:
         required: true
         content:
@@ -21075,14 +21131,13 @@ paths:
       summary: Seznam všech bankovních pohybů napříč účty a roky
       description: |
         Pohyby ze všech bankovních výpisů aktuální firmy, včetně spárovaných
-        a ignorovaných. Dostupné každé firmě s výpisy bez ohledu na režim
+        a ignorovaných. E-mailová avíza jsou dostupná ve vlastních přehledech
+        a do tohoto seznamu ani exportu nespárovaných pohybů nevstupují. Dostupné každé firmě s výpisy bez ohledu na režim
         účetnictví; vyžaduje čtení banky. Stav zaúčtování (`posting.status`,
         protiúčty, `period_closed`) vyplňuje jen firma v podvojném účetnictví,
         jinak `posting` nese nejvýš mzdové párování. Filtr a řazení podle
         zaúčtování se mimo podvojné účetnictví ignorují.
       parameters:
-        - { in: query, name: show_confirmed, schema: { type: boolean, default: false }, description: Zahrnout historii avíz nahrazených bankovními pohyby. }
-        - { in: query, name: confirmation_state, schema: { type: string, enum: [pending, review, confirmed] }, description: Stav potvrzení e-mailového avíza výpisem; nezávislý na párování s dokladem. Výslovný filtr confirmed zahrne historii. }
         - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
         - { in: query, name: per_page, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
         - { in: query, name: year, schema: { type: integer }, description: Kalendářní rok pohybu. }
@@ -31134,7 +31189,7 @@ components:
             code: { type: string }
             name: { type: string }
         customer_price_id: { type: [integer, 'null'] }
-        discount_pct: { type: [string, 'null'], description: "Sleva zákaznické ceny nebo cenové hladiny, jen u price_source = customer_discount / price_level_discount." }
+        discount_pct: { type: [string, 'null'], description: "Sleva zákaznické ceny nebo cenové hladiny v %, jen u price_source = customer_discount / price_level_discount. Záporná hodnota u hladiny je přirážka." }
         promo:
           type: [object, 'null']
           properties:
@@ -31245,7 +31300,7 @@ components:
         id: { type: integer }
         code: { type: string, maxLength: 50 }
         name: { type: string, maxLength: 100 }
-        default_discount_pct: { type: string, description: "Výchozí sleva hladiny v % (0–100, tři desetinná místa)." }
+        default_discount_pct: { type: string, description: "Výchozí sleva hladiny v %, záporná hodnota je přirážka (−999,999 až 100, tři desetinná místa)." }
         is_active: { type: boolean }
         display_order: { type: integer }
         client_count: { type: integer, description: "Počet odběratelů s touto hladinou." }
@@ -31256,7 +31311,7 @@ components:
       properties:
         code: { type: string, maxLength: 50, description: "Bez mezer." }
         name: { type: string, maxLength: 100 }
-        default_discount_pct: { type: [string, number], default: 0, description: "0–100, nejvýš 3 desetinná místa." }
+        default_discount_pct: { type: [string, number], default: 0, description: "Sleva v %, záporná hodnota je přirážka; −999,999 až 100, nejvýš 3 desetinná místa." }
         is_active: { type: boolean, default: true }
         display_order: { type: integer, default: 0 }
     EshopPriceLevelRule:
@@ -31279,7 +31334,7 @@ components:
         match_type: { type: string, enum: [product, category, manufacturer] }
         match_id: { type: integer, minimum: 1 }
         rule_type: { type: string, enum: [discount_pct, fixed], description: "fixed jen pro product a vždy s měnou." }
-        discount_pct: { type: [string, number, 'null'], description: "Povinné pro discount_pct; 0–100, nejvýš 3 desetinná místa." }
+        discount_pct: { type: [string, number, 'null'], description: "Povinné pro discount_pct; sleva v %, záporná hodnota je přirážka; −999,999 až 100, nejvýš 3 desetinná místa." }
         fixed_price: { type: [string, number, 'null'], description: "Povinné pro fixed; ≥ 0, nejvýš 2 desetinná místa." }
         currency_code: { type: [string, 'null'], minLength: 3, maxLength: 3 }
         priority: { type: integer, default: 0 }
@@ -31314,7 +31369,7 @@ components:
         price_level_id: { type: integer, minimum: 1 }
         remove: { type: boolean, description: "true = odebrat výjimku (viz popis operace)." }
         rule_type: { type: string, enum: [discount_pct, fixed] }
-        discount_pct: { type: [string, number, 'null'] }
+        discount_pct: { type: [string, number, 'null'], description: "Sleva v %, záporná hodnota je přirážka; −999,999 až 100, nejvýš 3 desetinná místa." }
         fixed_price: { type: [string, number, 'null'] }
         currency_code: { type: [string, 'null'], minLength: 3, maxLength: 3 }
         priority: { type: integer, description: "Bez klíče zůstane priorita stávající výjimky (jinak 0)." }
@@ -35030,6 +35085,7 @@ components:
         default_branding_profile_id: { type: [integer, "null"], description: "Výchozí brandingový profil pro nové vydané faktury klienta." }
         email_subject_format: { type: [string, "null"], maxLength: 200, description: "Předmět e-mailu s fakturou pro tohoto klienta. Zástupné znaky: {VS} {TYP} {KLIENT} {DODAVATEL} {MM} {YYYY} {YY} {DUZP_MM} {DUZP_YYYY} {DUZP_YY} (MM/YYYY/YY z data vystavení, DUZP_* z data plnění). NULL = předmět podle e-mailové šablony." }
         email_attachment_name_format: { type: [string, "null"], maxLength: 120, description: "Název přiloženého PDF bez přípony `.pdf`, stejné zástupné znaky jako u předmětu. Platí pro všechny e-maily s PDF faktury (odeslání, upomínky, poděkování za úhradu). NULL = výchozí název podle druhu dokladu (Faktura-{VS}.pdf, Proforma-{VS}.pdf, Dobropis-{VS}.pdf…)." }
+        email_attach_isdoc: { type: [boolean, "null"], default: null, description: "Samostatný ISDOC v e-mailech s PDF faktury. null = podle nastavení firmy, true = přikládat, false = nepřikládat. Při částečné aktualizaci vynechání zachová uloženou hodnotu, explicitní null obnoví dědění. Nemění vložení ISDOC do PDF ani web fakturu." }
         price_level_id: { type: [integer, "null"], description: "Cenová hladina odběratele (skladový modul). NULL = bez hladiny (v UI „Default“) — skladové položky se naceňují standardní cenou." }
         price_level_name: { type: [string, "null"], readOnly: true, description: "Název přiřazené cenové hladiny (jen čtení)." }
         archived_at: { type: [string, "null"], format: date-time, description: "NULL = aktivní; vyplněno = archivováno" }
@@ -35191,6 +35247,7 @@ components:
         default_branding_profile_id: { type: [integer, "null"], description: "Volitelný výchozí brandingový profil; musí patřit aktuálnímu supplier-ovi." }
         email_subject_format: { type: [string, "null"], maxLength: 200, description: "Předmět e-mailu s fakturou; zástupné znaky {VS} {TYP} {KLIENT} {DODAVATEL} {MM} {YYYY} {YY} {DUZP_MM} {DUZP_YYYY} {DUZP_YY}. Neznámý znak nebo víc řádků = 400 `validation_failed`. Prázdné / null = výchozí." }
         email_attachment_name_format: { type: [string, "null"], maxLength: 120, description: "Název přiloženého PDF bez přípony; stejné zástupné znaky; znaky zakázané v názvech souborů (lomítka, dvojtečka, `* ? < > |`, uvozovky) = 400 `validation_failed`. Prázdné / null = výchozí." }
+        email_attach_isdoc: { type: [boolean, "null"], default: null, description: "Samostatný ISDOC v e-mailech s PDF faktury. null = podle nastavení firmy, true = přikládat, false = nepřikládat. Při částečné aktualizaci vynechání zachová uloženou hodnotu, explicitní null obnoví dědění. Nemění vložení ISDOC do PDF ani web fakturu." }
         price_level_id: { type: [integer, "null"], description: "Cenová hladina odběratele; musí patřit firmě a být aktivní (jinak 422 `invalid_price_level`). `null` = bez hladiny. Klíč vynech, pokud hladinu neměníš — bez něj zůstane beze změny." }
         email_contacts:
           type: array
@@ -36754,7 +36811,7 @@ components:
         jednotlivé dny jsou ze seznamu skryté jako jeho podklady.
       properties:
         confirmation_summary: { $ref: '#/components/schemas/BankNoticeConfirmationSummary' }
-        can_delete_notices: { type: boolean, description: U avíz v seznamu jde o předběžnou odstranitelnost podle uložených stavů a dávkové kontroly vazeb. Detail a mazání ověřují aktuální data znovu. }
+        can_delete_notices: { type: boolean, description: U avíz jde o předběžnou odstranitelnost podle dávkové kontroly vazeb. Potvrzení všech avíz není podmínkou; mazání ověřuje aktuální data znovu pod zámkem. }
         deletion_blockers:
           type: array
           items: { $ref: '#/components/schemas/BankNoticeDeletionBlocker' }
@@ -36838,17 +36895,37 @@ components:
               type: array
               items: { $ref: '#/components/schemas/BankTransaction' }
 
-    BankTransaction:
+    BankUnignoreResult:
       type: object
       properties:
+        unmatched: { type: boolean, const: true }
+
+    BankTransaction:
+      type: object
+      description: |
+        Klientská role vidí pouze vazby na doklady z agend, ke kterým má právo čtení.
+        Ostatní vazby jsou prázdné nebo null; účetní detaily, dimenze a interní údaje
+        o platebních kartách se klientům neposkytují.
+      properties:
+        resolution:
+          type: [string, "null"]
+          enum: [payroll, transfer, outside_saldo, null]
+          description: Bezpečné označení jiného vypořádání pohybu pro klientské zobrazení bez účetních detailů.
+        match_available:
+          type: boolean
+          description: Dostupnost párování pohybu pro klienta; samotná akce navíc vyžaduje odpovídající oprávnění.
+        ignore_available:
+          type: boolean
+          description: Dostupnost ignorování pohybu pro klienta; samotná akce navíc vyžaduje bank.ignore k zápisu.
+        ignore_origin: { type: [string, "null"], enum: [manual, notice_transfer, superseded, null], description: Původ ignorování nebo převzetí avíza výpisem }
         confirmation_state: { type: string, enum: [pending, review, confirmed], description: Jen u e-mailových avíz. Potvrzení výpisem je oddělené od match_status a od zaúčtování. }
+        confirmation_record_exists: { type: boolean, description: Jen pro interní uživatele v detailu avíz email_notice a idoklad. Rozlišuje existující historii potvrzení od dosud nekontrolovaného avíza. }
         confirmation_reason: { type: [string, "null"], description: Strojový důvod čekání nebo kontroly. }
         authoritative_transaction_id: { type: [integer, "null"], format: int64 }
         authoritative_statement_id: { type: [integer, "null"], format: int64 }
         authoritative_statement_ids: { type: array, items: { type: integer, format: int64 }, description: Dostupné podklady kanonického potvrzujícího pohybu. }
         candidates: { type: array, items: { $ref: '#/components/schemas/BankNoticeConfirmationCandidate' } }
-        blockers: { type: array, items: { type: string }, description: Strojové důvody bránící bezpečnému potvrzení avíza. Úplné živé posouzení poskytuje detail a kontrola avíz; seznam pohybů pole nevrací. }
-        ignore_origin: { type: [string, "null"], enum: [manual, notice_transfer, superseded, null], description: Původ ignorování }
+        blockers: { type: array, items: { type: string }, description: Strojové důvody bránící bezpečnému potvrzení avíza. Úplné živé posouzení poskytuje kontrola avíz. Detail načítá uložené stavy a kandidáty pouze zobrazené stránky; seznam všech pohybů avíza neobsahuje. }
         id: { type: integer, format: int64 }
         source: { type: string, enum: [statement, email_notice, idoklad] }
         statement_id: { type: integer, format: int64, description: ID původního výpisu pohybu. U pohybu sdíleného mezi API a GPC se může lišit od ID právě zobrazeného výpisu. }
@@ -36970,6 +37047,8 @@ components:
         subset (fakturační údaje, defaulty, číslování, branding). `logo_path`
         a `signature_path` přes tento endpoint změnit NELZE (bezpečnost).
       properties:
+        public_isdoc_enabled: { type: boolean, default: false, description: "Nabízet samostatný ISDOC na web faktuře. Nezávislé na vložení ISDOC do PDF." }
+        email_attach_isdoc: { type: boolean, default: false, description: "Přikládat samostatný ISDOC vedle PDF v e-mailech faktur, včetně automatického odesílání, upomínek a poděkování s PDF. Výslovná volba odběratele email_attach_isdoc má přednost." }
         company_name: { type: string }
         purchase_import_received_at: { type: string, enum: [issue_date, import_date], default: issue_date, description: "Datum přijetí u importovaných přijatých dokladů (migrace 1848). issue_date = datum z dokladu (datum vystavení, jinak DUZP), import_date = den importu. Platí pro všechny formáty importu — AI z PDF, ISDOC/ISDOCX/PDF/A-3, Pohoda XML, iDoklad, Fakturoid i scan inbox. Na období nároku na odpočet vliv nemá: importovaný doklad si drží received_at_source='import'." }
         display_name: { type: [string, "null"], description: "Obchodní/značkové jméno v hlavičce PDF a e-mailů (fallback = company_name)" }
@@ -37056,6 +37135,8 @@ components:
         na `GET /api/settings/currencies`. (Pozn.: response obsahuje i další
         sloupce mimo tento výčet — branding, integrace, payment-thanks ap.)
       properties:
+        public_isdoc_enabled: { type: boolean, default: false, description: "Nabízet samostatný ISDOC na web faktuře. Nezávislé na vložení ISDOC do PDF." }
+        email_attach_isdoc: { type: boolean, default: false, description: "Přikládat samostatný ISDOC vedle PDF v e-mailech faktur, včetně automatického odesílání, upomínek a poděkování s PDF. Výslovná volba odběratele email_attach_isdoc má přednost." }
         id: { type: integer }
         company_name: { type: string }
         purchase_import_received_at: { type: string, enum: [issue_date, import_date], description: "Datum přijetí u importovaných přijatých dokladů (migrace 1848). issue_date = datum z dokladu (datum vystavení, jinak DUZP) — výchozí; import_date = den importu." }
@@ -37068,6 +37149,18 @@ components:
         ic: { type: [string, "null"] }
         dic: { type: [string, "null"] }
         is_vat_payer: { type: boolean, description: "Aktuální stav plátcovství DPH (derivovaná cache dneška); historie změn v `vat_status_history` (tabulka supplier_vat_status_history). Pro rozhodování k datu dokladu/období vždy použij historii, ne tento flag." }
+        client_ai_extraction_enabled:
+          type: boolean
+          default: false
+          readOnly: true
+          description: "Správce povolil klientské AI vytěžování pro tuto firmu. Samotná dostupnost vyžaduje také oprávnění uživatele a nakonfigurovaného aktivního AI poskytovatele firmy."
+        client_ai_extraction_monthly_limit:
+          type: integer
+          minimum: 0
+          maximum: 100000
+          default: 100
+          readOnly: true
+          description: "Měsíční limit klientských pokusů o vytěžení přijatých dokladů. Počítá se každý platný upload předaný ke zpracování včetně neúspěchu, duplicity a strukturovaného dokladu. Nula jejich vytěžování blokuje."
         dimensions_enabled: { type: boolean, description: "Uložený příznak dimenzí. Dostupnost funkce navíc závisí na platné licenci účetnictví." }
         vat_status_history:
           type: array

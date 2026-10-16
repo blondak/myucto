@@ -11,25 +11,20 @@ use MyInvoice\Service\Bank\UnmatchedBankExportService;
 
 final class BankNoticeReaderTest extends BankPostingTestCase
 {
-    public function testConfirmationFiltersAndPaginationKeepReviewVisible(): void
+    public function testAllMovementsAndUnmatchedExportExcludeLegacyAndUncheckedNotices(): void
     {
         [$notice, $target] = $this->confirmedPair();
+        $this->db->pdo()->prepare('DELETE FROM bank_notice_confirmations WHERE notice_transaction_id=?')->execute([$notice]);
         $filters = ['scope' => 'all', 'account' => self::ACCOUNT, 'year' => self::YEAR];
-        $page = $this->suggestionRepo->paginateUnposted($this->supplierId, 1, 0, $filters);
-        self::assertSame(1, $page['total']);
-        self::assertSame([$target], array_column($page['items'], 'id'));
-        $history = $this->suggestionRepo->paginateUnposted($this->supplierId, 1, 0, $filters + ['confirmation_state' => 'confirmed']);
-        self::assertSame(1, $history['total']);
-        self::assertSame([$notice], array_column($history['items'], 'id'));
-        self::assertSame(2, $this->suggestionRepo->paginateUnposted($this->supplierId, 0, 0, $filters + ['show_confirmed' => true])['total']);
-
-        $this->invalidate($notice);
-        $review = $this->suggestionRepo->paginateUnposted($this->supplierId, 1, 0, $filters + ['confirmation_state' => 'review']);
-        self::assertSame(1, $review['total']);
-        self::assertSame([$notice], array_column($review['items'], 'id'));
-        $list = $this->container->get(BankMovementListService::class)->list($this->supplierId, $filters + ['confirmation_state' => 'review'], 'all');
-        self::assertSame('review', $list['items'][0]['confirmation_state']);
-        self::assertSame('authoritative_removed', $list['items'][0]['confirmation_reason']);
+        foreach ([null, 'superseded'] as $origin) {
+            $this->db->pdo()->prepare('UPDATE bank_transactions SET ignore_origin=? WHERE id=?')->execute([$origin, $notice]);
+            $page = $this->suggestionRepo->paginateUnposted($this->supplierId, 50, 0, $filters);
+            self::assertSame([$target], array_column($page['items'], 'id'));
+            $list = $this->container->get(BankMovementListService::class)->list($this->supplierId, $filters, 'all');
+            self::assertSame([$target], array_column($list['items'], 'id'));
+            $export = new UnmatchedBankExportService($this->db);
+            self::assertSame(1, $export->buildAll($this->supplierId, ['year' => self::YEAR, 'account' => self::ACCOUNT])['count']);
+        }
     }
 
     public function testCardCandidatesAndExportCannotReuseConfirmedOrInvalidatedNotice(): void
@@ -48,6 +43,24 @@ final class BankNoticeReaderTest extends BankPostingTestCase
             self::assertSame(1, $cards->unmatched($this->supplierId, self::YEAR . '-01-01', self::YEAR . '-12-31')['count']);
             self::assertSame(1, $export->buildAll($this->supplierId, ['year' => self::YEAR, 'account' => self::ACCOUNT])['count']);
         }
+    }
+
+    public function testActiveScopePreservesLegacyLifecycleAndConfirmedHistory(): void
+    {
+        [$notice, $target] = $this->confirmedPair();
+        $pdo = $this->db->pdo();
+        $active = $pdo->prepare('SELECT COUNT(*) FROM bank_transactions bt WHERE bt.id=? AND ' . \MyInvoice\Service\Bank\BankNoticeConfirmationScope::activeSql());
+        $pdo->prepare("UPDATE bank_transactions SET ignore_origin='superseded',match_status='manual' WHERE id=?")->execute([$notice]);
+        $active->execute([$notice]);
+        self::assertSame(0, (int) $active->fetchColumn(), 'Persisted confirmation remains history even with legacy matching metadata.');
+        $pdo->prepare('DELETE FROM bank_notice_confirmations WHERE notice_transaction_id=?')->execute([$notice]);
+        foreach (['unmatched' => 0, 'ignored' => 0, 'manual' => 1, 'auto_exact' => 1] as $status => $expected) {
+            $pdo->prepare('UPDATE bank_transactions SET match_status=? WHERE id=?')->execute([$status, $notice]);
+            $active->execute([$notice]);
+            self::assertSame($expected, (int) $active->fetchColumn(), $status);
+        }
+        $active->execute([$target]);
+        self::assertSame(1, (int) $active->fetchColumn());
     }
 
     /** @return array{int,int} */

@@ -227,6 +227,8 @@ export interface Supplier {
   reminder_days_after_due: number
   auto_generate_recurring: boolean
   embed_isdoc: boolean
+  public_isdoc_enabled: boolean
+  email_attach_isdoc: boolean
   /** Přidat SPAYD DT se splatností do QR vystavených dokladů. */
   invoice_qr_include_due_date: boolean
   /** Přidat SPAYD DT se splatností do QR přijatých dokladů. */
@@ -356,6 +358,8 @@ export interface Supplier {
   cssz_ossz_code?: string | null
   health_insurance_number?: string | null
   // AI extrakční brána (Epic F7) — non-secret volby (secrety jen přes /ai/credentials).
+  client_ai_extraction_enabled?: boolean
+  client_ai_extraction_monthly_limit?: number
   ai_provider?: 'anthropic' | 'azure_openai' | 'openai' | 'gemini' | 'ollama'
   ai_data_region?: 'eu' | 'us'
   ai_eu_residency_required?: boolean

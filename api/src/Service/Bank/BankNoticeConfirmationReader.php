@@ -5,12 +5,25 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Bank;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\BankStatementOwnershipResolver;
 use PDO;
 
 /** Dávkový přehled uloženého životního cyklu. Živé posouzení změny patří do confirmation service. */
 final class BankNoticeConfirmationReader
 {
     public function __construct(private readonly Connection $db) {}
+
+    /** @return array<int,bool> Historie pro legacy avíza včetně iDokladu, bez posuzování kandidátů. */
+    public function recordExistence(int $supplierId, array $transactionIds): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $transactionIds), static fn (int $id): bool => $id > 0)));
+        if ($ids === []) return [];
+        $stmt = $this->db->pdo()->prepare('SELECT bt.id, EXISTS (SELECT 1 FROM bank_notice_confirmations c WHERE c.notice_transaction_id=bt.id) AS confirmation_record_exists FROM bank_transactions bt JOIN bank_statements bs ON bs.id=bt.statement_id WHERE ' . BankStatementOwnershipResolver::sql() . ' AND bt.id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')');
+        $stmt->execute([...BankStatementOwnershipResolver::params($supplierId), ...$ids]);
+        $result = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $result[(int) $row['id']] = (bool) $row['confirmation_record_exists'];
+        return $result;
+    }
 
     /** @return array<int,array<string,mixed>> */
     public function notices(int $supplierId, array $transactionIds): array
@@ -63,7 +76,6 @@ final class BankNoticeConfirmationReader
             $entry['confirmation_summary'][$row['confirmation_state']] += (int) $row['notice_count'];
             $entry['confirmation_summary']['total'] += (int) $row['notice_count'];
             $codes = [];
-            if ($row['confirmation_state'] !== 'confirmed') $codes[$row['confirmation_reason'] ?? 'not_confirmed'] = (int) $row['notice_count'];
             foreach ($row as $key => $value) {
                 if (str_starts_with($key, 'dependency_') && (int) $value > 0) $codes[$key] = max($codes[$key] ?? 0, (int) $value);
             }
@@ -72,7 +84,7 @@ final class BankNoticeConfirmationReader
         }
         foreach ($result as &$entry) {
             $summary = $entry['confirmation_summary'];
-            $entry['can_delete_notices'] = $summary['total'] > 0 && $summary['confirmed'] === $summary['total'] && $entry['deletion_blockers'] === [];
+            $entry['can_delete_notices'] = $entry['deletion_blockers'] === [];
             $entry['deletion_blockers'] = array_map(static fn (string $code, int $count): array => ['code' => $code, 'count' => $count], array_keys($entry['deletion_blockers']), array_values($entry['deletion_blockers']));
         }
         unset($entry);
@@ -99,18 +111,17 @@ final class BankNoticeConfirmationReader
         $predicates = [];
         if ($dependencies) {
             $predicates = [];
-            foreach ([...BankNoticeConfirmationService::blockingLinks(), ['invoice_payments', 'bank_transaction_id'], ['payment_matches', 'bank_transaction_id'], ['gopay_clearings', 'payout_match_transaction_id']] as [$table, $key]) {
-                $predicates[$table][] = "EXISTS (SELECT 1 FROM {$table} dep WHERE dep.{$key}=bt.id)";
+            foreach (BankNoticeConfirmationService::deletionDependencies('bt.id') as $table => $conditions) {
+                foreach ($conditions as $where) $predicates[$table][] = "EXISTS (SELECT 1 FROM {$table} dep WHERE {$where})";
             }
-            foreach (['journal_entries' => "source_type IN ('bank','card_settlement','card_writeoff') AND source_id=bt.id", 'cash_journal_notes' => "source_type='bank' AND source_id=bt.id AND deleted_at IS NULL", 'de_movement_classification_history' => "source_type='bank' AND source_id=bt.id", 'document_links' => "entity_type='bank_transaction' AND entity_id=bt.id", 'document_dimensions' => "doc_type='bank_transaction' AND doc_id=bt.id", 'document_dimension_splits' => "doc_type='bank_transaction' AND doc_id=bt.id"] as $table => $where) $predicates[$table][] = "EXISTS (SELECT 1 FROM {$table} dep WHERE {$where})";
             foreach ($predicates as $table => $conditions) $extra .= ', (' . implode(' OR ', $conditions) . ") AS dependency_{$table}";
         }
         $columns = $dependencies ? 'bt.id,bt.statement_id' : 'bt.*,bs.supplier_id,bs.account_number AS stmt_account,bs.bank_code AS stmt_bank,bs.currency AS stmt_currency,c.authoritative_transaction_id';
         $sql = "SELECT {$columns},
             CASE WHEN c.state='confirmed' AND c.authoritative_transaction_id IS NULL THEN 'review' ELSE COALESCE(c.state,'pending') END AS confirmation_state,
             CASE WHEN c.state='confirmed' AND c.authoritative_transaction_id IS NULL THEN 'authoritative_removed' WHEN c.id IS NULL THEN 'not_checked' ELSE c.reason END AS confirmation_reason
-            {$extra} FROM bank_transactions bt JOIN bank_statements bs ON bs.id=bt.statement_id LEFT JOIN bank_notice_confirmations c ON c.notice_transaction_id=bt.id AND c.supplier_id=bs.supplier_id
-            WHERE bs.supplier_id=? AND bs.source='email_notice' AND bt.source='email_notice' AND {$column} IN (" . implode(',', array_fill(0, count($ids), '?')) . ')';
+            {$extra} FROM bank_transactions bt JOIN bank_statements bs ON bs.id=bt.statement_id LEFT JOIN bank_notice_confirmations c ON c.notice_transaction_id=bt.id AND c.supplier_id=" . (int) $supplierId . "
+            WHERE " . BankStatementOwnershipResolver::sql() . " AND bs.source='email_notice' AND bt.source='email_notice' AND {$column} IN (" . implode(',', array_fill(0, count($ids), '?')) . ')';
         if ($dependencies) {
             $sums = '';
             foreach (array_keys($predicates) as $table) $sums .= ", SUM(dependency_{$table}) AS dependency_{$table}";
@@ -119,7 +130,7 @@ final class BankNoticeConfirmationReader
             $sql .= ' ORDER BY bt.id';
         }
         $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute([$supplierId, ...$ids]);
+        $stmt->execute([...BankStatementOwnershipResolver::params($supplierId), ...$ids]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
@@ -127,8 +138,8 @@ final class BankNoticeConfirmationReader
     {
         $ids = array_values(array_unique(array_filter(array_map('intval', array_column($rows, 'authoritative_transaction_id')))));
         if ($ids === []) return [];
-        $stmt = $this->db->pdo()->prepare('SELECT bt.id,bt.statement_id,bi.statement_id AS imported_statement_id FROM bank_transactions bt JOIN bank_statements bs ON bs.id=bt.statement_id LEFT JOIN bank_transaction_imports bi ON bi.bank_transaction_id=bt.id WHERE bs.supplier_id=? AND bt.id IN (' . implode(',', array_fill(0, count($ids), '?')) . ') ORDER BY bt.id,bi.statement_id');
-        $stmt->execute([$supplierId, ...$ids]);
+        $stmt = $this->db->pdo()->prepare('SELECT bt.id,bt.statement_id,bi.statement_id AS imported_statement_id FROM bank_transactions bt JOIN bank_statements bs ON bs.id=bt.statement_id LEFT JOIN bank_transaction_imports bi ON bi.bank_transaction_id=bt.id WHERE ' . BankStatementOwnershipResolver::sql() . ' AND bt.id IN (' . implode(',', array_fill(0, count($ids), '?')) . ') ORDER BY bt.id,bi.statement_id');
+        $stmt->execute([...BankStatementOwnershipResolver::params($supplierId), ...$ids]);
         $result = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $id = (int) $row['id'];
@@ -148,8 +159,8 @@ final class BankNoticeConfirmationReader
         $stmt = $this->db->pdo()->prepare('WITH notice_dates AS (SELECT DISTINCT posted_at FROM bank_transactions WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . "))
             SELECT DISTINCT bt.*,bs.account_number AS stmt_account,bs.bank_code AS stmt_bank,bs.currency AS stmt_currency
             FROM notice_dates nd JOIN bank_transactions bt ON bt.posted_at BETWEEN DATE_SUB(nd.posted_at, INTERVAL 5 DAY) AND DATE_ADD(nd.posted_at, INTERVAL 5 DAY)
-            JOIN bank_statements bs ON bs.id=bt.statement_id WHERE bs.supplier_id=? AND bt.source='statement' AND bs.source IN " . BankStatementSource::sqlList() . ' ORDER BY bt.id');
-        $stmt->execute([...$ids, $supplierId]);
+            JOIN bank_statements bs ON bs.id=bt.statement_id WHERE " . BankStatementOwnershipResolver::sql() . " AND bt.source='statement' AND bs.source IN " . BankStatementSource::sqlList() . ' ORDER BY bt.id');
+        $stmt->execute([...$ids, ...BankStatementOwnershipResolver::params($supplierId)]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 }

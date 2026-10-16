@@ -10,6 +10,7 @@ use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Tests\Support\BankSqlitePdo;
+use MyInvoice\Security\EffectiveRole;
 use PDO;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -39,10 +40,12 @@ final class BankIgnoreNoteTest extends TestCase
         $sqlite->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $sqlite->exec('CREATE TABLE bank_transactions (id INTEGER, statement_id INTEGER, match_status TEXT, matched_invoice_id INTEGER, ignore_note TEXT, ignore_origin TEXT)');
         $sqlite->exec("INSERT INTO bank_transactions VALUES (1, 2, 'unmatched', NULL, NULL, NULL)");
-        $sqlite->exec('CREATE TABLE bank_notice_confirmations (supplier_id INTEGER, notice_transaction_id INTEGER, state TEXT, reason TEXT)');
+        $sqlite->exec("ALTER TABLE bank_transactions ADD COLUMN source TEXT DEFAULT 'statement'");
+        $sqlite->exec('CREATE TABLE bank_notice_confirmations (supplier_id INTEGER, notice_transaction_id INTEGER, state TEXT, reason TEXT, authoritative_transaction_id INTEGER)');
         $sqlite->exec('CREATE TABLE bank_statements (id INTEGER, matched_count INTEGER)');
         $sqlite->exec('INSERT INTO bank_statements VALUES (2, 0)');
         $sqlite->exec('CREATE TABLE activity_log (supplier_id, user_id, action, entity_type, entity_id, payload, ip, user_agent)');
+        $this->createAllocationTables($sqlite);
 
         // MariaDB ownership SQL is covered separately; all writes execute against SQLite.
         $pdo = $this->scopedPdo($sqlite);
@@ -63,6 +66,7 @@ final class BankIgnoreNoteTest extends TestCase
         $reflection->getProperty('matchV2')->setValue($action, $matchReflection->newInstanceWithoutConstructor());
         $request = (new ServerRequestFactory())->createServerRequest('POST', '/bank-transactions/1/ignore')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 7)
+            ->withAttribute('auth.effective_role', new EffectiveRole(0, 'Synthetic bank staff', 'staff', true, ['bank' => 1, 'bank.ignore' => 2]))
             ->withParsedBody($note === null ? [] : ['note' => $note]);
         $response = $action->ignore($request, new Response(), ['id' => 1]);
         self::assertSame($status, $response->getStatusCode());
@@ -97,10 +101,12 @@ final class BankIgnoreNoteTest extends TestCase
         $sqlite->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $sqlite->exec('CREATE TABLE bank_transactions (id INTEGER, statement_id INTEGER, match_status TEXT, matched_invoice_id INTEGER, ignore_note TEXT, ignore_origin TEXT)');
         $sqlite->exec("INSERT INTO bank_transactions VALUES (1, 2, 'ignored', NULL, 'Uložená poznámka', 'manual')");
-        $sqlite->exec('CREATE TABLE bank_notice_confirmations (supplier_id INTEGER, notice_transaction_id INTEGER, state TEXT, reason TEXT)');
+        $sqlite->exec("ALTER TABLE bank_transactions ADD COLUMN source TEXT DEFAULT 'statement'");
+        $sqlite->exec('CREATE TABLE bank_notice_confirmations (supplier_id INTEGER, notice_transaction_id INTEGER, state TEXT, reason TEXT, authoritative_transaction_id INTEGER)');
         $sqlite->exec('CREATE TABLE bank_statements (id INTEGER, matched_count INTEGER)');
         $sqlite->exec('INSERT INTO bank_statements VALUES (2, 0)');
         $sqlite->exec('CREATE TABLE activity_log (supplier_id, user_id, action, entity_type, entity_id, payload, ip, user_agent)');
+        $this->createAllocationTables($sqlite);
 
         $pdo = $this->scopedPdo($sqlite);
         $db = $this->createStub(Connection::class);
@@ -116,6 +122,7 @@ final class BankIgnoreNoteTest extends TestCase
         $reflection->getProperty('matchV2')->setValue($action, $matchReflection->newInstanceWithoutConstructor());
         $request = (new ServerRequestFactory())->createServerRequest('POST', '/bank-transactions/1/ignore')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 7)
+            ->withAttribute('auth.effective_role', new EffectiveRole(0, 'Synthetic bank staff', 'staff', true, ['bank' => 1, 'bank.ignore' => 2]))
             ->withParsedBody($body);
         $response = $action->ignore($request, new Response(), ['id' => 1]);
         self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
@@ -137,7 +144,8 @@ final class BankIgnoreNoteTest extends TestCase
         $sqlite->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $sqlite->exec('CREATE TABLE bank_transactions (id INTEGER, statement_id INTEGER, match_status TEXT, matched_invoice_id INTEGER, ignore_note TEXT, posted_at TEXT, matched_at TEXT, matched_by INTEGER, ignore_origin TEXT)');
         $sqlite->exec("INSERT INTO bank_transactions VALUES (1, 2, 'ignored', NULL, 'Test note', '2099-01-01', NULL, NULL, 'manual')");
-        $sqlite->exec('CREATE TABLE bank_notice_confirmations (supplier_id INTEGER, notice_transaction_id INTEGER, state TEXT, reason TEXT)');
+        $sqlite->exec("ALTER TABLE bank_transactions ADD COLUMN source TEXT DEFAULT 'statement'");
+        $sqlite->exec('CREATE TABLE bank_notice_confirmations (supplier_id INTEGER, notice_transaction_id INTEGER, state TEXT, reason TEXT, authoritative_transaction_id INTEGER)');
         $sqlite->exec('CREATE TABLE bank_statements (id INTEGER, matched_count INTEGER)');
         $sqlite->exec('INSERT INTO bank_statements VALUES (2, 0)');
         $sqlite->exec('CREATE TABLE activity_log (supplier_id, user_id, action, entity_type, entity_id, payload, ip, user_agent)');
@@ -175,7 +183,8 @@ final class BankIgnoreNoteTest extends TestCase
         $matchReflection = new \ReflectionClass(\MyInvoice\Service\Bank\Match\MatchSuggestionService::class);
         $reflection->getProperty('matchV2')->setValue($action, $matchReflection->newInstanceWithoutConstructor());
         $request = (new ServerRequestFactory())->createServerRequest('POST', '/bank-transactions/1/unmatch')
-            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 7);
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 7)
+            ->withAttribute('auth.effective_role', new EffectiveRole(0, 'Synthetic bank staff', 'staff', true, ['bank' => 1, 'bank.match' => 2]));
         $response = $action->unmatch($request, new Response(), ['id' => 1]);
         self::assertSame($closed ? 409 : 200, $response->getStatusCode(), (string) $response->getBody());
         $row = $sqlite->query('SELECT match_status, ignore_note FROM bank_transactions')->fetch(PDO::FETCH_ASSOC);
@@ -192,6 +201,9 @@ final class BankIgnoreNoteTest extends TestCase
         $pdo = $this->createStub(PDO::class);
         $pdo->method('prepare')->willReturnCallback(static function (string $sql) use ($scope, $sqlite) {
             if (str_contains($sql, 'CASE WHEN bs.supplier_id')) {
+                if (str_contains($sql, 'SELECT bt.*')) {
+                    return $sqlite->prepare('SELECT * FROM bank_transactions WHERE id=? AND ?=?');
+                }
                 if (str_contains($sql, 'SELECT bt.id, bt.statement_id, bt.matched_invoice_id')) {
                     return $sqlite->prepare('SELECT id, statement_id, matched_invoice_id, posted_at, match_status FROM bank_transactions WHERE id=? AND ?=?');
                 }
@@ -218,7 +230,7 @@ final class BankIgnoreNoteTest extends TestCase
         ], null);
         $row += ['id' => 1, 'transaction_source' => 'statement', 'statement_id' => 2,
             'posted_at' => '2099-01-01', 'amount' => -25, 'currency' => 'CZK', 'account_number' => '1000000005',
-            'match_status' => 'unmatched', 'ignore_note' => 'Test note', 'period_closed' => false];
+            'match_status' => 'unmatched', 'ignore_note' => 'Test note', 'ignore_origin' => null, 'period_closed' => false];
         $count = $this->createStub(\PDOStatement::class);
         $count->method('fetchColumn')->willReturn(1);
         $list = $this->createStub(\PDOStatement::class);
@@ -238,5 +250,15 @@ final class BankIgnoreNoteTest extends TestCase
         $db->method('pdo')->willReturn($pdo);
         $result = (new \MyInvoice\Repository\BankPostingSuggestionRepository($db))->paginateUnposted(7, 50, 0);
         self::assertSame('Test note', $result['items'][0]['ignore_note']);
+    }
+
+    private function createAllocationTables(PDO $sqlite): void
+    {
+        foreach (['invoice_payments', 'payment_matches', 'payroll_payment_matches', 'other_item_allocations'] as $table) {
+            $sqlite->exec('CREATE TABLE ' . $table . ' (bank_transaction_id INTEGER)');
+        }
+        $sqlite->exec('CREATE TABLE tax_advance_schedules (matched_transaction_id INTEGER)');
+        $sqlite->exec('CREATE TABLE bank_transfer_matches (in_transaction_id INTEGER, out_transaction_id INTEGER)');
+        $sqlite->exec('CREATE TABLE gopay_clearings (bank_transaction_id INTEGER, payout_match_transaction_id INTEGER)');
     }
 }

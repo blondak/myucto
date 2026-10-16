@@ -85,12 +85,12 @@ final class BankNoticeConfirmationBatchReadTest extends TestCase
         self::assertSame($one, $many, 'Počet SQL SELECT nesmí růst s počtem přehledů avíz.');
         foreach ($last['items'] as $item) {
             self::assertSame(['pending' => 1, 'review' => 0, 'confirmed' => 0, 'total' => 1], $item['confirmation_summary']);
-            self::assertFalse($item['can_delete_notices']);
-            self::assertSame([['code' => 'not_checked', 'count' => 1]], $item['deletion_blockers']);
+            self::assertTrue($item['can_delete_notices']);
+            self::assertSame([], $item['deletion_blockers']);
         }
     }
 
-    public function testMovementListQueryCountDoesNotGrowAndKeepsLiveCandidates(): void
+    public function testAllMovementListExcludesNoticesAndKeepsConstantReadQueries(): void
     {
         $this->movement();
         [$target] = $this->movement('gpc');
@@ -100,15 +100,12 @@ final class BankNoticeConfirmationBatchReadTest extends TestCase
         [$one, $first] = $this->selects(fn () => $list->list($this->supplier, $query, 'all'));
         for ($i = 0; $i < 24; $i++) $this->movement();
         [$many, $last] = $this->selects(fn () => $list->list($this->supplier, $query, 'all'));
-        self::assertSame(2, $first['total']);
-        self::assertSame(26, $last['total']);
+        self::assertSame(1, $first['total']);
+        self::assertSame(1, $last['total']);
         self::assertSame($one, $many, 'Počet SQL SELECT nesmí růst s počtem řádků avíz.');
-        foreach ($last['items'] as $item) {
-            if ($item['source'] !== 'email_notice') continue;
-            self::assertSame('pending', $item['confirmation_state']);
-            self::assertSame('not_checked', $item['confirmation_reason']);
-            self::assertSame([$target], array_column($item['candidates'], 'id'));
-        }
+        self::assertSame([$target], array_column($first['items'], 'id'));
+        self::assertSame([$target], array_column($last['items'], 'id'));
+        self::assertSame(['statement'], array_column($last['items'], 'source'));
         self::assertSame(0, (int) $this->db->pdo()->query('SELECT COUNT(*) FROM bank_notice_confirmations WHERE supplier_id=' . $this->supplier)->fetchColumn(), 'GET nesmí zapisovat ani automaticky potvrzovat.');
     }
 
