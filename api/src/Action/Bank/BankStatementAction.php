@@ -1449,7 +1449,7 @@ final class BankStatementAction
         // mít stabilní).
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         if (!RequestAuthorization::allows($request, 'bank', AccessLevel::WRITE)) {
-            return Json::error($response, 'forbidden', 'Pouze admin smí mazat výpisy.', 403);
+            return Json::error($response, 'forbidden', 'Chybí oprávnění pro zápis banky.', 403);
         }
 
         // Supplier scope check — stejný predikát jako detail()/download() (SEC-01).
@@ -1462,9 +1462,6 @@ final class BankStatementAction
         $ownedRow = $owned->fetch(\PDO::FETCH_ASSOC);
         if ($ownedRow === false) {
             return Json::error($response, 'not_found', 'Výpis nenalezen.', 404);
-        }
-        if ($ownedRow['source'] === 'email_notice' && !RequestAuthorization::isCompanyAdmin($request)) {
-            return Json::error($response, 'forbidden', 'Pouze správce firmy smí trvale mazat avíza.', 403);
         }
         $fileName = (string) $ownedRow['file_name'];
 

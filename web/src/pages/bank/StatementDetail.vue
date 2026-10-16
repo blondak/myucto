@@ -500,7 +500,7 @@ const statementActions = computed<ActionItem[]>(() => {
       icon: 'trash',
       tier: 'advanced',
       variant: 'danger',
-      show: !auth.isClientRole && auth.isCompanyAdminRole && (s.api_evidence === true || isVirtual.value),
+      show: !auth.isClientRole && auth.canWrite('bank') && (s.source === 'email_notice' || auth.isCompanyAdminRole) && (s.api_evidence === true || isVirtual.value),
       title: t(s.api_evidence ? 'bank.statement_delete_evidence_hint' : 'bank.statement_delete_hint'),
       disabled: deletingStatement.value || (s.source === 'email_notice' && !s.can_delete_notices),
       disabledReason: s.source === 'email_notice' && !s.can_delete_notices ? t('bank.notice_confirmation.delete_blocked') : undefined,

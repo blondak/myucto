@@ -35,7 +35,9 @@ const { t, tm, rt, locale } = useI18n()
 const toast = useToast()
 const authStore = useAuthStore()
 const supplierStore = useSupplierStore()
-const isAdmin = computed(() => authStore.isCompanyAdminRole)
+function canDeleteStatement(statement: BankStatement): boolean {
+  return !authStore.isClientRole && authStore.canWrite('bank') && (statement.source === 'email_notice' || authStore.isCompanyAdminRole)
+}
 const isDoubleEntry = computed(() => !authStore.isClientRole && authStore.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
 
 const router = useRouter()
@@ -442,7 +444,7 @@ const groupedStatements = computed(() => {
 
 async function onDelete(s: BankStatement, ev: MouseEvent) {
   ev.stopPropagation()
-  if (s.source === 'email_notice' && !s.can_delete_notices) return
+  if (!canDeleteStatement(s) || (s.source === 'email_notice' && !s.can_delete_notices)) return
   const prompt = s.source === 'email_notice' ? t('bank.notice_confirmation.delete_confirm') : t('bank.delete_confirm', { name: s.file_name })
   const noticeWarning = s.deleted_notice_confirmations ? '\n\n' + t('bank.notice_confirmation.deleted_evidence_warning', { count: s.deleted_notice_confirmations }) : ''
   if (!confirm(prompt + noticeWarning)) return
@@ -894,7 +896,7 @@ useWindowRefresh(['bank', 'bank-statements', 'bank-transactions', 'bank-match-su
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                   PDF
                 </button>
-                <button v-if="isAdmin && !s.api_month" :disabled="s.source === 'email_notice' && !s.can_delete_notices" type="button" @click="onDelete(s, $event)"
+                <button v-if="canDeleteStatement(s) && !s.api_month" :disabled="s.source === 'email_notice' && !s.can_delete_notices" type="button" @click="onDelete(s, $event)"
                    :title="t(s.source === 'email_notice' && !s.can_delete_notices ? 'bank.notice_confirmation.delete_blocked' : 'bank.delete')"
                    class="cursor-pointer inline-flex w-7 h-7 items-center justify-center text-neutral-400 hover:text-danger-500 hover:bg-danger-50 border border-transparent hover:border-danger-200 rounded">
                   <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3"/></svg>
@@ -969,7 +971,7 @@ useWindowRefresh(['bank', 'bank-statements', 'bank-transactions', 'bank-match-su
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
               PDF
             </button>
-            <button v-if="isAdmin && !s.api_month" :disabled="s.source === 'email_notice' && !s.can_delete_notices" type="button" @click="onDelete(s, $event)"
+            <button v-if="canDeleteStatement(s) && !s.api_month" :disabled="s.source === 'email_notice' && !s.can_delete_notices" type="button" @click="onDelete(s, $event)"
                class="cursor-pointer inline-flex items-center gap-1 px-2 h-7 text-xs border border-danger-500/40 text-danger-600 hover:bg-danger-50 rounded">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3"/></svg>
               {{ t('bank.delete') }}

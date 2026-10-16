@@ -172,14 +172,17 @@ final class BankNoticeConfirmationApiTest extends TestCase
             self::assertArrayNotHasKey('processing_error', $candidate);
         }
     }
-    public function testActiveMovementCanStillBeIgnoredAndNoticeDeletionRequiresAdministrator(): void
+    public function testActiveMovementCanStillBeIgnoredAndNoticeDeletionRequiresBankWrite(): void
     {
         $notice = $this->movement('email_notice');
         [$status, $result] = $this->call('ignore', $notice, body: ['note' => 'Synthetic checked notice']);
         self::assertSame(200, $status);
         self::assertTrue($result['ignored']);
         self::assertSame('ignored', $this->db->pdo()->query('SELECT match_status FROM bank_transactions WHERE id=' . $notice)->fetchColumn());
-        self::assertSame(403, $this->call('delete', $this->statement($notice), role: 'accountant')[0]);
+        $statement = $this->statement($notice);
+        self::assertSame(403, $this->call('delete', $statement, role: 'readonly')[0]);
+        self::assertSame(200, $this->call('delete', $statement, role: 'accountant')[0]);
+        self::assertSame(0, (int) $this->db->pdo()->query('SELECT COUNT(*) FROM bank_statements WHERE id=' . $statement)->fetchColumn());
     }
 
 }

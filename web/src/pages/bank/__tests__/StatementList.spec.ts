@@ -14,6 +14,8 @@ import type { BankReconciliationCandidate } from '@/types/bankReconciliation'
 
 const m = vi.hoisted(() => ({
   admin: false,
+  bankWrite: true,
+  clientRole: false,
   list: vi.fn(),
   clientsList: vi.fn(),
   clientGet: vi.fn(),
@@ -81,7 +83,8 @@ vi.mock('@/composables/useToast', () => ({
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
-    canWrite: () => true,
+    canWrite: (key: string) => key !== 'bank' || m.bankWrite,
+    get isClientRole() { return m.clientRole },
     isSuperadmin: false,
     get isCompanyAdminRole() { return m.admin },
     hasCommercialFeatures: false,
@@ -624,5 +627,30 @@ describe('email notice deletion eligibility', () => {
     expect(wrapper.findAll('[data-testid="notice-summary"]')).toHaveLength(2)
     wrapper.unmount()
     m.admin = false
+  })
+})
+
+
+describe('notice deletion permission', () => {
+  it.each([[true, false, 2], [false, false, 0], [true, true, 0]] as const)('bank write %s / client %s exposes %s delete buttons', async (bankWrite, clientRole, count) => {
+    m.admin = false
+    m.bankWrite = bankWrite
+    m.clientRole = clientRole
+    m.list.mockResolvedValue({ ...emptyPage(), total: 1, items: [{
+      id: 157, source: 'email_notice', file_name: 'Synthetic notice', account_number: '1000000005', bank_code: '0100', currency: 'CZK',
+      statement_date: '2099-06-30', transaction_count: 0, matched_count: 0, can_delete_notices: true,
+      confirmation_summary: { total: 0, pending: 0, review: 0, confirmed: 0 },
+    }] })
+    const wrapper = mount(StatementList, { global: { stubs } })
+    try {
+      await flushPromises()
+      const buttons = wrapper.findAll('button').filter(button => button.attributes('title') === 'bank.delete' || button.text() === 'bank.delete')
+      expect(buttons).toHaveLength(count)
+      expect(buttons.every(button => button.attributes('disabled') === undefined)).toBe(true)
+    } finally {
+      wrapper.unmount()
+      m.bankWrite = true
+      m.clientRole = false
+    }
   })
 })
