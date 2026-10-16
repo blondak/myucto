@@ -59,6 +59,21 @@ describe('purchase invoice list loading', () => {
   })
   afterEach(() => { vi.useRealTimers() })
 
+  it('loads the remaining page once and stops at the last page', async () => {
+    mocks.list.mockResolvedValue({ data: [], meta: { total: 71, pages: 2 } })
+    const { wrapper } = await open()
+    const vm = wrapper.vm as unknown as { load: (reset: boolean) => Promise<void>; page: number }
+    const pending = vm.load(false)
+    await vm.load(false)
+    await pending
+    expect(mocks.list).toHaveBeenCalledTimes(2)
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, per_page: 50 }))
+    expect(vm.page).toBe(2)
+    await vm.load(false)
+    expect(mocks.list).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
   it.each<Record<string, string>>([{}, { year: 'all' }, { year: 'all', vendor: '7', q: 'synthetic' }])('loads the list once when opened with query %j', async query => {
     const { wrapper } = await open(query)
     await vi.advanceTimersByTimeAsync(350)

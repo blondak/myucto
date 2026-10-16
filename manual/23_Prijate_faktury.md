@@ -25,6 +25,8 @@ Oproti vystaveným fakturám se liší takto:
 | Průběh | koncept → vystavená → odeslaná → zaplacená | koncept → přijatá → zaúčtovaná → uhrazená |
 | Schvalování a odesílání | ano, klient potvrdí | ne, doklad jen evidujete |
 
+Seznam načítá doklady po 50. Další doklady se načtou při posunu dolů nebo tlačítkem **Další** pod seznamem. Počet načtených dokladů a celkový počet vidíte v záhlaví.
+
 ### 23.1.1 Opakující se agenda
 
 <!-- cols: 26 44 30 -->

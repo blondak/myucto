@@ -29,6 +29,8 @@ Kapitolu otevřete, když:
 | podle potřeby | Získat jedno PDF z více faktur | hromadná akce **PDF export**, viz [§ 14.7](#147-krok-za-krokem-sloucene-pdf-z-vice-faktur) |
 | po importu nebo migraci | Opravit režim OSS u více dokladů | hromadná akce **Nastavit OSS**, viz [§ 14.8](#148-krok-za-krokem-hromadne-nastaveni-oss) |
 
+Seznam načítá doklady po 50. Další doklady se načtou při posunu dolů nebo tlačítkem **Další** pod seznamem. Počet načtených dokladů a celkový počet vidíte v záhlaví.
+
 ## 14.2 Než začnete
 
 - **Faktury musí existovat.** Nové vytvoříte tlačítkem **Nová faktura** (postup v

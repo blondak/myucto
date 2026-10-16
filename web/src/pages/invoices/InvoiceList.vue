@@ -1833,7 +1833,13 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
         </div>
       </section>
 
-      <div v-if="page < pages" ref="loadMoreTarget" class="text-center text-sm text-neutral-500 pointer-fine-hidden">
+      <div v-if="page < pages" ref="loadMoreTarget" class="flex flex-wrap justify-center py-4">
+        <button type="button" :class="btnOutline('neutral')" :disabled="loading || loadingMore" @click="load(false)">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m-6-6 6 6 6-6" />
+          </svg>
+          {{ loadingMore ? t('common.loading_more') : t('common.load_more') }}
+        </button>
       </div>
     </div>
     <ListLoadingSpinner :show="loading || loadingMore" />
