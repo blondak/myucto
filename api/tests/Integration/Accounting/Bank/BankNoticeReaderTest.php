@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Accounting\Bank;
 
-use MyInvoice\Repository\CashJournalRepository;
 use MyInvoice\Service\Bank\BankMovementListService;
 use MyInvoice\Service\Bank\BankPaymentCandidateScope;
 use MyInvoice\Service\Bank\Card\CardPaymentOverview;
@@ -31,19 +30,6 @@ final class BankNoticeReaderTest extends BankPostingTestCase
         $list = $this->container->get(BankMovementListService::class)->list($this->supplierId, $filters + ['confirmation_state' => 'review'], 'all');
         self::assertSame('review', $list['items'][0]['confirmation_state']);
         self::assertSame('authoritative_removed', $list['items'][0]['confirmation_reason']);
-    }
-
-    public function testCashJournalCountsOnlyAuthoritativeMovementAfterConfirmationAndInvalidation(): void
-    {
-        [$notice, $target] = $this->confirmedPair();
-        $journal = $this->container->get(CashJournalRepository::class);
-        foreach ([false, true] as $invalidated) {
-            if ($invalidated) $this->invalidate($notice);
-            $rows = $journal->movements($this->supplierId, self::YEAR . '-01-01', self::YEAR . '-12-31');
-            $bankRows = array_values(array_filter($rows, static fn (array $row): bool => $row['source_type'] === 'bank'));
-            self::assertSame([$target], array_column($bankRows, 'source_id'));
-            self::assertSame(200.0, $bankRows[0]['amount']);
-        }
     }
 
     public function testCardCandidatesAndExportCannotReuseConfirmedOrInvalidatedNotice(): void

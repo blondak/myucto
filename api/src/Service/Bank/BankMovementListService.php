@@ -63,10 +63,11 @@ final class BankMovementListService
         $postingByTx = $this->posting->transactionPostingInfo($supplierId, $txIds);
         $dimensionsByTx = (new DimensionAssignmentRepository($this->db))
             ->headerDimensionsIfEnabled($supplierId, 'bank_transaction', $txIds);
-        $items = array_map(function (array $item) use ($supplierId, $postingByTx, $dimensionsByTx, $doubleEntry): array {
+        $confirmations = (new BankNoticeConfirmationReader($this->db))->notices($supplierId, array_column(array_filter($result['items'], static fn (array $item): bool => $item['source'] === 'email_notice'), 'id'));
+        $items = array_map(function (array $item) use ($supplierId, $postingByTx, $dimensionsByTx, $doubleEntry, $confirmations): array {
             $item['posting'] = $postingByTx[$item['id']] ?? null;
             if ($item['source'] === 'email_notice') {
-                $item += (new BankNoticeConfirmationService($this->db))->inspectNotice($supplierId, (int) $item['id']);
+                $item += $confirmations[(int) $item['id']] ?? [];
             }
             // Uzavřené účetní období existuje jen v podvojném účetnictví.
             $item['period_closed'] = $doubleEntry && $item['period_closed'];

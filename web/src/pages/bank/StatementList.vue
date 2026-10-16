@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import NoticeConfirmationSummary from '@/components/bank/NoticeConfirmationSummary.vue'
+import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import { ref, computed, onMounted, onUnmounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -645,6 +646,8 @@ async function onFileSelected(e: Event) {
   uploading.value = false
   if (input) input.value = ''
 }
+useWindowRefresh(['bank', 'bank-statements', 'bank-transactions', 'bank-match-suggestions', 'accounting', 'invoices', 'purchase-invoices', 'clients'], () => load(),
+  () => !uploading.value && !scanning.value && !ambiguityModal.value && !reconciliationModal.value)
 </script>
 
 <template>

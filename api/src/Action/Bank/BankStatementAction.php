@@ -983,10 +983,13 @@ final class BankStatementAction
                 . implode(',', array_map('intval', array_column($rows, 'id'))) . ')'
             )->fetchAll(\PDO::FETCH_COLUMN)));
         }
+        $confirmationReader = new \MyInvoice\Service\Bank\BankNoticeConfirmationReader($this->db);
+        $deletedNoticeCounts = $confirmationReader->deletedCounts($sid, array_column($rows, 'id'));
+        $noticeSummaries = $confirmationReader->statements($sid, array_column(array_filter($rows, static fn (array $row): bool => $row['source'] === 'email_notice'), 'id'));
         foreach ($rows as &$r) {
             $r['id'] = (int) $r['id'];
             $r['api_month'] = isset($monthIds[$r['id']]);
-            $r['deleted_notice_confirmations'] = $this->deletedNoticeCount($sid, $r['id']);
+            $r['deleted_notice_confirmations'] = $deletedNoticeCounts[$r['id']] ?? 0;
             $r['transaction_count'] = (int) $r['transaction_count'];
             $r['matched_count'] = (int) $r['matched_count'];
             $r['non_invoice_count'] = (int) $r['non_invoice_count'];
@@ -1000,9 +1003,7 @@ final class BankStatementAction
             $r['has_pdf'] = (bool) $r['has_pdf'];
             $r['balance_calculation'] = $balanceSummaries[$r['id']] ?? null;
             if ($r['source'] === 'email_notice') {
-                $inspection = $this->confirmations()->inspectStatement($sid, $r['id']);
-                unset($inspection['items']);
-                $r = array_merge($r, $inspection);
+                $r = array_merge($r, $noticeSummaries[$r['id']]);
             }
         }
         unset($r);

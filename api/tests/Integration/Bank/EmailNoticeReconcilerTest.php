@@ -271,7 +271,7 @@ final class EmailNoticeReconcilerTest extends TestCase
         $email = $this->db->pdo()->query(
             "SELECT match_status, matched_invoice_id FROM bank_transactions WHERE id = $emailTx"
         )->fetch(PDO::FETCH_ASSOC);
-        self::assertSame('ignored', $email['match_status']);
+        self::assertSame('unmatched', $email['match_status']);
         self::assertNull($email['matched_invoice_id']);
 
         // matched_count avízo-výpisu klesl na 0 → smazání výpisu se může nabídnout.
@@ -281,6 +281,8 @@ final class EmailNoticeReconcilerTest extends TestCase
 
     /**
      * Stejný účet u JINÉ banky není tentýž účet — převzetí se nesmí provést.
+     * Guard nesmí zabírat, když je kód banky na jedné straně neznámý (legacy avíza
+     * bez parsovatelného „účet/kód" mají bank_code NULL) — viz test níže.
      */
     public function testNoTakeOverWhenBankCodeDiffers(): void
     {
@@ -298,8 +300,8 @@ final class EmailNoticeReconcilerTest extends TestCase
         self::assertSame(0, $this->paymentCountForTx($gpcTx));
     }
 
-    /** Bez prokázaného kódu banky nelze avízo automaticky potvrdit. */
-    public function testKeepsPaymentWhenCandidateBankCodeUnknown(): void
+    /** Legacy avízo bez bank_code (NULL) nesmí kvůli guardu přijít o převzetí. */
+    public function testTakeOverWhenCandidateBankCodeUnknown(): void
     {
         $invA = $this->insertInvoice(self::VS_A, 1000.00);
         [, $emailTx] = $this->insertStatementWithTx('email_notice', 1000.00, self::VS_A, 'email-null-bank', '');
@@ -310,9 +312,9 @@ final class EmailNoticeReconcilerTest extends TestCase
 
         [, $gpcTx] = $this->insertStatementWithTx('gpc', 1000.00, self::VS_A, 'gpc-null-bank');
 
-        self::assertNull($this->reconciler->takeOverFromEmailNotice($gpcTx));
-        self::assertSame(0, $this->paymentCountForTx($gpcTx));
-        self::assertSame(1, $this->paymentCountForTx($emailTx));
+        self::assertNotNull($this->reconciler->takeOverFromEmailNotice($gpcTx));
+        self::assertSame(1, $this->paymentCountForTx($gpcTx));
+        self::assertSame(0, $this->paymentCountForTx($emailTx));
     }
 
     public function testGpcTakesOverIdokladPaymentAndMarksSecondaryIgnored(): void
@@ -777,22 +779,26 @@ final class EmailNoticeReconcilerTest extends TestCase
      * × GPC „GITHUB, INC." 848,35. Bez kurzové tolerance zůstala platba na avízu.
      * Převzít a přepsat evidovanou částku na skutečně zúčtovanou (GPC = zdroj pravdy).
      */
-    /** Odlišná blokace vyžaduje kontrolu; potvrzení nesmí tiše měnit částku úhrady. */
-    public function testCardNoticeWithFxSettlementDifferenceRequiresReview(): void
+    public function testTakeOverCardNoticeWithFxSettlementDifference(): void
     {
         $purchaseId = $this->insertPurchaseInvoice(848.35);
         [, $emailTx] = $this->insertStatementWithTx('email_notice', -831.48, '', 'card-fx-email');
         $this->insertPaymentMatch($emailTx, $purchaseId, 831.48);
         $this->markTxMatched($emailTx, null, 'auto_partial');
+
         [, $gpcTx] = $this->insertStatementWithTx('gpc', -848.35, '', 'card-fx-gpc');
         $this->setCounterpartyAccount($gpcTx, '0000000000000000');
-        self::assertNull($this->reconciler->takeOverFromEmailNotice($gpcTx));
-        self::assertSame(1, $this->payableMatchCountForTx($emailTx));
-        self::assertSame(0, $this->payableMatchCountForTx($gpcTx));
-        self::assertSame('831.48', $this->payableMatchAmountForTx($emailTx));
-        $service = new \MyInvoice\Service\Bank\BankNoticeConfirmationService($this->db);
-        self::assertSame('amount_difference', $service->inspectNotice($this->supplierId, $emailTx)['confirmation_reason']);
-        self::assertTrue($service->blocksMatching($this->supplierId, $gpcTx));
+
+        $result = $this->reconciler->takeOverFromEmailNotice($gpcTx);
+
+        self::assertNotNull($result, 'Kurzový rozdíl blokace × zúčtování nesmí bránit převzetí.');
+        self::assertSame(0, $this->payableMatchCountForTx($emailTx), 'Avízo zůstane bez úhrady.');
+        self::assertSame(1, $this->payableMatchCountForTx($gpcTx), 'Úhrada patří na GPC transakci.');
+        self::assertSame(
+            '848.35',
+            $this->payableMatchAmountForTx($gpcTx),
+            'Evidovaná částka se má opravit na zúčtovanou, ne zůstat na blokované.',
+        );
     }
 
     /**
@@ -903,13 +909,18 @@ final class EmailNoticeReconcilerTest extends TestCase
         self::assertSame('unmatched', $this->matchStatus($gpcTx));
     }
 
-    /** Jednotlivá přesná shoda doloží avízo i při pozdějším zúčtování bez úhrady. */
-    public function testSupersedesUnpaidNoticeWithinSettlementWindow(): void
+    /**
+     * Výpis, který den avíza vůbec nepokrývá (avíza se zapnula dřív, než začíná
+     * importované období), nesmí avízo nahradit — ten pohyb v něm není a zmizel by
+     * z evidence úplně.
+     */
+    public function testKeepsUnmatchedNoticeOutsideStatementPeriod(): void
     {
         [, $emailTx] = $this->insertStatementWithTx('email_notice', -1499.00, '', 'sup-out-e', null, '2099-06-12');
         [, $gpcTx] = $this->insertStatementWithTx('gpc', -1499.00, '', 'sup-out-g', null, '2099-06-15');
-        self::assertSame($emailTx, $this->reconciler->supersedeUnmatchedEmailNotice($gpcTx));
-        self::assertSame('ignored', $this->matchStatus($emailTx));
+
+        self::assertNull($this->reconciler->supersedeUnmatchedEmailNotice($gpcTx));
+        self::assertSame('unmatched', $this->matchStatus($emailTx));
     }
 
     /** Dvě nerozlišitelná avíza na jeden řádek výpisu → nejednoznačné, nesahat na ně. */

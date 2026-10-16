@@ -28,6 +28,12 @@ final class BankNoticeConfirmationService
 
     public function __construct(private readonly Connection $db, private readonly ?GoPayService $gopay = null) {}
 
+    /** Sdílený registr blokujících vazeb pro detail i dávkové seznamy. */
+    public static function blockingLinks(): array
+    {
+        return self::LINKS;
+    }
+
     /** Volat před otevřením transakce; stejný zámek drží import autoritativního výpisu. */
     public function lockSupplier(int $supplierId): string
     {
@@ -71,8 +77,11 @@ final class BankNoticeConfirmationService
         $record = $this->record($supplierId, $noticeId);
         if (($record['state'] ?? null) === 'confirmed') {
             $target = $this->transaction($supplierId, (int) $record['authoritative_transaction_id']);
+            // Datum ani částka nesmí zneplatnit auditované ruční potvrzení nebo
+            // převzetí karetní blokace, které již prošlo pravidly reconcileru.
             if ($target !== null && $this->isAuthoritative($target) && $this->sameAccount($notice, $target)
-                && $this->sameCurrency($notice, $target) && abs((float) $notice['amount'] - (float) $target['amount']) < 0.005) {
+                && $this->sameCurrency($notice, $target)
+                && (abs((float) $notice['amount'] - (float) $target['amount']) <= 0.005 || in_array($record['method'], ['manual','card_fx'], true))) {
                 $blockers = $this->sourceBlockers($notice, $target);
                 if ($blockers === []) return $this->inspection('confirmed', null, $target, [], []);
                 return $this->inspection('review', $blockers[0], $target, [$target], $blockers);
@@ -84,22 +93,34 @@ final class BankNoticeConfirmationService
         }
         $candidates = $this->candidates($notice);
         if ($candidates === []) return $this->inspection('pending', 'no_candidate', null, [], []);
-        $exact = array_values(array_filter($candidates, static fn (array $r): bool => abs((float) $notice['amount'] - (float) $r['amount']) < 0.005));
-        if (count($exact) !== 1) {
-            $reason = $exact === [] ? 'amount_difference' : 'ambiguous_candidates';
-            return $this->inspection('review', $reason, null, $candidates, [$reason]);
+        $reconciler = new EmailNoticeReconciler($this->db, $this->gopay);
+        $hasEvidence = $this->hasPayments($noticeId) || in_array($notice['match_status'], ['auto_exact','auto_partial','manual'], true);
+        $exact = array_values(array_filter($candidates, static fn (array $r): bool => abs((float) $notice['amount'] - (float) $r['amount']) <= 0.005));
+        $eligible = [];
+        foreach ($candidates as $candidate) {
+            $selected = $hasEvidence ? $reconciler->findTakeoverCandidate((int) $candidate['id']) : null;
+            if (($hasEvidence && (int) ($selected['id'] ?? 0) === $noticeId)
+                || (!$hasEvidence && $reconciler->findSupersededNotice((int) $candidate['id']) === $noticeId)) $eligible[] = $candidate;
         }
-        $target = $exact[0];
+        // Stejnou preferenci přesné částky používá i původní takeover reconcileru.
+        $eligibleExact = array_values(array_filter($eligible, static fn (array $r): bool => abs((float) $notice['amount'] - (float) $r['amount']) <= 0.005));
+        $pool = $eligibleExact !== [] ? $eligibleExact : $eligible;
+        if (count($pool) > 1 || count($exact) > 1) return $this->inspection('review', 'ambiguous_candidates', null, $candidates, ['ambiguous_candidates']);
+        $target = $pool[0] ?? $exact[0] ?? null;
+        if ($target === null) return $this->inspection('review', 'amount_difference', null, $candidates, ['amount_difference']);
         $blockers = $this->sourceBlockers($notice, $target);
         $reserved = $this->db->pdo()->prepare('SELECT id FROM bank_notice_confirmations WHERE authoritative_transaction_id = ? AND (notice_transaction_id IS NULL OR notice_transaction_id <> ?)' . $this->lockingRead());
         $reserved->execute([(int) $target['id'], $noticeId]);
         if ($reserved->fetchColumn() !== false) $blockers[] = 'target_reserved';
-        $twins = $this->db->pdo()->prepare("SELECT bt.*, bs.supplier_id, bs.source AS statement_source, bs.account_number AS stmt_account, bs.bank_code AS stmt_bank, bs.currency AS stmt_currency FROM bank_transactions bt JOIN bank_statements bs ON bs.id=bt.statement_id WHERE bs.supplier_id=? AND bt.source='email_notice' AND bs.source='email_notice' AND ABS(bt.amount-?) < 0.005 AND bt.posted_at BETWEEN DATE_SUB(?, INTERVAL 5 DAY) AND DATE_ADD(?, INTERVAL 5 DAY)" . $this->lockingRead());
-        $twins->execute([$supplierId, $target['amount'], $target['posted_at'], $target['posted_at']]);
-        $matchingNotices = array_filter($twins->fetchAll(PDO::FETCH_ASSOC), fn (array $r): bool => $this->sameAccount($r, $target) && $this->sameCurrency($r, $target) && $this->sameIdentity($r, $target));
-        if (count($matchingNotices) !== 1) $blockers[] = 'ambiguous_notices';
+        if ($pool === []) {
+            $covered = $reconciler->coveredPeriod((int) $target['statement_id']);
+            if (!$hasEvidence && ($notice['posted_at'] < ($covered['covered_from'] ?? '') || $notice['posted_at'] > ($covered['covered_to'] ?? ''))) {
+                $blockers[] = 'notice_outside_statement_period';
+            } else {
+                $blockers[] = 'ambiguous_notices';
+            }
+        }
         if ($blockers !== []) return $this->inspection('review', $blockers[0], null, $candidates, array_values(array_unique($blockers)));
-        // Náhled neprohlašuje dokončený přenos za hotový.
         return $this->inspection('pending', 'ready', $target, $candidates, []);
     }
 
@@ -206,11 +227,10 @@ final class BankNoticeConfirmationService
                 return $this->inspectNotice($supplierId, $noticeId);
             }
             if ($notice === null || $target === null || !$this->isAuthoritative($target) || !$this->sameAccount($notice, $target) || !$this->sameCurrency($notice, $target)
-                || abs((float) $notice['amount'] - (float) $target['amount']) >= 0.005
-                || abs((int) ((strtotime($notice['posted_at']) - strtotime($target['posted_at'])) / 86400)) > 5) {
-                throw new BankNoticeConfirmationException('unsafe_confirmation', 'Pohyby nemají shodný účet, měnu, částku nebo přípustné datum.');
+                || ((float) $notice['amount'] <=> 0) !== ((float) $target['amount'] <=> 0)) {
+                throw new BankNoticeConfirmationException('unsafe_confirmation', 'Pohyby nemají shodný účet, měnu nebo směr platby.');
             }
-            if ($this->sourceBlockers($notice, $target) !== []) throw new BankNoticeConfirmationException('notice_dependencies', 'Avízo má nevyřešené vazby nebo rozdílné datum úhrady.');
+            if ($this->sourceBlockers($notice, $target) !== []) throw new BankNoticeConfirmationException('notice_dependencies', 'Avízo má nevyřešené vazby.');
             $stmt = $this->db->pdo()->prepare('SELECT id FROM bank_notice_confirmations WHERE authoritative_transaction_id=? AND (notice_transaction_id IS NULL OR notice_transaction_id<>?)' . $this->lockingRead());
             $stmt->execute([$authoritativeId, $noticeId]);
             if ($stmt->fetchColumn() !== false) throw new BankNoticeConfirmationException('target_reserved', 'Tento pohyb již potvrzuje jiné avízo.');
@@ -276,7 +296,10 @@ final class BankNoticeConfirmationService
         $inspection = $this->evaluateNotice($supplierId, $noticeId);
         if ($inspection['confirmation_state'] === 'confirmed') return $inspection;
         if ($inspection['confirmation_reason'] === 'ready') {
-            $this->confirm($supplierId, $this->notice($supplierId, $noticeId), $this->transaction($supplierId, (int) $inspection['authoritative_transaction_id']), $userId, 'exact', null);
+            $notice = $this->notice($supplierId, $noticeId);
+            $target = $this->transaction($supplierId, (int) $inspection['authoritative_transaction_id']);
+            $method = abs((float) $notice['amount'] - (float) $target['amount']) > 0.005 ? 'card_fx' : 'exact';
+            $this->confirm($supplierId, $notice, $target, $userId, $method, null);
             return $this->inspectNotice($supplierId, $noticeId);
         }
         $notice = $this->notice($supplierId, $noticeId);
@@ -291,10 +314,16 @@ final class BankNoticeConfirmationService
         sort($ids);
         $pdo->prepare('SELECT id FROM bank_transactions WHERE id IN (?,?) ORDER BY id FOR UPDATE')->execute($ids);
         $this->saveRecord($supplierId, $notice, 'pending', 'ready');
-        if ($this->hasPayments((int) $notice['id'])) {
+        $hadPayments = $this->hasPayments((int) $notice['id']);
+        if ($hadPayments) {
             foreach (['invoice_payments', 'payment_matches'] as $table) {
                 $pdo->prepare("UPDATE {$table} SET bank_transaction_id=? WHERE supplier_id=? AND bank_transaction_id=?")->execute([$target['id'], $supplierId, $notice['id']]);
             }
+            if ($method === 'card_fx') {
+                $pdo->prepare('UPDATE payment_matches SET amount=? WHERE supplier_id=? AND bank_transaction_id=?')->execute([number_format(abs((float) $target['amount']), 2, '.', ''), $supplierId, $target['id']]);
+            }
+        }
+        if ($hadPayments || in_array($notice['match_status'], ['auto_exact','auto_partial','manual'], true)) {
             $pdo->prepare('UPDATE bank_transactions SET match_status=?,matched_invoice_id=?,matched_at=?,matched_by=? WHERE id=?')->execute([$notice['match_status'], $notice['matched_invoice_id'], $notice['matched_at'], $notice['matched_by'], $target['id']]);
         }
         $payout = $pdo->prepare('SELECT 1 FROM gopay_clearings WHERE payout_match_transaction_id=? LIMIT 1' . $this->lockingRead());
@@ -305,7 +334,7 @@ final class BankNoticeConfirmationService
         // Jde stále o stejné pozorování platby, nikoli nový vzorek pro učení.
         // Počty a datum povýšení mapy se při pouhém převzetí nepřepočítávají.
         $pdo->prepare('UPDATE bank_counterparty_observations o JOIN bank_counterparty_map m ON m.id=o.map_id SET o.bank_transaction_id=? WHERE m.supplier_id=? AND o.bank_transaction_id=?')->execute([$target['id'], $supplierId, $notice['id']]);
-        $pdo->prepare("UPDATE bank_transactions SET match_status='ignored',ignore_origin='superseded',ignore_note='Nahrazeno bankovním výpisem',matched_invoice_id=NULL,matched_at=NULL,matched_by=NULL WHERE id=?")->execute([$notice['id']]);
+        $pdo->prepare("UPDATE bank_transactions SET match_status=?,ignore_origin='superseded',ignore_note='Nahrazeno bankovním výpisem',matched_invoice_id=NULL,matched_at=NULL,matched_by=NULL WHERE id=?")->execute([$hadPayments || in_array($notice['match_status'], ['auto_exact','auto_partial','manual'], true) ? 'unmatched' : 'ignored', $notice['id']]);
         $pdo->prepare("UPDATE bank_notice_confirmations SET state='confirmed',reason=NULL,authoritative_transaction_id=?,original_authoritative_transaction_id=?,method=?,confirmed_by=?,manual_reason=?,confirmed_at=NOW(),checked_at=NOW() WHERE supplier_id=? AND notice_transaction_id=?")->execute([$target['id'], $target['id'], $method, $userId, $reason === null ? null : mb_substr($reason, 0, 500), $supplierId, $notice['id']]);
         $pdo->prepare("UPDATE bank_statements SET matched_count=(SELECT COUNT(*) FROM bank_transactions WHERE statement_id=? AND match_status IN ('auto_exact','auto_partial','manual')) WHERE id=?")->execute([$notice['statement_id'], $notice['statement_id']]);
         if ($hasPayout && !($this->gopay?->completeTransferredPayout($supplierId, (int) $target['id'], $userId) ?? false)) {
@@ -353,10 +382,9 @@ final class BankNoticeConfirmationService
         if ($this->hasPayments($id)) {
             if (!in_array($notice['match_status'], ['auto_exact','auto_partial','manual'], true)) $blockers[] = 'source_payment_status';
             if ($this->hasPayments((int) $target['id']) || in_array($target['match_status'], ['auto_exact','auto_partial','manual'], true)) $blockers[] = 'target_has_payment';
-            if ($notice['posted_at'] !== $target['posted_at']) $blockers[] = 'payment_date_difference';
-            $stmt = $pdo->prepare('SELECT 1 FROM invoice_payments WHERE bank_transaction_id=? AND (supplier_id<>? OR paid_on<>?) LIMIT 1');
-            $stmt->execute([$id, $notice['supplier_id'], $target['posted_at']]);
-            if ($stmt->fetchColumn() !== false) $blockers[] = 'payment_date_difference';
+            $stmt = $pdo->prepare('SELECT 1 FROM invoice_payments WHERE bank_transaction_id=? AND supplier_id<>? LIMIT 1');
+            $stmt->execute([$id, $notice['supplier_id']]);
+            if ($stmt->fetchColumn() !== false) $blockers[] = 'foreign_payment_dependency';
             $stmt = $pdo->prepare('SELECT 1 FROM payment_matches WHERE bank_transaction_id=? AND supplier_id<>? LIMIT 1');
             $stmt->execute([$id, $notice['supplier_id']]);
             if ($stmt->fetchColumn() !== false) $blockers[] = 'foreign_payment_dependency';
@@ -365,9 +393,13 @@ final class BankNoticeConfirmationService
             $stmt->execute([$notice['supplier_id'], $id]);
             if ($stmt->fetchColumn() === false) $blockers[] = 'missing_payment_evidence';
         }
-        $stmt = $pdo->prepare('SELECT 1 FROM gopay_clearings WHERE payout_match_transaction_id=? LIMIT 1');
+        $stmt = $pdo->prepare('SELECT supplier_id FROM gopay_clearings WHERE payout_match_transaction_id=?' . $this->lockingRead());
         $stmt->execute([$id]);
-        if ($stmt->fetchColumn() !== false && $this->gopay === null) $blockers[] = 'dependency_gopay_payout';
+        $payoutSuppliers = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        if ($payoutSuppliers !== []) {
+            if ($this->gopay === null || array_diff($payoutSuppliers, [(int) $notice['supplier_id']]) !== []) $blockers[] = 'dependency_gopay_payout';
+            if ($this->hasPayments((int) $target['id']) || in_array($target['match_status'], ['auto_exact','auto_partial','manual'], true)) $blockers[] = 'target_has_payment';
+        }
         return array_values(array_unique($blockers));
     }
 
@@ -426,29 +458,17 @@ final class BankNoticeConfirmationService
 
     private function sameAccount(array $a, array $b): bool
     {
-        return AccountNumberNormalizer::normalize((string) $a['stmt_account']) !== '' && AccountNumberNormalizer::equals((string) $a['stmt_account'], (string) $b['stmt_account']) && trim((string) $a['stmt_bank']) === trim((string) $b['stmt_bank']);
+        return EmailNoticeReconciler::sameOwnAccount($a, $b);
     }
 
     private function sameCurrency(array $a, array $b): bool
     {
-        $left = strtoupper(trim((string) ($a['currency'] ?: $a['stmt_currency'])));
-        $right = strtoupper(trim((string) ($b['currency'] ?: $b['stmt_currency'])));
-        return $left !== '' && $left === $right;
+        return EmailNoticeReconciler::sameCurrency($a, $b);
     }
 
-    private function sameIdentity(array $a, array $b): bool
+    private function sameIdentity(array $notice, array $authoritative): bool
     {
-        $aVs = VariableSymbolNormalizer::digits((string) ($a['variable_symbol'] ?? ''));
-        $bVs = VariableSymbolNormalizer::digits((string) ($b['variable_symbol'] ?? ''));
-        $aAccount = AccountNumberNormalizer::normalize((string) ($a['counterparty_account'] ?? ''));
-        $bAccount = AccountNumberNormalizer::normalize((string) ($b['counterparty_account'] ?? ''));
-        if ($aAccount !== '' && $bAccount !== '' && !AccountNumberNormalizer::equals($aAccount, $bAccount)) return false;
-        $aBank = trim((string) ($a['counterparty_bank'] ?? ''));
-        $bBank = trim((string) ($b['counterparty_bank'] ?? ''));
-        if ($aBank !== '' && $bBank !== '' && $aBank !== $bBank) return false;
-        if ($aVs !== '' || $bVs !== '') return $aVs !== '' && $aVs === $bVs;
-        if ($aAccount !== '' || $bAccount !== '') return $aAccount !== '' && $bAccount !== '' && AccountNumberNormalizer::equals($aAccount, $bAccount);
-        return true;
+        return EmailNoticeReconciler::twinIdentity($authoritative, $notice, VariableSymbolNormalizer::digits((string) ($authoritative['variable_symbol'] ?? ''))) !== null;
     }
 
     private function lockingRead(): string

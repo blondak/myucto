@@ -258,7 +258,7 @@ final class BankNoticeConfirmationTest extends TestCase
         self::assertSame(1,(int)$this->db->pdo()->query('SELECT COUNT(*) FROM invoice_payments WHERE bank_transaction_id=' . $notice)->fetchColumn());
     }
 
-    public function testCrossPeriodPaymentDateRemainsReviewWithoutChangingTaxDocument(): void
+    public function testCrossPeriodPaymentDateTransfersWithoutChangingTaxDocument(): void
     {
         $notice=$this->movement('email_notice',100,'2099-12-31');
         $invoice=$this->invoice();
@@ -267,10 +267,98 @@ final class BankNoticeConfirmationTest extends TestCase
         $target=$this->movement('gpc',100,'2100-01-01');
         $before=$this->db->pdo()->query('SELECT * FROM invoice_payments WHERE id=' . $payment)->fetch(PDO::FETCH_ASSOC);
         $result=$this->service->reconcileNotice($this->supplier,$notice);
-        self::assertSame('review',$result['confirmation_state']);
-        self::assertContains('payment_date_difference',$result['blockers']);
+        self::assertSame('confirmed',$result['confirmation_state']);
+        $before['bank_transaction_id'] = $target;
         self::assertSame($before,$this->db->pdo()->query('SELECT * FROM invoice_payments WHERE id=' . $payment)->fetch(PDO::FETCH_ASSOC));
-        self::assertTrue($this->service->blocksMatching($this->supplier,$target));
+        self::assertFalse($this->service->blocksMatching($this->supplier,$target));
+        self::assertTrue($this->service->inspectStatement($this->supplier,$this->statement($notice))['can_delete_notices']);
+    }
+
+    public function testManualAmountAndDateDifferencePreservesOriginalPaymentAndTaxDocument(): void
+    {
+        $notice = $this->movement('email_notice', 100, '2099-12-31');
+        $invoice = $this->invoice(100, 'proforma');
+        $payment = $this->payment($notice, $invoice, 100, $this->invoice(100, 'tax_document'));
+        $this->db->pdo()->prepare("UPDATE invoice_payments SET paid_on='2099-12-31' WHERE id=?")->execute([$payment]);
+        $target = $this->movement('gpc', 102, '2100-01-12');
+        $before = $this->db->pdo()->query('SELECT * FROM invoice_payments WHERE id=' . $payment)->fetch(PDO::FETCH_ASSOC);
+        $result = $this->service->confirmManually($this->supplier, $notice, $target, $this->user, 'Synthetic bank settlement reviewed; original payment retained');
+        self::assertSame('confirmed', $result['confirmation_state']);
+        $before['bank_transaction_id'] = $target;
+        self::assertSame($before, $this->db->pdo()->query('SELECT * FROM invoice_payments WHERE id=' . $payment)->fetch(PDO::FETCH_ASSOC));
+        self::assertSame('100.00', $this->db->pdo()->query('SELECT paid_total FROM invoices WHERE id=' . $invoice)->fetchColumn());
+        $audit = $this->db->pdo()->query('SELECT method,confirmed_by,manual_reason FROM bank_notice_confirmations WHERE notice_transaction_id=' . $notice)->fetch(PDO::FETCH_ASSOC);
+        self::assertSame('manual', $audit['method']);
+        self::assertSame($this->user, (int) $audit['confirmed_by']);
+        self::assertStringContainsString('original payment retained', $audit['manual_reason']);
+        self::assertTrue($this->service->inspectStatement($this->supplier, $this->statement($notice))['can_delete_notices']);
+        $this->service->prepareNoticeDeletion($this->supplier, $this->statement($notice), $this->user);
+        $this->db->pdo()->prepare('DELETE FROM bank_statements WHERE id=?')->execute([$this->statement($notice)]);
+        self::assertSame($before, $this->db->pdo()->query('SELECT * FROM invoice_payments WHERE id=' . $payment)->fetch(PDO::FETCH_ASSOC));
+    }
+
+    #[DataProvider('cardSettlementAllocations')]
+    public function testCardFxConfirmationPreservesSingleAllocationOrRequiresManualSplit(array $amounts): void
+    {
+        $notice = $this->movement('email_notice', -100, '2099-06-14', ['vs'=>'']);
+        $pdo = $this->db->pdo();
+        $ids = [];
+        foreach ($amounts as $amount) {
+            $pdo->prepare("INSERT INTO purchase_invoices (supplier_id,vendor_id,vendor_invoice_number,issue_date,tax_date,due_date,received_at,currency_id,vendor_snapshot,total_without_vat,total_vat,total_with_vat,status,created_by) VALUES (?,?,?, ?,?,?,?,?,'{}',?,0,?,'received',?)")
+                ->execute([$this->supplier,$this->client,'SYN-FX-' . $amount,self::DATE,self::DATE,self::DATE,self::DATE,$this->currency,$amount,$amount,$this->user]);
+            $purchase = (int) $pdo->lastInsertId();
+            $pdo->prepare("INSERT INTO payment_matches (supplier_id,bank_transaction_id,purchase_invoice_id,amount,match_type) VALUES (?,?,?,?,'manual')")->execute([$this->supplier,$notice,$purchase,$amount]);
+            $ids[] = (int) $pdo->lastInsertId();
+        }
+        $pdo->prepare("UPDATE bank_transactions SET match_status='manual' WHERE id=?")->execute([$notice]);
+        $target = $this->movement('gpc', -102, self::DATE, ['vs'=>'']);
+        $result = $this->service->reconcileNotice($this->supplier, $notice);
+        if (count($amounts) === 1) {
+            self::assertSame('confirmed', $result['confirmation_state']);
+            self::assertSame('card_fx', $pdo->query('SELECT method FROM bank_notice_confirmations WHERE notice_transaction_id=' . $notice)->fetchColumn());
+            self::assertSame('102.00', $pdo->query('SELECT amount FROM payment_matches WHERE id=' . $ids[0])->fetchColumn());
+        } else {
+            self::assertSame('review', $result['confirmation_state']);
+            self::assertTrue($this->service->blocksMatching($this->supplier, $target));
+            $result = $this->service->confirmManually($this->supplier, $notice, $target, $this->user, 'Synthetic FX split allocation retained');
+            self::assertSame('confirmed', $result['confirmation_state']);
+            foreach ($ids as $index => $id) self::assertSame(number_format($amounts[$index], 2, '.', ''), $pdo->query('SELECT amount FROM payment_matches WHERE id=' . $id)->fetchColumn());
+        }
+        foreach ($ids as $id) self::assertSame($target, (int) $pdo->query('SELECT bank_transaction_id FROM payment_matches WHERE id=' . $id)->fetchColumn());
+        self::assertSame('unmatched', $pdo->query('SELECT match_status FROM bank_transactions WHERE id=' . $notice)->fetchColumn());
+        self::assertSame('superseded', $pdo->query('SELECT ignore_origin FROM bank_transactions WHERE id=' . $notice)->fetchColumn());
+        self::assertTrue($this->service->inspectStatement($this->supplier, $this->statement($notice))['can_delete_notices']);
+    }
+
+    public static function cardSettlementAllocations(): array
+    {
+        return ['single'=>[[100]], 'split'=>[[40, 60]]];
+    }
+
+    #[DataProvider('isolations')]
+    public function testManualDifferencesStillRejectTenantAccountCurrencyBankAndDirection(array $overrides, float $amount): void
+    {
+        $notice = $this->movement('email_notice');
+        if (isset($overrides['supplier'])) $overrides['supplier'] = $this->createIsolatedSupplier($this->db->pdo(), $this->supplier);
+        $target = $this->movement('gpc', $amount, '2100-01-12', $overrides);
+        $this->expectException(BankNoticeConfirmationException::class);
+        try {
+            $this->service->confirmManually($this->supplier, $notice, $target, $this->user, 'Synthetic unsafe account checked');
+        } finally {
+            self::assertSame('unmatched', $this->db->pdo()->query('SELECT match_status FROM bank_transactions WHERE id=' . $notice)->fetchColumn());
+            self::assertSame(0, (int) $this->db->pdo()->query('SELECT COUNT(*) FROM bank_notice_confirmations WHERE notice_transaction_id=' . $notice)->fetchColumn());
+        }
+    }
+
+    public function testUnmatchedNoticeOutsideCoveredPeriodCannotDisappear(): void
+    {
+        $notice = $this->movement('email_notice', -100, '2099-06-12', ['vs'=>'']);
+        $this->movement('gpc', -100, '2099-06-15', ['vs'=>'']);
+        $result = $this->service->reconcileNotice($this->supplier, $notice);
+        self::assertSame('review', $result['confirmation_state']);
+        self::assertContains('notice_outside_statement_period', $result['blockers']);
+        self::assertSame('unmatched', $this->db->pdo()->query('SELECT match_status FROM bank_transactions WHERE id=' . $notice)->fetchColumn());
+        self::assertFalse($this->service->inspectStatement($this->supplier, $this->statement($notice))['can_delete_notices']);
     }
 
     public function testBalanceMustHaveAuthoritativeAnchorBeforeNoticeCanBeDeleted(): void
