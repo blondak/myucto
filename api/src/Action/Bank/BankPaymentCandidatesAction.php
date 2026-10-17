@@ -89,11 +89,9 @@ final class BankPaymentCandidatesAction
         if ($own) $pdo->beginTransaction();
         else $pdo->exec('SAVEPOINT bank_document_match');
         try {
-            $lock = $pdo->prepare('SELECT bt.id FROM bank_transactions bt
-                JOIN bank_statements bs ON bs.id = bt.statement_id
-                WHERE bt.id = ? AND ' . BankStatementOwnershipResolver::sql('bs') . ' FOR UPDATE');
-            $lock->execute([$transactionId, ...BankStatementOwnershipResolver::params($supplierId)]);
-            if ($lock->fetchColumn() === false) throw new \DomainException('Bankovní pohyb nebyl nalezen.', 404);
+            if ((new \MyInvoice\Service\Bank\BankTransactionContext($this->db))->lock($supplierId, $transactionId) === null) {
+                throw new \DomainException('Bankovní pohyb nebyl nalezen.', 404);
+            }
             $document = $this->search->document($supplierId, $type, (int) $document['id'], true);
             if ($document === null) throw new \DomainException('Stav dokladu se mezitím změnil.', 409);
             if (RequestAuthorization::isClientType($request)) {
@@ -117,6 +115,9 @@ final class BankPaymentCandidatesAction
             else $pdo->exec('RELEASE SAVEPOINT bank_document_match');
             return $result;
         } catch (\Throwable $exception) {
+            if (\MyInvoice\Infrastructure\Database\TransactionFailure::rollbackIfAborted($pdo, $exception)) {
+                throw $exception;
+            }
             if ($pdo->inTransaction()) {
                 if ($own) $pdo->rollBack();
                 else { $pdo->exec('ROLLBACK TO SAVEPOINT bank_document_match'); $pdo->exec('RELEASE SAVEPOINT bank_document_match'); }

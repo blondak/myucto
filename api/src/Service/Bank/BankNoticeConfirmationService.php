@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Bank;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\TransactionFailure;
+use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Infrastructure\Database\NamedLockName;
 use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Service\Accounting\GoPay\GoPayService;
@@ -569,23 +571,19 @@ final class BankNoticeConfirmationService
         $savepoint = 'bank_notice_' . bin2hex(random_bytes(5));
         try {
             if ($owns) $pdo->beginTransaction(); else $pdo->exec('SAVEPOINT ' . $savepoint);
+            // Nový cíl potvrzení ještě nemá notice vazbu, takže jeho běžný zápis
+            // drží jen účetní a řádkové zámky. Obě cesty musí začít obdobím.
+            (new DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
             $result = $action();
             if ($owns) $pdo->commit(); else $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
             return $result;
         } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) {
+            if (!TransactionFailure::rollbackIfAborted($pdo, $e) && $pdo->inTransaction()) {
                 if ($owns) {
                     $pdo->rollBack();
                 } else {
-                    try {
-                        $pdo->exec('ROLLBACK TO SAVEPOINT ' . $savepoint);
-                        $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
-                    } catch (\PDOException $rollbackError) {
-                        // InnoDB při deadlocku / konfliktu starého snapshotu může
-                        // zrušit celou transakci, ačkoli PDO ještě vrací true.
-                        if ($pdo->inTransaction()) $pdo->rollBack();
-                        if (!$e instanceof \PDOException || !in_array((int) ($e->errorInfo[1] ?? 0), [1020, 1205, 1213], true)) throw $rollbackError;
-                    }
+                    $pdo->exec('ROLLBACK TO SAVEPOINT ' . $savepoint);
+                    $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
                 }
             }
             if ($e instanceof \PDOException && in_array((int) ($e->errorInfo[1] ?? 0), [1020, 1205, 1213], true)) {

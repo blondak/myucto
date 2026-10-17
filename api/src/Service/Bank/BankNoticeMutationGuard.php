@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Bank;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\NamedLockName;
+use MyInvoice\Infrastructure\Database\TransactionFailure;
+use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use PDO;
 
 /** Avíza a jejich cíle sdílejí zámek importu; ostatní vazby chrání řádkový zámek pohybu. */
@@ -46,6 +48,10 @@ final class BankNoticeMutationGuard
         try {
             if ($ownsTransaction) $pdo->beginTransaction();
             else $pdo->exec('SAVEPOINT ' . $savepoint);
+            // Stejné pořadí jako BankTransactionContext: období před pohybem.
+            // PDO varianta je nízkoúrovňový PurchasePaymentMatchWriter; účetní
+            // kontext tam zajišťuje nadřazená párovací služba.
+            if ($this->db instanceof Connection) (new DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
             // Zůstává zamčené i po návratu do transakce volajícího.
             $statement = $pdo->prepare('SELECT id, source FROM bank_transactions WHERE id = ? FOR UPDATE');
             $statement->execute([$transactionId]);
@@ -72,12 +78,13 @@ final class BankNoticeMutationGuard
         } catch (\Throwable $exception) {
             // MariaDB snapshot isolation může novější řádek odmítnout a zrušit celou
             // transakci (1020); deadlock dělá totéž. Původní savepoint už neexistuje.
-            $transactionConflict = $exception instanceof \PDOException
-                && in_array((int) ($exception->errorInfo[1] ?? 0), [1020, 1213], true);
-            if (($ownsTransaction || $transactionConflict) && $pdo->inTransaction()) $pdo->rollBack();
-            elseif (!$ownsTransaction && $pdo->inTransaction()) {
-                $pdo->exec('ROLLBACK TO SAVEPOINT ' . $savepoint);
-                $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
+            $transactionConflict = TransactionFailure::rollbackIfAborted($pdo, $exception);
+            if (!$transactionConflict && $pdo->inTransaction()) {
+                if ($ownsTransaction) $pdo->rollBack();
+                else {
+                    $pdo->exec('ROLLBACK TO SAVEPOINT ' . $savepoint);
+                    $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
+                }
             }
             if ($transactionConflict) throw new BankNoticeConfirmationException('bank_busy', 'Stav bankovního pohybu se mezitím změnil. Opakujte akci.');
             throw $exception;

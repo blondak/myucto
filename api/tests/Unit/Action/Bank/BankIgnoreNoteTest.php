@@ -57,7 +57,7 @@ final class BankIgnoreNoteTest extends TestCase
             $reflection->getProperty($name)->setValue($action, $value);
         }
         $reflection->getProperty('ownership')->setValue($action, new \MyInvoice\Repository\BankStatementOwnershipResolver($db));
-        $posting = $this->createStub(\MyInvoice\Service\Accounting\Bank\BankPostingService::class);
+        $posting = $this->postingStub($sqlite);
         if ($status === 409) {
             $posting->method('onIgnore')->willThrowException(new \MyInvoice\Service\Accounting\PostingException('posted_transaction_cannot_be_ignored', 'Test rejection', 409));
         }
@@ -117,7 +117,7 @@ final class BankIgnoreNoteTest extends TestCase
             $reflection->getProperty($name)->setValue($action, $value);
         }
         $reflection->getProperty('ownership')->setValue($action, new \MyInvoice\Repository\BankStatementOwnershipResolver($db));
-        $reflection->getProperty('bankPosting')->setValue($action, $this->createStub(\MyInvoice\Service\Accounting\Bank\BankPostingService::class));
+        $reflection->getProperty('bankPosting')->setValue($action, $this->postingStub($sqlite));
         $matchReflection = new \ReflectionClass(\MyInvoice\Service\Bank\Match\MatchSuggestionService::class);
         $reflection->getProperty('matchV2')->setValue($action, $matchReflection->newInstanceWithoutConstructor());
         $request = (new ServerRequestFactory())->createServerRequest('POST', '/bank-transactions/1/ignore')
@@ -168,7 +168,7 @@ final class BankIgnoreNoteTest extends TestCase
         $paymentsReflection->getProperty('db')->setValue($payments, $db);
         $reflection->getProperty('payments')->setValue($action, $payments);
         $reflection->getProperty('ownership')->setValue($action, new \MyInvoice\Repository\BankStatementOwnershipResolver($db));
-        $posting = $this->createStub(\MyInvoice\Service\Accounting\Bank\BankPostingService::class);
+        $posting = $this->postingStub($sqlite);
         if ($closed) {
             $posting->method('releaseMatch')->willThrowException(new \MyInvoice\Service\Accounting\PostingException('period_closed', 'Test closed period', 409));
         }
@@ -195,6 +195,7 @@ final class BankIgnoreNoteTest extends TestCase
     /** Ownership resolver SQL is covered on MariaDB; mutation SQL runs on real fixture rows. */
     private function scopedPdo(BankSqlitePdo $sqlite): PDO
     {
+        $sqlite->exec('CREATE TABLE accounting_periods (id INTEGER, supplier_id INTEGER, status TEXT, starts_on TEXT)');
         $scope = $this->createStub(\PDOStatement::class);
         $scope->method('execute')->willReturn(true);
         $scope->method('fetchColumn')->willReturn(1);
@@ -250,6 +251,19 @@ final class BankIgnoreNoteTest extends TestCase
         $db->method('pdo')->willReturn($pdo);
         $result = (new \MyInvoice\Repository\BankPostingSuggestionRepository($db))->paginateUnposted(7, 50, 0);
         self::assertSame('Test note', $result['items'][0]['ignore_note']);
+    }
+
+    private function postingStub(PDO $sqlite): \MyInvoice\Service\Accounting\Bank\BankPostingService
+    {
+        $posting = $this->createStub(\MyInvoice\Service\Accounting\Bank\BankPostingService::class);
+        $posting->method('lockTransaction')->willReturnCallback(static function (int $supplierId, int $transactionId) use ($sqlite): ?array {
+            self::assertSame(7, $supplierId);
+            self::assertSame(1, $transactionId);
+            self::assertTrue($sqlite->inTransaction());
+            $row = $sqlite->query('SELECT * FROM bank_transactions WHERE id = 1')->fetch(PDO::FETCH_ASSOC);
+            return $row === false ? null : $row;
+        });
+        return $posting;
     }
 
     private function createAllocationTables(PDO $sqlite): void
