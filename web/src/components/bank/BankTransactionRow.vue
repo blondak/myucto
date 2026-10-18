@@ -16,6 +16,8 @@ import PostingRowActions from './PostingRowActions.vue'
 import RuleFormModal from './RuleFormModal.vue'
 import RepostModal from '@/components/accounting/RepostModal.vue'
 import PostingStatusBadge from './PostingStatusBadge.vue'
+import BankTransactionJournalLink from './BankTransactionJournalLink.vue'
+import { useBankJournalNavigation } from './useBankJournalNavigation'
 import MatchSuggestionPanel from './MatchSuggestionPanel.vue'
 import WhyChip from '@/components/automation/WhyChip.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
@@ -65,6 +67,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const auth = useAuthStore()
+const journalNavigation = useBankJournalNavigation()
 
 /** Spárovaná faktura → návrh dimenzí pohybu (její dimenze, jinak výchozí zakázky/klienta). */
 const dimensionPrefill = computed(() => props.tx.matched_invoice_id
@@ -237,8 +240,14 @@ function onPosted(payload: { result: PostResult; debit: string; credit: string }
 function matchActions(tx: BankTransaction): RowAction[] {
   if (isBankNoticeReadOnly(tx)) return []
   const st = tx.match_status
+  const cashJournal = journalNavigation.cashTarget(tx)
   const canMatch = props.actions.canRunDetailAction(tx, 'match')
   return [
+    {
+      key: 'open-cash-journal', label: t('bank.open_cash_journal'), icon: 'doc', variant: 'neutral',
+      to: cashJournal ?? undefined, show: !!cashJournal, menuOnly: true, workspaceOpen: 'beside',
+      onNavigate: event => { void journalNavigation.open(event, cashJournal) },
+    },
     {
       key: 'open-inv', label: t('bank.open'), icon: 'doc', variant: 'neutral',
       to: tx.matched_invoice_id ? `/invoices/${tx.matched_invoice_id}` : undefined,
@@ -432,7 +441,8 @@ function candidateReject() {
         {{ tx.posting?.counter_account_codes?.join(', ') || '-' }}
       </td>
       <td class="px-3 py-2 text-right text-xs whitespace-nowrap">
-        <div class="flex items-center justify-end gap-1">
+        <div class="flex flex-wrap items-center justify-end gap-1">
+          <BankTransactionJournalLink :tx="tx" />
           <PostingRowActions v-if="isDoubleEntry && !isBankNoticeReadOnly(tx)"
             :tx="tx" :currency="currency()"
             @changed="emit('changed')" @posted="onPosted" />
@@ -592,6 +602,7 @@ function candidateReject() {
          stavově relevantní — Otevřít u spárovaného pohybu, Spárovat u ostatních
          — takže na očích zůstane to, co uživatel na daném řádku opravdu chce. -->
     <div class="flex flex-wrap items-center justify-end gap-1.5 pt-1">
+      <BankTransactionJournalLink :tx="tx" />
       <PostingRowActions v-if="isDoubleEntry && !isBankNoticeReadOnly(tx)"
         :tx="tx" :currency="currency()"
         @changed="emit('changed')" @posted="onPosted" />
