@@ -39,12 +39,30 @@ final class SupplierLogoSvgRasterizationTest extends TestCase
         yield 'unsafe intermediate height' => ['1x1000000000'];
     }
 
+    public function testUnavailableCoderRegistryAllowsCliFallback(): void
+    {
+        foreach (['none', 'query-error'] as $renderer) {
+            $result = $this->probe($renderer, '200x50');
+            self::assertFalse($result['converted']);
+            self::assertSame([], $result['calls']);
+        }
+    }
+
     private function probe(string $renderer, string $native): array
     {
+        static $builtinDom = null;
+        if ($builtinDom === null) {
+            // DOM může být zkompilované přímo do PHP, zejména na Windows.
+            $check = proc_open([PHP_BINARY, '-n', '-r', 'exit(class_exists("DOMDocument") ? 0 : 1);'], [], $pipes);
+            self::assertIsResource($check);
+            $builtinDom = proc_close($check) === 0;
+        }
+        $command = [PHP_BINARY, '-n'];
+        if (!$builtinDom) array_push($command, '-d', 'extension=dom');
         $output = tempnam(sys_get_temp_dir(), 'svg-probe-');
         self::assertNotFalse($output);
         try {
-            $process = proc_open([PHP_BINARY, '-n', dirname(__DIR__, 3) . '/Fixtures/Imaging/logo-imagick-probe.php', $output, $renderer, $native],
+            $process = proc_open([...$command, dirname(__DIR__, 3) . '/Fixtures/Imaging/logo-imagick-probe.php', $output, $renderer, $native],
                 [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
             self::assertIsResource($process);
             $stdout = stream_get_contents($pipes[1]);
@@ -79,17 +97,38 @@ final class SupplierLogoSvgRasterizationTest extends TestCase
         self::assertNotFalse($output);
         try {
             file_put_contents($source, '<svg xmlns="http://www.w3.org/2000/svg" ' . $attributes . '>' . $content . '</svg>');
-            $converter = new SupplierLogoConverter(new NullLogger());
-            $converted = (new \ReflectionMethod($converter, 'convertSvgViaImagick'))->invoke($converter, $source, $output);
-            self::assertTrue($converted);
-            $size = getimagesize($output);
-            self::assertNotFalse($size);
-            self::assertSame($expected, array_slice($size, 0, 2));
-            $pixels = imagecreatefrompng($output);
-            self::assertNotFalse($pixels);
-            $center = imagecolorsforindex($pixels, imagecolorat($pixels, intdiv($expected[0], 2), intdiv($expected[1], 2)));
-            self::assertSame(['red' => 255, 'green' => 0, 'blue' => 0, 'alpha' => 0], $center,
-                'Změna rozměrů musí zachovat obsah loga, ne jen vytvořit prázdné PNG.');
+            $logger = new class extends \Psr\Log\AbstractLogger {
+                public array $messages = [];
+                public function log($level, \Stringable|string $message, array $context = []): void { $this->messages[] = (string) $message; }
+            };
+            $converter = new SupplierLogoConverter($logger);
+            $coders = [null];
+            foreach (['MSVG', 'RSVG'] as $format) {
+                if (\Imagick::queryFormats($format) !== []) $coders[] = strtolower($format) . ':';
+            }
+            foreach ($coders as $coder) {
+                @unlink($output);
+                $logger->messages = [];
+                $converted = $coder === null
+                    ? (new \ReflectionMethod($converter, 'convertSvgViaImagick'))->invoke($converter, $source, $output)
+                    : (new \ReflectionMethod($converter, 'rasterizeSvgViaImagick'))->invoke($converter, $source, $output, $coder, $coder);
+                $reason = ($coder ?? 'selected') . ': ' . implode(' | ', $logger->messages);
+                // Docker záměrně zakazuje MVG, které MSVG používá interně.
+                // Jen doložené odmítnutí policy je očekávané; ostatní chyby padají.
+                if (!$converted && $coder === 'msvg:' && preg_match('/security policy[^\n]*[`\'"]MVG[\'"]/i', $reason)) {
+                    self::assertFileDoesNotExist($output, $reason);
+                    continue;
+                }
+                self::assertTrue($converted, $reason);
+                $size = getimagesize($output);
+                self::assertNotFalse($size);
+                self::assertSame($expected, array_slice($size, 0, 2), $reason);
+                $pixels = imagecreatefrompng($output);
+                self::assertNotFalse($pixels);
+                $center = imagecolorsforindex($pixels, imagecolorat($pixels, intdiv($expected[0], 2), intdiv($expected[1], 2)));
+                self::assertSame(['red' => 255, 'green' => 0, 'blue' => 0, 'alpha' => 0], $center,
+                    $reason . ' Změna rozměrů musí zachovat obsah loga, ne jen vytvořit prázdné PNG.');
+            }
         } finally {
             @unlink($source);
             @unlink($output);
@@ -100,6 +139,8 @@ final class SupplierLogoSvgRasterizationTest extends TestCase
     {
         yield 'viewBox only' => ['viewBox="0 0 200 50"', '<rect width="200" height="50" fill="red"/>', [800, 200]];
         yield 'percentage viewport' => ['width="100%" height="100%" viewBox="0 0 200 50"', '<rect width="200" height="50" fill="red"/>', [800, 200]];
+        yield 'physical units' => ['width="20mm" height="5mm" viewBox="0 0 200 50"', '<rect width="200" height="50" fill="red"/>', [800, 200]];
+        yield 'offset viewBox' => ['viewBox="10 20 200 50"', '<rect x="10" y="20" width="200" height="50" fill="red"/>', [800, 200]];
         yield 'wide viewport' => ['width="100000" height="10" viewBox="0 0 100000 10"', '<rect width="100000" height="10" fill="red"/>', [800, 1]];
         yield 'tall viewport' => ['width="10" height="100000" viewBox="0 0 10 100000"', '<rect width="10" height="100000" fill="red"/>', [1, 240]];
     }

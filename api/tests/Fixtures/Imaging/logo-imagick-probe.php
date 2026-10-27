@@ -25,6 +25,8 @@ final class Imagick
     public static function queryFormats(string $format): array
     {
         $available = $GLOBALS['argv'][2];
+        if ($available === 'query-error') throw new RuntimeException('Coder registry unavailable.');
+        if ($available === 'none') return [];
         return match ($format) {
             'RSVG' => str_starts_with($available, 'rsvg') ? ['RSVG'] : [],
             'MSVG' => $available !== 'rsvg-only' ? ['MSVG'] : [],
@@ -64,6 +66,10 @@ final class Imagick
     }
     public function resizeImage(int $width, int $height, int $filter, float $blur, bool $bestFit): bool
     {
+        if (!$bestFit) {
+            [$this->width, $this->height] = [$width, $height];
+            return true;
+        }
         $scale = min($width / $this->width, $height / $this->height);
         $this->width = max(1, (int) round($this->width * $scale));
         $this->height = max(1, (int) round($this->height * $scale));
@@ -92,5 +98,11 @@ require $api . '/src/Support/Imaging/ImagickGuard.php';
 require $api . '/src/Service/Mail/SupplierLogoConverter.php';
 $converter = new MyInvoice\Service\Mail\SupplierLogoConverter(new Psr\Log\NullLogger());
 $method = new ReflectionMethod($converter, 'convertSvgViaImagick');
-$result = $method->invoke($converter, 'synthetic.svg', $argv[1]);
+$source = $argv[1] . '.svg';
+file_put_contents($source, '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="50"><rect width="200" height="50"/></svg>');
+try {
+    $result = $method->invoke($converter, $source, $argv[1]);
+} finally {
+    @unlink($source);
+}
 echo json_encode(['converted' => $result, 'calls' => Imagick::$calls], JSON_THROW_ON_ERROR);
