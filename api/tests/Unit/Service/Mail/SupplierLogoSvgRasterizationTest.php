@@ -6,6 +6,8 @@ namespace MyInvoice\Tests\Unit\Service\Mail;
 
 use MyInvoice\Service\Mail\SupplierLogoConverter;
 use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\PreserveGlobalState;
+use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
 
@@ -87,6 +89,10 @@ final class SupplierLogoSvgRasterizationTest extends TestCase
         yield 'build without MSVG' => ['rsvg-only', '100000x100000', [240, 240]];
     }
 
+    // ImageMagick 6 počítá TIME od inicializace procesu, ne od začátku operace.
+    // Geometrii ověřujeme s čerstvým časovým rozpočtem, i po dlouhém běhu celé sady.
+    #[RunInSeparateProcess]
+    #[PreserveGlobalState(false)]
     #[DataProvider('svgGeometryCases')]
     public function testActualSvgRenderPreservesGeometry(string $attributes, string $content, array $expected): void
     {
