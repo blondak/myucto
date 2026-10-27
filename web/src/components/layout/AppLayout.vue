@@ -1795,11 +1795,16 @@ onBeforeUnmount(() => {
                   type="button"
                   class="cursor-pointer flex w-full items-center gap-2.5 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 hover:text-danger-600 disabled:opacity-60"
                   :disabled="logoutBusy"
+                  :aria-busy="logoutBusy"
                   role="menuitem"
                   @click="logout"
                 >
-                  <svg class="w-4 h-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6A2.25 2.25 0 0 0 5.25 5.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3-6 3 3m0 0-3 3m3-3H9"/></svg>
-                  {{ t('nav.logout') }}
+                  <svg v-if="logoutBusy" class="w-4 h-4 shrink-0 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle class="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" />
+                    <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" stroke-width="3" stroke-linecap="round" />
+                  </svg>
+                  <svg v-else class="w-4 h-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6A2.25 2.25 0 0 0 5.25 5.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3-6 3 3m0 0-3 3m3-3H9"/></svg>
+                  {{ t(logoutBusy ? 'nav.logging_out' : 'nav.logout') }}
                 </button>
               </div>
             </transition>
@@ -2075,8 +2080,16 @@ onBeforeUnmount(() => {
             <button
               @click="logout"
               :disabled="logoutBusy"
-              class="cursor-pointer w-full px-2 h-9 text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-surface disabled:opacity-60"
-            >{{ t('nav.logout') }}</button>
+              :aria-busy="logoutBusy"
+              class="cursor-pointer inline-flex items-center justify-center gap-2 whitespace-nowrap w-full px-2 h-9 text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-surface disabled:opacity-60"
+            >
+              <svg v-if="logoutBusy" class="w-4 h-4 shrink-0 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle class="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" />
+                <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" stroke-width="3" stroke-linecap="round" />
+              </svg>
+              <svg v-else class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6A2.25 2.25 0 0 0 5.25 5.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3-6 3 3m0 0-3 3m3-3H9"/></svg>
+              {{ t(logoutBusy ? 'nav.logging_out' : 'nav.logout') }}
+            </button>
           </div>
           <!-- Klávesové zkratky tu byly, ale na dotykovém zařízení je není čím
                vyvolat — odkaz jen zabíral místo na dně zásuvky. Na desktopu

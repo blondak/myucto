@@ -174,6 +174,8 @@ dobrovolně zapnout v rozsahu 1 až 1440 minut.
 1. V pravém horním rohu klikněte na své jméno.
 2. V nabídce zvolte **Odhlásit**. Na mobilu je tlačítko **Odhlásit** dole v
    postranním menu.
+3. Během čekání na potvrzení serveru tlačítko zobrazuje otáčející se indikátor
+   a text **Odhlašování…**. Po tuto dobu na něj nelze kliknout znovu.
 
 **Jak poznáte, že je hotovo:** vidíte přihlašovací obrazovku. Session se zruší
 okamžitě i na serveru.
