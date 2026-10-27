@@ -15,6 +15,7 @@ import { CHROME_FILLED_PRIMARY } from '@/components/ui/buttonStyles'
 import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { useNavOrder } from '@/composables/useNavOrder'
 import { usePurchaseApprovalCount } from '@/composables/usePurchaseApprovalCount'
+import LogoutProgressOverlay from '@/components/LogoutProgressOverlay.vue'
 import SupplierSwitcher from './SupplierSwitcher.vue'
 import GlobalSearch from './GlobalSearch.vue'
 import CommandPalette from './CommandPalette.vue'
@@ -1657,7 +1658,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div :style="{ '--app-footer-height': `${appFooterHeight}px`, '--app-header-height': `${appHeaderHeight}px` }" class="min-h-screen flex flex-col overflow-x-clip bg-neutral-50" @keydown.esc="userMenuOpen = false; navigationLayoutOpen = false">
+  <Teleport to="body">
+    <LogoutProgressOverlay v-if="logoutBusy" />
+  </Teleport>
+  <div :inert="logoutBusy" :style="{ '--app-footer-height': `${appFooterHeight}px`, '--app-header-height': `${appHeaderHeight}px` }" class="min-h-screen flex flex-col overflow-x-clip bg-neutral-50" @keydown.esc="userMenuOpen = false; navigationLayoutOpen = false">
 
     <!-- ═════════════════════ TOPBAR ═════════════════════ -->
     <header ref="appHeader" class="nav-inverted sticky top-0 z-30 bg-surface border-b border-neutral-200 shadow-md">
