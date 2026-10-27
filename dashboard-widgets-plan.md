@@ -2,7 +2,9 @@
 
 ## Stav a cíl
 
-Tento dokument je návrh implementace. Uložení plánu nezahajuje implementaci.
+Společný registr, datová API, obě dashboardové plochy a editor jsou
+implementované. Dokument zachycuje návrh i schválené chování včetně následných
+úprav rozměrů a ovládání. Stav ověření je uvedený v oddílu 9.
 
 Cílem je jeden registr widgetů, společná vykreslovací komponenta a dvě samostatně
 nastavitelné plochy. Adresy `/` i `/portal` zůstanou zachované. Výchozí obchodní
@@ -22,9 +24,8 @@ a stávajícími podmínkami aplikace.
 | `/portal` | Přehled firmy: obchodní výsledky, cashflow, doklady, orientační DPH a spolupráce s účetní |
 
 Obě adresy používají stejné komponenty, datové služby, pravidla widgetů a editor.
-Není potřeba přesměrovat `/portal` na `/`. Stávající výběr vstupní plochy při
-přihlášení lze zachovat, včetně klientského vstupu na `/portal`. Přístup na
-`/` sám o sobě klientovi není potřeba rozšiřovat.
+Cesty `/` a `/portal` i stávající přesměrování klientů na `/portal` zůstávají
+zachované. Klientský přístup na `/` se tím nerozšiřuje.
 
 Podstránky `/portal/document-requests`, `/portal/purchase-invoice-submissions`,
 `/portal/settings` a `/portal/mcp` nejsou součástí slučování.
@@ -64,13 +65,15 @@ Každý typ widgetu definuje:
 - stabilní identifikátor typu;
 - i18n klíče názvu a popisu do nabídky „Přidat widget“;
 - pojmenované pravidlo přístupu a podmínky firmy;
-- podporované šířky, výchozí velikost a povolené nastavení;
+- minimální a maximální šířku, výchozí šířku a povolené nastavení;
 - datové závislosti;
 - zda lze vložit více instancí stejného typu;
 - chování bez dat.
 
-Identifikátor instance se liší od identifikátoru typu. Například pět KPI karet
-používá stejný typ `business.kpi`, ale jiné instance a období.
+Manifest obsahuje 24 typů: 23 datových widgetů a technický typ
+`layout.divider`. Identifikátor instance se liší od identifikátoru typu.
+Například pět KPI karet používá stejný typ `business.kpi`, ale jiné instance
+a období. Oddělovač není datový widget a mimo editor se nezobrazuje.
 
 V tabulce znamená **R** čtení a **W** zápis. **Základ** znamená přístup k dané
 ploše a aktuální firmě; zachovává dnešní dostupnost agregátů portálu.
@@ -89,7 +92,7 @@ Nedává přístup k jednotlivým dokladům nebo interním údajům.
 | `receivables.due` | Faktury splatné dnes, tento týden a tento měsíc | `invoices R` |
 | `invoices.overdue` | Konkrétní faktury po splatnosti | `invoices R` |
 | `invoices.upcoming` | Konkrétní faktury před splatností | `invoices R` |
-| `clients.top` | Top odběratelé; tabulka, graf nebo obojí | `invoices R` + `clients R` |
+| `clients.top` | Top odběratelé; tabulka, graf nebo obojí, volitelné umístění tabulky vlevo/vpravo/nad/pod grafem | `invoices R` + `clients R` |
 | `invoices.drafts` | Rozpracované faktury a výkazy práce | `invoices R`; změny podle práv a zámku dokladu |
 | `invoices.approvals` | Vydané faktury čekající na schválení | `invoices.approval R` |
 | `documents.requests` | Chybějící doklady; klientský nebo interní pohled | Klient: `documents.submit R`; interní: `documents.requests R` |
@@ -132,25 +135,83 @@ nastavením zachová vlastní současné ovládání.
 
 ## 3. Výchozí sestavy
 
-Použije se mřížka o 12 sloupcích. Na mobilu se obsah složí do jednoho sloupce
-ve stejném pořadí. Registr stanoví podporované šířky; libovolné rozměry
-v pixelech nejsou součástí první verze.
+Desktop používá dvanáctisloupcovou mřížku. Základní buňka má poměr stran 16:9
+a výšku widgetu tvoří celočíselný počet řádků mřížky. Datový widget zabere
+podporovaný počet sloupců a jeho výška se přizpůsobí obsahu nebo zvolenému
+minimu. Mobilní zobrazení skládá widgety přirozeně do jednoho sloupce.
+Manifest pro každý typ určuje minimální a maximální šířku; u datových widgetů
+je možné měnit šířku po jednom sloupci až do 12. Oddělovač má pevnou šířku
+12 sloupců. Následující tabulka uvádí minimum a výchozí hodnotu v aktuálním
+manifestu:
+
+| Typ | Minimum | Výchozí |
+|---|---:|---:|
+| `business.kpi` | 3 | 3 |
+| `business.monthly` | 4 | 9 |
+| `sales.summary` | 4 | 6 |
+| `purchases.summary` | 4 | 6 |
+| `receivables.aging` | 3 | 4 |
+| `payables.aging` | 3 | 4 |
+| `cashflow.weekly` | 4 | 4 |
+| `cashflow.collections` | 4 | 6 |
+| `receivables.due` | 4 | 6 |
+| `invoices.overdue` | 4 | 6 |
+| `invoices.upcoming` | 4 | 6 |
+| `clients.top` | 6 | 12 |
+| `invoices.drafts` | 4 | 8 |
+| `invoices.approvals` | 3 | 4 |
+| `documents.requests` | 3 | 4 |
+| `actions.quick` | 3 | 4 |
+| `actions.todo` | 3 | 4 |
+| `vat.current` | 3 | 6 |
+| `tax.deadlines` | 4 | 6 |
+| `tax.calendar` | 4 | 6 |
+| `tax.net` | 4 | 6 |
+| `tax.advances` | 4 | 6 |
+| `accounting.status` | 4 | 12 |
+| `layout.divider` | 12 | 12 |
+
+Týdenní cashflow se doporučuje používat od 6 sloupců, aby se tabulka pohodlně
+četla. Výšku lze nastavit jako `auto`, `compact`,
+`normal` nebo `tall`, pouze pokud ji daný widget podporuje. Výchozí výška všech
+nových instancí i výchozích sestav je `auto` (Automatická); uložené ruční
+volby se nemění.
+
+`layout.divider` vykreslí v editoru samostatnou lištu přes celou šířku řádku;
+mimo editor není vidět. Lištu lze přetáhnout i do prázdného místa některé skupiny.
+Přesun do volného místa skupiny vloží oddělovač na konec cílové skupiny,
+těsně před její následující oddělovač. Na desktopu další skupina začíná až pod nejvyšším
+widgetem předchozí skupiny, takže rozložení nevytváří zuby kvůli nestejně
+vysokým kartám. Oddělovač lze přesouvat a odstranit pouze v editoru.
 
 ### Společná obchodní sestava company-v1
 
-| Pořadí | Widgety | Šířka |
-|---|---|---|
-| 1 | `actions.quick` | 12 |
-| 2 | `actions.todo` / `documents.requests` | 8 / 4 |
-| 3 | Čtyři instance `business.kpi`: tento měsíc, minulý měsíc, letos a loni do dneška | 3 každý |
-| 4 | `business.kpi`: posledních 12 měsíců / `business.monthly` | 3 / 9 |
-| 5 | `sales.summary` / `purchases.summary` | 6 / 6 |
-| 6 | `invoices.drafts` / `invoices.approvals` | 8 / 4 |
-| 7 | `receivables.aging` / `payables.aging` / `cashflow.weekly` | 4 / 4 / 4 |
-| 8 | `receivables.due` / `cashflow.collections` | 6 / 6 |
-| 9 | `invoices.overdue` / `invoices.upcoming` | 6 / 6 |
-| 10 | `clients.top`, tabulka a graf | 12 |
-| 11 | `vat.current` / `tax.deadlines` | 6 / 6 |
+Výchozí obchodní sestava obsahuje 23 datových widgetů a 9 oddělovačů
+(32 položek celkem). První skupina obsahuje rychlé akce, úkoly a požadavky na
+doklady; oddělovač následuje až za nimi. Sestava portálu `portal-v1` má shodný
+obsah. Domovská sestava `home-v1` obsahuje 27 datových widgetů a 12 oddělovačů
+(39 položek celkem), tedy navíc interní účetní a daňové widgety podle oprávnění.
+
+### Doporučení pro šířky
+
+Při šířce okna 1 920 px zabere otevřené menu přibližně 240 px a hlavní oblast
+přehledu má zhruba 1 600 až 1 616 px. Orientační výsledné šířky při dvanácti
+sloupcích a mezerách mřížky:
+
+| Sloupce | Přibližná šířka |
+|---:|---:|
+| 3 | 388 px |
+| 4 | 523 px |
+| 6 | 792 px |
+| 8 | 1 061 px |
+| 9 | 1 196 px |
+| 12 | 1 600 px |
+
+Doporučené šířky jsou 4 sloupce pro rychlé akce a Akce pro tebe, 3 pro KPI,
+4 pro malé souhrny a 6 pro běžné grafy či tabulky. Kombinace tabulky a grafu
+potřebuje obvykle 8 nebo 12 sloupců. `actions.quick` a `actions.todo` mají
+minimum 3, maximum 12 a pro nově přidané instance výchozí šířku 4.
+Tyto změny výchozích voleb nemění již uložené osobní konfigurace.
 
 Nepovolené nebo nepoužitelné widgety se vynechají a rozložení se přeskupí.
 Jejich uložená konfigurace tím nezanikne.
@@ -172,21 +233,36 @@ Osobní konfigurace obou ploch je nezávislá.
 
 ## 4. Editor rozložení
 
-Editor bude společný pro obě plochy. V režimu **Upravit přehled** umožní:
+Editor je společný pro obě plochy. V režimu **Upravit přehled** umožňuje:
 
 - přidat widget z katalogu dostupného aktuálnímu uživateli a firmě;
 - odebrat widget;
 - změnit pořadí přetažením i tlačítky pro posun;
-- zvolit podporovanou šířku;
+- zvolit podporovanou šířku a dostupnou výšku;
 - upravit podporované nastavení;
-- uložit změny, zrušit je nebo obnovit výchozí sestavu.
+- uložit změny, zrušit je nebo obnovit výchozí sestavu;
+- najít widget v prohledávatelném katalogu a znovu přidat odebraný typ;
+- přidat, přesunout nebo odebrat oddělovač skupin; jeho lišta zabírá celou
+  šířku a volné místo ve skupině slouží jako cíl přesunu před následující oddělovač.
 
 Změny se provádějí v pracovní kopii a uloží společným potvrzením. Zrušení
-obnoví původní stav. Rozměry se mění jen v režimu editace.
+obnoví původní stav. Rozměry se mění jen v režimu editace. Rohový úchyt
+umožňuje měnit šířku i výšku tažením nebo klávesami; rozměry se přichytí
+k podporovaným velikostem. Při náhledu má widget plovoucí editační lištu
+s úchytem pro přesun a ovládáním nastavení a odebrání; lišta leží mimo měřenou
+výšku obsahu, aby náhled odpovídal uložené geometrii karty. Hlavička plochy
+zůstává nad widgety; název firmy a tlačítka editoru sdílejí jeden řádek.
 
-Výška se přizpůsobí komponentě. U tabulek půjde nastavit omezený počet řádků;
-grafy a karty nabídnou pouze velikosti, které podporuje jejich komponenta.
-Mobilní ovládání musí mít dostupnou alternativu k přetažení.
+Svislá ryska uprostřed pravé hrany mění pouze šířku a vodorovná ryska
+uprostřed spodní hrany pouze výšku; druhý rozměr vždy zachová. Rohový úchyt mění obě osy a zobrazí se
+jen u widgetů s oběma nastavitelnými rozměry. Vodorovný úchyt reaguje na
+šipky vlevo/vpravo, svislý na šipky nahoru/dolů.
+
+Katalog má pružnou mřížku s minimální šířkou karty 240 px, mezerou 12 px
+a nejvýše šesti sloupci. Rozhoduje šířka samotného katalogu. Na displeji
+1920 × 1080 s bočním menu zobrazuje šest karet po přibližně 251 px; názvy
+jsou v češtině i angličtině jednořádkové, popisy mají nejvýše dva řádky. Při 1536 px jsou čtyři sloupce. Vyhledávání pracuje s aktuálními
+překlady názvů a popisů bez zkracování obsahu.
 
 Editor i widgety použijí existující design tokeny, sémantická tlačítka s ikonami,
 zalomitelné toolbary a české i anglické překlady.
@@ -213,6 +289,7 @@ widgetů a načtou její data.
       "id": "kpi-ytd",
       "type": "business.kpi",
       "span": 3,
+      "height": "auto",
       "options": {
         "period": "ytd",
         "currency": "all"
@@ -222,6 +299,7 @@ widgetů a načtou její data.
       "id": "monthly",
       "type": "business.monthly",
       "span": 9,
+      "height": "normal",
       "options": {
         "months": 12,
         "currency": "auto"
@@ -231,14 +309,15 @@ widgetů a načtou její data.
 }
 ```
 
-Pořadí určuje pole `widgets`. Konfigurace obsahuje identifikátory, velikosti
-a nastavení; neobsahuje částky, výsledky dotazů, oprávnění ani identifikátory
-konkrétních firem.
+Pořadí určuje pole `widgets`. Konfigurace může obsahovat nejvýše 64 instancí,
+z toho 32 datových widgetů a 32 oddělovačů; její velikost je omezena na 16 KiB.
+Obsahuje identifikátory, šířky, podporovanou výšku a nastavení; neobsahuje
+částky, výsledky dotazů, oprávnění ani identifikátory konkrétních firem.
 
 ### Validace a souběh
 
 - Známé typy widgetů a unikátní ID instancí.
-- Počet instancí podle pravidel typu, celkem nejvýše 32.
+- Nejvýše 32 datových widgetů a 32 oddělovačů, celkem nejvýše 64 položek.
 - Pouze velikosti a nastavení povolené registrem.
 - Nejvýše 16 KiB konfigurace a hloubka odpovídající typovanému schématu.
 - Vlastní validátor konfigurace; současnou obecnou validaci preferencí
@@ -262,7 +341,7 @@ který smí data jen číst. Přístup k ukládání proto nebude navázaný na
 | Existuje vlastní sestava | Použije se vlastní konfigurace |
 | Přibude nový widget | Nabídne se v katalogu, sám se nepřidá do vlastní sestavy |
 | Uživatel ztratí právo nebo přepne firmu | Nedostupný widget se skryje, jeho konfigurace zůstane zachovaná |
-| Obnovení výchozího stavu | Odstraní se vlastní konfigurace a použije aktuální výchozí sestava |
+| Obnovení výchozího stavu | Konfigurace rozložení se nastaví na `null` a použije se aktuální výchozí sestava; zůstane revizní tombstone, aby se neobnovila stará revize |
 | Změní se formát konfigurace | Provede se explicitní převod podle `schemaVersion` |
 
 `schemaVersion` řídí formát konfigurace. `presetVersion` označuje verzi výchozí
@@ -337,6 +416,10 @@ repozitáře.
 
 ### Etapa 1 — registr, výchozí sestavy a ukládání konfigurace
 
+**Stav:** Dokončeno a ověřeno jednotkovými, integračními a HTTP testy.
+Manifest, výchozí sestavy, validace, uživatelské preference, revize,
+souběžný zápis i reset mají regresní pokrytí.
+
 **Rozsah:**
 
 - manifest widgetů, pojmenovaná pravidla dostupnosti a frontendová mapa komponent;
@@ -357,6 +440,10 @@ repozitáře.
 
 ### Etapa 2 — data widgetů a oprávnění
 
+**Stav:** Implementováno. Cílené jednotkové, integrační a HTTP testy
+ověřují shodu obchodních dat, izolaci, oprávnění i původní kontrakty.
+Před odesláním změny se vyhodnotí také širší účetní a daňová auditní brána.
+
 **Rozsah:**
 
 - vyčlenění potřebných agregací do společných služeb;
@@ -376,6 +463,11 @@ repozitáře.
 
 ### Etapa 3 — společné vykreslení obou ploch
 
+**Stav:** Dokončeno. Obě stránky používají sdílenou komponentu a zachovávají
+své dosavadní cesty a přesměrování. Ověřené jsou obnova dat, zahození
+opožděných odpovědí, přepnutí firmy a zachování skrytých widgetů.
+Responzivní zobrazení i světlý a tmavý režim byly zkontrolované v prohlížeči.
+
 **Rozsah:**
 
 - `DashboardBoard`, stav načítání, prázdné a chybové stavy;
@@ -394,6 +486,12 @@ repozitáře.
 - zachované oddělené chování technického správce a úvodního založení firmy.
 
 ### Etapa 4 — editor, ovládání a dokumentace
+
+**Stav:** Dokončeno. Editor zahrnuje vyhledávání, rozměry, přesouvání,
+oddělovače, uložení, zrušení a reset. Rysky na hranách mění jednotlivé osy,
+rohový úchyt obě. Klávesové i pointer ovládání a konflikty mají testy.
+Katalog byl změřený v češtině i angličtině při šířkách 320 až 2560 px.
+Aktualizované jsou kapitoly 9 a 10 manuálu i vygenerované HTML.
 
 **Rozsah:**
 
@@ -453,8 +551,9 @@ soubory a kontrakty.
   v `AGENTS.md`.
 - Pokud se změní veřejné API, ověřit OpenAPI striktním parsováním bez duplicitních
   klíčů a bez neplatných odkazů.
-- Aktualizovat kapitoly 9 a 10 manuálu a vygenerovat pouze HTML přes
-  `php tools/generateManualHtml.php`. Generované soubory necommitovat.
+- Kapitoly 9 a 10 popisují výsledné uživatelské chování. Po jejich změně
+  vygenerovat pouze HTML přes `php tools/generateManualHtml.php`;
+  generované soubory necommitovat.
 
 ## 11. Výchozí zdroje v repozitáři
 
