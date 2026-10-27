@@ -10,6 +10,7 @@ import { widgetComponents } from '@/dashboard/registry'
 import { hasBusinessActivity } from '@/dashboard/activity'
 import { groupWidgets, cellHeightForWidth, rowsForContent } from '@/dashboard/grid'
 import DashboardDragHandle from './DashboardDragHandle.vue'
+import WidgetCatalog from './WidgetCatalog.vue'
 import WidgetResizeHandle from './WidgetResizeHandle.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 const props = defineProps<{ board: BoardId }>()
@@ -53,8 +54,6 @@ watch(saving, value => { if (value) cancelDrag() })
 watch(editing, value => { if (!value) cancelDrag() })
 const definitions = computed(() => new Map(catalog.value?.widgets.map(w => [w.type, w]) ?? []))
 const addable = computed(() => catalog.value?.widgets.filter(w => w.type !== 'layout.divider').filter(w => w.repeatable || !draft.value?.widgets.some(i => i.type === w.type)) ?? [])
-const catalogSearch = ref('')
-const filteredAddable = computed(() => addable.value.filter(def => `${t(def.titleKey)} ${t(def.descriptionKey)}`.toLocaleLowerCase().includes(catalogSearch.value.toLocaleLowerCase())))
 const dataWidgetCount = computed(() => draft.value?.widgets.filter(w => w.type !== 'layout.divider').length ?? 0)
 const dividerCount = computed(() => draft.value?.widgets.filter(w => w.type === 'layout.divider').length ?? 0)
 const groups = computed(() => groupWidgets(visible.value, editing.value))
@@ -98,6 +97,11 @@ function finishDrag() {
 }
 function remove(id: string) { if (draft.value) draft.value.widgets = draft.value.widgets.filter(w => w.id !== id) }
 
+function resizeAxes(definition: WidgetDefinition): ('width' | 'height' | 'both')[] {
+  const width = definition.spans.length > 1
+  const height = (definition.heights?.length ?? 0) > 1
+  return [...(width ? ['width' as const] : []), ...(height ? ['height' as const] : []), ...(width && height ? ['both' as const] : [])]
+}
 function optionValue(value: string | number | boolean) {
   return typeof value === 'string' && ['all','auto','table','chart','both','left','right','above','below'].includes(value) ? t(`dashboardBoard.${value}`) : typeof value === 'string' && ['current_month','last_month','ytd','prev_year_ytd','last_12m'].includes(value) ? t(`portal.period_${value}`) : String(value)
 }
@@ -136,16 +140,7 @@ watch([results, businessActivity], ([value, activity]) => {
     </div>
     <div v-if="editing" class="p-4 bg-surface border border-primary-200 rounded-lg space-y-3">
       <p v-if="hiddenCount" class="text-sm text-neutral-500">{{ t('dashboardBoard.hidden') }}</p>
-      <details class="space-y-3">
-        <summary class="cursor-pointer text-sm font-medium text-primary-600">{{ t('dashboardBoard.add') }}</summary>
-        <input v-model="catalogSearch" type="search" :aria-label="t('common.search')" :placeholder="t('common.search')" class="w-full border border-neutral-300 rounded-md bg-surface px-3 py-2 text-sm" />
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          <div v-for="def in filteredAddable" :key="def.type" class="rounded-lg border border-neutral-200 p-3 flex flex-col gap-2 min-w-0">
-            <h3 class="font-medium text-sm">{{ t(def.titleKey) }}</h3><p class="text-xs text-neutral-500 flex-1">{{ t(def.descriptionKey) }}</p>
-            <button type="button" :disabled="saving || dataWidgetCount >= 32" :class="[button, 'bg-primary-600 border-primary-600 text-white hover:bg-primary-700 self-start']" @click="state.add(def)"><span aria-hidden="true">＋</span>{{ t('dashboardBoard.add') }}</button>
-          </div>
-        </div>
-      </details>
+      <WidgetCatalog :definitions="addable" :disabled="saving || dataWidgetCount >= 32" @add="state.add" />
       <button type="button" :disabled="saving || dividerCount >= 32" :class="[button, 'border-neutral-300 text-neutral-700 hover:bg-neutral-50']" @click="addDivider"><span aria-hidden="true">＋</span>{{ t('dashboardBoard.addDivider') }}</button>
       <p v-if="dataWidgetCount >= 32" class="text-xs text-warning-600">{{ t('dashboardBoard.limit') }}</p>
     </div>
@@ -187,7 +182,7 @@ watch([results, businessActivity], ([value, activity]) => {
           </div>
           </div>
         </div>
-        <WidgetResizeHandle v-if="editing && (definitions.get(instance.type)!.spans.length > 1 || (definitions.get(instance.type)!.heights?.length ?? 0) > 1)" :instance="instance" :definition="definitions.get(instance.type)!" :cell-width="cellHeight * 16 / 9" :cell-height="cellHeight" :disabled="saving" @resize="(span,height) => { instance.span = span; instance.height = height }" />
+        <template v-if="editing"><WidgetResizeHandle v-for="axis in resizeAxes(definitions.get(instance.type)!)" :key="axis" :axis="axis" :instance="instance" :definition="definitions.get(instance.type)!" :cell-width="cellHeight * 16 / 9" :cell-height="cellHeight" :disabled="saving" @resize="(span,height) => { instance.span = span; instance.height = height }" /></template>
       </article>
         </div>
       </section>

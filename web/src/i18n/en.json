@@ -40206,6 +40206,8 @@
     "divider": "New row",
     "dividerHint": "Following widgets start below the previous group.",
     "resize": "Resize widget",
+    "resizeWidth": "Resize widget width only",
+    "resizeHeight": "Resize widget height only",
     "move": "Move widget",
     "tablePosition": "Table position",
     "left": "Left of chart",

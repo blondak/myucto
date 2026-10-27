@@ -39,6 +39,8 @@ describe('dashboard editor controls', () => {
     await wrapper.findAll('button').find(b => b.text().includes('dashboardBoard.edit'))!.trigger('click')
     expect(wrapper.find('.widget-inner').html()).toBe(before)
     expect(wrapper.find('article').attributes('style')).toBe(rows)
+    expect(wrapper.findAll('[data-resize-axis]').map(handle => handle.attributes('data-resize-axis'))).toEqual(['width','height','both'])
+    for (const handle of wrapper.findAll('[data-resize-axis]')) expect(wrapper.find('.widget-inner').element.contains(handle.element)).toBe(false)
     await wrapper.find('button[aria-label="dashboardBoard.options"]').trigger('click')
     expect(wrapper.find('[data-widget-settings]').exists()).toBe(true)
     expect(wrapper.find('.widget-inner').element.contains(wrapper.find('[data-widget-settings]').element)).toBe(false)

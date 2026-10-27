@@ -40206,6 +40206,8 @@
     "divider": "Nový řádek",
     "dividerHint": "Následující widgety začnou pod předchozí skupinou.",
     "resize": "Změnit velikost widgetu",
+    "resizeWidth": "Změnit pouze šířku widgetu",
+    "resizeHeight": "Změnit pouze výšku widgetu",
     "move": "Přesunout widget",
     "tablePosition": "Umístění tabulky",
     "left": "Vlevo od grafu",
