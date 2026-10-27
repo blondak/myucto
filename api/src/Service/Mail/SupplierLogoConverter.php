@@ -214,50 +214,48 @@ final class SupplierLogoConverter
      * SVG via Imagick. Vrací true při úspěchu, false pokud Imagick neumí SVG
      * (chybí delegate) — caller pak zkusí rsvg-convert.
      *
-     * Klíčový detail: Imagick by default rasterizuje SVG na nativní velikost
-     * (`width`/`height` z SVG nebo viewBox při 72 DPI). Pro malá loga to dělá
-     * rozmazaný výsledek na retině — proto před readImage zvedáme resolution
-     * tak, aby výstup měl alespoň MAX_HEIGHT_PX, a pak downscalujeme s Lanczos.
+     * Obecný coder SVG může i při pingImage spustit externí Inkscape a vykreslit
+     * celý nativní rastr mimo limity Imagicku. Rozměry proto čteme interním MSVG
+     * a vykreslujeme explicitním RSVG/MSVG až s omezeným cílovým rozměrem.
      */
     private function convertSvgViaImagick(string $sourcePath, string $targetPath): bool
     {
-        // Coder vynucený prefixem `svg:` (žádná autodetekce formátu) a stejné resource
-        // limity jako náhledy dokumentů.
-        $spec = 'svg:' . $sourcePath;
         try {
-            return ImagickGuard::withLimits(function () use ($spec, $targetPath): bool {
-                // Probe nativní rozměry (ping = bez full decode)
-                $size = ImagickGuard::ping($spec);
+            return ImagickGuard::withLimits(function () use ($sourcePath, $targetPath): bool {
+                $hasRsvg = \Imagick::queryFormats('RSVG') !== [];
+                $probeCoder = \Imagick::queryFormats('MSVG') !== [] ? 'msvg:' : ($hasRsvg ? 'rsvg:' : null);
+                if ($probeCoder === null) return false;
+                $size = ImagickGuard::ping($probeCoder . $sourcePath);
                 if ($size === null) {
                     return false;
                 }
                 [$natW, $natH] = $size;
-
-                // Pokud je nativní výška menší než target, boostni rasterizační DPI
-                // tak, aby SVG vyrenderovalo aspoň MAX_HEIGHT_PX vysoké
-                $boost = max(1.0, self::MAX_HEIGHT_PX / $natH);
-                $dpi   = (int) ceil(72 * $boost);
-                // Pixel-bomb: obří deklarované rozměry renderujeme v menším měřítku, aby
-                // rastr nepřesáhl MAX_DECODED_PIXELS (výstup se stejně zmenší na 800×240).
-                $cap = sqrt(self::MAX_DECODED_PIXELS / ($natW * $natH));
-                if ($boost > $cap) {
-                    $dpi = max(1, (int) floor(72 * $cap));
-                }
+                // Malé vektory zvětšíme pro retinu. MSVG nerozumí rámečku jako
+                // best-fit, proto předáváme už přesný poměr stran, ne 800×240.
+                $scale = min(self::MAX_WIDTH_PX / $natW, self::MAX_HEIGHT_PX / $natH);
+                // RSVG subpixelovou hranu zaokrouhlí na nulu. Extrémně úzký vektor
+                // nejprve vykreslíme s nejkratší hranou 1 px a pak zmenšíme. Ani
+                // tento mezikrok nesmí překročit pixelový ani stranový limit.
+                $scale = max($scale, 1 / min($natW, $natH));
+                $width = max(1, (int) round($natW * $scale));
+                $height = max(1, (int) round($natH * $scale));
+                if (!ImagickGuard::withinPixelLimit($width, $height, self::MAX_DECODED_PIXELS)) return false;
+                $coder = $hasRsvg ? 'rsvg:' : 'msvg:';
 
                 $im = new \Imagick();
-                $im->setBackgroundColor(new \ImagickPixel('transparent'));
-                $im->setResolution($dpi, $dpi);
-                $im->readImage($spec);
-                $im->setImageFormat('png32'); // PNG s alfa kanálem
+                try {
+                    $im->setBackgroundColor(new \ImagickPixel('transparent'));
+                    $im->setSize($width, $height);
+                    $im->readImage($coder . $sourcePath);
+                    $im->setImageFormat('png32'); // PNG s alfa kanálem
 
-                // Resize do MAX bounds (bestfit zachová poměr stran)
-                if ($im->getImageHeight() > self::MAX_HEIGHT_PX || $im->getImageWidth() > self::MAX_WIDTH_PX) {
-                    $im->resizeImage(self::MAX_WIDTH_PX, self::MAX_HEIGHT_PX, \Imagick::FILTER_LANCZOS, 1, true);
+                    if ($im->getImageHeight() > self::MAX_HEIGHT_PX || $im->getImageWidth() > self::MAX_WIDTH_PX) {
+                        $im->resizeImage(self::MAX_WIDTH_PX, self::MAX_HEIGHT_PX, \Imagick::FILTER_LANCZOS, 1, true);
+                    }
+                    return $im->writeImage('png32:' . $targetPath) && is_file($targetPath);
+                } finally {
+                    $im->clear();
                 }
-                $ok = $im->writeImage('png32:' . $targetPath);
-                $im->clear();
-                $im->destroy();
-                return $ok && is_file($targetPath);
             });
         } catch (\Throwable $e) {
             $this->logger->info('Imagick SVG conversion failed, will try rsvg fallback: ' . $e->getMessage());
