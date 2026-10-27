@@ -28,6 +28,21 @@ function storeFor(locked: boolean) {
   return store
 }
 describe('odhlášení vlastní domény', () => {
+  it('souběžná odhlášení sdílejí jediný požadavek a po dokončení vyčistí identitu', async () => {
+    const store = storeFor(false)
+    let finish!: () => void
+    m.logout.mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve }))
+    const first = store.logout()
+    const second = store.logout()
+    expect(m.logout).toHaveBeenCalledTimes(1)
+    expect(m.broadcast).not.toHaveBeenCalled()
+    finish()
+    await Promise.all([first, second])
+    expect(m.broadcast).toHaveBeenCalledTimes(1)
+    expect(store.csrfToken).toBe('')
+    expect(store.user).toBeNull()
+  })
+
   it('ukončí zapamatované období DPH a ponechá ostatní data sezení', async () => {
     const store = storeFor(false)
     sessionStorage.setItem('myinvoice.vat-report-period.1.2.vat', JSON.stringify({ year: 2025, month: 9, periodOverride: 'quarterly' }))
