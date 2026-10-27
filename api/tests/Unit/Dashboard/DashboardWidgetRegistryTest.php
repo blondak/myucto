@@ -37,8 +37,8 @@ final class DashboardWidgetRegistryTest extends TestCase
             self::assertCount(count($layout['widgets']), $registry->validate($layout)['widgets']);
         }
         self::assertEquals($registry->defaultLayout('portal'), $registry->validate($company['presets']['company-v1']));
-        self::assertCount(40, $registry->defaultLayout('home')['widgets']);
-        self::assertCount(33, $registry->defaultLayout('portal')['widgets']);
+        self::assertCount(39, $registry->defaultLayout('home')['widgets']);
+        self::assertCount(32, $registry->defaultLayout('portal')['widgets']);
     }
 
     public function testEmptyCustomLayoutDoesNotReintroduceDefaults(): void
@@ -68,7 +68,7 @@ final class DashboardWidgetRegistryTest extends TestCase
         foreach ([['schemaVersion', 2], ['schemaVersion', '1'], ['presetVersion', 0], ['presetVersion', 2], ['supplier_id', 12]] as [$key, $value]) {
             yield $key . ':' . $value => [array_replace($base, [$key => $value])];
         }
-        foreach ([['id', ''], ['id', '../bad'], ['id', str_repeat('a', 65)], ['type', 'unknown'], ['span', '3'], ['span', 5], ['height', 'giant'], ['height', 300], ['height', 'normal'], ['height', null], ['options', ['period' => 'invalid']], ['options', ['period' => null]], ['options', ['unknown' => 1]], ['options', ['period' => ['ytd']]], ['options', ['currency' => 'czk']]] as $i => [$key, $value]) {
+        foreach ([['id', ''], ['id', '../bad'], ['id', str_repeat('a', 65)], ['type', 'unknown'], ['span', '3'], ['span', 2], ['span', 13], ['span', 4.5], ['height', 'giant'], ['height', 300], ['height', 'normal'], ['height', null], ['options', ['period' => 'invalid']], ['options', ['period' => null]], ['options', ['unknown' => 1]], ['options', ['period' => ['ytd']]], ['options', ['currency' => 'czk']]] as $i => [$key, $value]) {
             $layout = $base;
             $layout['widgets'][0][$key] = $value;
             yield 'instance ' . $i => [$layout];
@@ -131,6 +131,74 @@ final class DashboardWidgetRegistryTest extends TestCase
         $layout = self::layout();
         $layout['widgets'][0] = ['id' => 'monthly', 'type' => 'business.monthly', 'span' => 9, 'height' => 'tall', 'options' => []];
         self::assertSame('tall', $registry->validate($layout)['widgets'][0]['height']);
+    }
+
+    public function testTopClientsTablePositionDefaultsToLeftAndAcceptsSupportedPositions(): void
+    {
+        $registry = new DashboardWidgetRegistry();
+        $layout = self::layout();
+        $layout['widgets'][0] = ['id' => 'top', 'type' => 'clients.top', 'span' => 12, 'options' => []];
+        self::assertSame('left', $registry->validate($layout)['widgets'][0]['options']->tablePosition);
+        foreach (['left', 'right', 'above', 'below'] as $position) {
+            $layout['widgets'][0]['options'] = ['tablePosition' => $position];
+            self::assertSame($position, $registry->validate($layout)['widgets'][0]['options']->tablePosition);
+        }
+    }
+
+    public function testTopClientsRejectsUnknownTablePosition(): void
+    {
+        $layout = self::layout();
+        $layout['widgets'][0] = ['id' => 'top', 'type' => 'clients.top', 'span' => 12, 'options' => ['tablePosition' => 'diagonal']];
+        $this->expectException(\InvalidArgumentException::class);
+        (new DashboardWidgetRegistry())->validate($layout);
+    }
+
+    public function testActionWidgetsSupportQuarterAndThirdWidth(): void
+    {
+        $registry = new DashboardWidgetRegistry();
+        foreach (['actions.quick', 'actions.todo'] as $type) {
+            self::assertSame(4, $registry->get($type)['defaultSpan']);
+            foreach ([3, 4] as $span) {
+                $layout = self::layout();
+                $layout['widgets'] = [['id' => 'actions', 'type' => $type, 'span' => $span, 'options' => []]];
+                self::assertSame($span, $registry->validate($layout)['widgets'][0]['span']);
+            }
+        }
+    }
+
+    public function testDefaultActionRowUsesThreeThirdWidthWidgets(): void
+    {
+        $registry = new DashboardWidgetRegistry();
+        foreach (['home', 'portal'] as $board) {
+            $widgets = $registry->defaultLayout($board)['widgets'];
+            self::assertSame(['actions.quick', 'actions.todo', 'documents.requests', 'layout.divider'], array_column(array_slice($widgets, 0, 4), 'type'));
+            self::assertSame([4, 4, 4], array_column(array_slice($widgets, 0, 3), 'span'));
+        }
+    }
+
+    public function testEveryWidgetAcceptsEveryColumnBetweenItsBounds(): void
+    {
+        $registry = new DashboardWidgetRegistry();
+        foreach ($registry->all() as $widget) {
+            self::assertArrayHasKey('minSpan', $widget);
+            self::assertArrayHasKey('maxSpan', $widget);
+            self::assertSame(range($widget['minSpan'], $widget['maxSpan']), $widget['spans']);
+            foreach ($widget['spans'] as $span) {
+                $layout = self::layout();
+                $layout['widgets'] = [['id' => 'size', 'type' => $widget['type'], 'span' => $span, 'options' => []]];
+                self::assertSame($span, $registry->validate($layout)['widgets'][0]['span']);
+            }
+            foreach ([$widget['minSpan'] - 1, $widget['maxSpan'] + 1] as $span) {
+                $layout = self::layout();
+                $layout['widgets'] = [['id' => 'size', 'type' => $widget['type'], 'span' => $span, 'options' => []]];
+                try {
+                    $registry->validate($layout);
+                    self::fail('Rozměr mimo hranice widgetu musí být odmítnut.');
+                } catch (\InvalidArgumentException) {
+                    self::assertTrue(true);
+                }
+            }
+        }
     }
 
     private static function layout(): array

@@ -7,12 +7,8 @@
       "descriptionKey": "dashboardWidgets.widgets.business_kpi.description",
       "accessRule": "base",
       "scope": "company",
-      "spans": [
-        3,
-        4,
-        6,
-        12
-      ],
+      "minSpan": 3,
+      "maxSpan": 12,
       "defaultSpan": 3,
       "options": {
         "period": {
@@ -48,11 +44,8 @@
       "descriptionKey": "dashboardWidgets.widgets.business_monthly.description",
       "accessRule": "base",
       "scope": "company",
-      "spans": [
-        6,
-        9,
-        12
-      ],
+      "minSpan": 4,
+      "maxSpan": 12,
       "defaultSpan": 9,
       "options": {
         "months": {
@@ -81,7 +74,7 @@
         "normal",
         "tall"
       ],
-      "defaultHeight": "normal"
+      "defaultHeight": "auto"
     },
     {
       "type": "sales.summary",
@@ -89,11 +82,8 @@
       "descriptionKey": "dashboardWidgets.widgets.sales_summary.description",
       "accessRule": "invoices.read",
       "scope": "company",
-      "spans": [
-        4,
-        6,
-        12
-      ],
+      "minSpan": 4,
+      "maxSpan": 12,
       "defaultSpan": 6,
       "options": {
         "currency": {
@@ -118,11 +108,8 @@
       "descriptionKey": "dashboardWidgets.widgets.purchases_summary.description",
       "accessRule": "purchases.read",
       "scope": "company",
-      "spans": [
-        4,
-        6,
-        12
-      ],
+      "minSpan": 4,
+      "maxSpan": 12,
       "defaultSpan": 6,
       "options": {
         "currency": {
@@ -147,11 +134,8 @@
       "descriptionKey": "dashboardWidgets.widgets.receivables_aging.description",
       "accessRule": "base",
       "scope": "company",
-      "spans": [
-        4,
-        6,
-        12
-      ],
+      "minSpan": 3,
+      "maxSpan": 12,
       "defaultSpan": 4,
       "options": {
         "currency": {
@@ -179,11 +163,8 @@
       "descriptionKey": "dashboardWidgets.widgets.payables_aging.description",
       "accessRule": "base",
       "scope": "company",
-      "spans": [
-        4,
-        6,
-        12
-      ],
+      "minSpan": 3,
+      "maxSpan": 12,
       "defaultSpan": 4,
       "options": {
         "currency": {
@@ -211,11 +192,8 @@
       "descriptionKey": "dashboardWidgets.widgets.cashflow_weekly.description",
       "accessRule": "base",
       "scope": "company",
-      "spans": [
-        4,
-        6,
-        12
-      ],
+      "minSpan": 4,
+      "maxSpan": 12,
       "defaultSpan": 4,
       "options": {
         "currency": {
@@ -243,10 +221,8 @@
       "descriptionKey": "dashboardWidgets.widgets.cashflow_collections.description",
       "accessRule": "invoices.read",
       "scope": "company",
-      "spans": [
-        6,
-        12
-      ],
+      "minSpan": 4,
+      "maxSpan": 12,
       "defaultSpan": 6,
       "options": {
         "currency": {
@@ -274,10 +250,8 @@
       "descriptionKey": "dashboardWidgets.widgets.receivables_due.description",
       "accessRule": "invoices.read",
       "scope": "company",
-      "spans": [
-        6,
-        12
-      ],
+      "minSpan": 4,
+      "maxSpan": 12,
       "defaultSpan": 6,
       "options": {
         "currency": {
@@ -305,10 +279,8 @@
       "descriptionKey": "dashboardWidgets.widgets.invoices_overdue.description",
       "accessRule": "invoices.read",
       "scope": "company",
-      "spans": [
-        6,
-        12
-      ],
+      "minSpan": 4,
+      "maxSpan": 12,
       "defaultSpan": 6,
       "options": {
         "rows": {
@@ -340,10 +312,8 @@
       "descriptionKey": "dashboardWidgets.widgets.invoices_upcoming.description",
       "accessRule": "invoices.read",
       "scope": "company",
-      "spans": [
-        6,
-        12
-      ],
+      "minSpan": 4,
+      "maxSpan": 12,
       "defaultSpan": 6,
       "options": {
         "rows": {
@@ -375,10 +345,8 @@
       "descriptionKey": "dashboardWidgets.widgets.clients_top.description",
       "accessRule": "clients.invoices.read",
       "scope": "company",
-      "spans": [
-        6,
-        12
-      ],
+      "minSpan": 6,
+      "maxSpan": 12,
       "defaultSpan": 12,
       "options": {
         "rows": {
@@ -403,6 +371,16 @@
           "type": "string",
           "pattern": "^(all|auto|[A-Z]{3})$",
           "default": "auto"
+        },
+        "tablePosition": {
+          "type": "enum",
+          "values": [
+            "left",
+            "right",
+            "above",
+            "below"
+          ],
+          "default": "left"
         }
       },
       "repeatable": false,
@@ -416,7 +394,7 @@
         "normal",
         "tall"
       ],
-      "defaultHeight": "normal"
+      "defaultHeight": "auto"
     },
     {
       "type": "invoices.drafts",
@@ -424,11 +402,8 @@
       "descriptionKey": "dashboardWidgets.widgets.invoices_drafts.description",
       "accessRule": "invoices.read",
       "scope": "company",
-      "spans": [
-        6,
-        8,
-        12
-      ],
+      "minSpan": 4,
+      "maxSpan": 12,
       "defaultSpan": 8,
       "options": {
         "rows": {
@@ -460,11 +435,8 @@
       "descriptionKey": "dashboardWidgets.widgets.invoices_approvals.description",
       "accessRule": "invoices.approval.read",
       "scope": "company",
-      "spans": [
-        4,
-        6,
-        12
-      ],
+      "minSpan": 3,
+      "maxSpan": 12,
       "defaultSpan": 4,
       "options": {
         "rows": {
@@ -496,11 +468,8 @@
       "descriptionKey": "dashboardWidgets.widgets.documents_requests.description",
       "accessRule": "documents.requests",
       "scope": "company",
-      "spans": [
-        4,
-        6,
-        12
-      ],
+      "minSpan": 3,
+      "maxSpan": 12,
       "defaultSpan": 4,
       "options": {
         "rows": {
@@ -532,11 +501,9 @@
       "descriptionKey": "dashboardWidgets.widgets.actions_quick.description",
       "accessRule": "actions.quick",
       "scope": "company",
-      "spans": [
-        6,
-        12
-      ],
-      "defaultSpan": 12,
+      "minSpan": 3,
+      "maxSpan": 12,
+      "defaultSpan": 4,
       "options": {},
       "repeatable": false,
       "dependencies": [
@@ -554,12 +521,9 @@
       "descriptionKey": "dashboardWidgets.widgets.actions_todo.description",
       "accessRule": "actions.todo",
       "scope": "company",
-      "spans": [
-        6,
-        8,
-        12
-      ],
-      "defaultSpan": 8,
+      "minSpan": 3,
+      "maxSpan": 12,
+      "defaultSpan": 4,
       "options": {
         "rows": {
           "type": "enum",
@@ -590,10 +554,8 @@
       "descriptionKey": "dashboardWidgets.widgets.vat_current.description",
       "accessRule": "base",
       "scope": "vat_payer",
-      "spans": [
-        6,
-        12
-      ],
+      "minSpan": 3,
+      "maxSpan": 12,
       "defaultSpan": 6,
       "options": {},
       "repeatable": false,
@@ -612,10 +574,8 @@
       "descriptionKey": "dashboardWidgets.widgets.tax_deadlines.description",
       "accessRule": "base",
       "scope": "company",
-      "spans": [
-        6,
-        12
-      ],
+      "minSpan": 4,
+      "maxSpan": 12,
       "defaultSpan": 6,
       "options": {},
       "repeatable": false,
@@ -637,10 +597,8 @@
       "descriptionKey": "dashboardWidgets.widgets.tax_calendar.description",
       "accessRule": "reports.read",
       "scope": "company",
-      "spans": [
-        6,
-        12
-      ],
+      "minSpan": 4,
+      "maxSpan": 12,
       "defaultSpan": 6,
       "options": {},
       "repeatable": false,
@@ -662,10 +620,8 @@
       "descriptionKey": "dashboardWidgets.widgets.tax_net.description",
       "accessRule": "reports.read",
       "scope": "self_employed",
-      "spans": [
-        6,
-        12
-      ],
+      "minSpan": 4,
+      "maxSpan": 12,
       "defaultSpan": 6,
       "options": {},
       "repeatable": false,
@@ -684,10 +640,8 @@
       "descriptionKey": "dashboardWidgets.widgets.tax_advances.description",
       "accessRule": "reports.read",
       "scope": "company",
-      "spans": [
-        6,
-        12
-      ],
+      "minSpan": 4,
+      "maxSpan": 12,
       "defaultSpan": 6,
       "options": {},
       "repeatable": false,
@@ -709,10 +663,8 @@
       "descriptionKey": "dashboardWidgets.widgets.accounting_status.description",
       "accessRule": "accounting.status",
       "scope": "double_entry",
-      "spans": [
-        6,
-        12
-      ],
+      "minSpan": 4,
+      "maxSpan": 12,
       "defaultSpan": 12,
       "options": {},
       "repeatable": false,
@@ -734,9 +686,8 @@
       "descriptionKey": "dashboardWidgets.widgets.layout_divider.description",
       "accessRule": "base",
       "scope": "company",
-      "spans": [
-        12
-      ],
+      "minSpan": 12,
+      "maxSpan": 12,
       "defaultSpan": 12,
       "options": {},
       "repeatable": true,

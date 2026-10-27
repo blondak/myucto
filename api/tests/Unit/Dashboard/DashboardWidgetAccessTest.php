@@ -66,6 +66,16 @@ final class DashboardWidgetAccessTest extends TestCase
         self::assertFalse($this->allowed($this->request(['dashboard' => 2]), 'actions.quick'));
     }
 
+    public function testPurchaseApprovalsKeepReadOnlyAccessAndClientBankMatchingDoesNotGrantRematch(): void
+    {
+        $approver = $this->request(['purchase_invoices.approve' => 1]);
+        self::assertTrue($this->access->capabilities($approver, 'actions.todo')['purchaseApprove']);
+        $client = $this->request(['bank' => 1, 'bank.match' => 2], 'client');
+        self::assertTrue($this->access->capabilities($client, 'actions.todo')['bankMatch']);
+        self::assertFalse($this->access->capabilities($client, 'actions.todo')['bankRematch']);
+        self::assertTrue($this->access->capabilities($this->request(['bank' => 1, 'bank.match' => 2]), 'actions.todo')['bankRematch']);
+    }
+
     public function testDocumentViewsStaySeparatedByClientPolicy(): void
     {
         self::assertTrue($this->allowed($this->request(['documents.submit' => 1], 'client'), 'documents.requests'));
@@ -89,7 +99,7 @@ final class DashboardWidgetAccessTest extends TestCase
         self::assertNotContains('sales.summary', $available);
         self::assertNotContains('accounting.status', $available);
         self::assertContains('sales.summary', array_column($catalog['defaultLayout']['widgets'], 'type'));
-        self::assertCount(33, $catalog['defaultLayout']['widgets']);
+        self::assertCount(32, $catalog['defaultLayout']['widgets']);
         self::assertNotNull($this->registry->get('accounting.status'));
         self::assertCount(24, $this->registry->all());
         self::assertSame('portal', $catalog['board']);

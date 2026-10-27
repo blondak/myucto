@@ -36,6 +36,14 @@ final class RequestAuthorization
         };
     }
 
+    /** Celý výpis přepárují interní role; klient může párovat jen jednotlivé pohyby. */
+    public static function canRematchBankStatements(Request $request): bool
+    {
+        return !self::isClientType($request)
+            && self::allows($request, 'bank')
+            && self::allows($request, 'bank.match', AccessLevel::WRITE);
+    }
+
     /**
      * Je požadavek z přihlášené browserové relace?
      *

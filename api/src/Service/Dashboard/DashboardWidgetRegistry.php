@@ -26,6 +26,14 @@ final class DashboardWidgetRegistry
             if (isset($this->widgets[$widget['type']])) {
                 throw new \LogicException('Duplicitní typ dashboardového widgetu.');
             }
+            if (!is_int($widget['minSpan'] ?? null) || !is_int($widget['maxSpan'] ?? null)
+                || !is_int($widget['defaultSpan'] ?? null) || $widget['minSpan'] < 1
+                || $widget['maxSpan'] > 12 || $widget['minSpan'] > $widget['defaultSpan']
+                || $widget['defaultSpan'] > $widget['maxSpan']) {
+                throw new \LogicException('Neplatné hranice šířky dashboardového widgetu.');
+            }
+            // Katalog i validace používají stejnou souvislou řadu sloupců.
+            $widget['spans'] = range($widget['minSpan'], $widget['maxSpan']);
             $this->widgets[$widget['type']] = $widget;
         }
     }

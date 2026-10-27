@@ -24,7 +24,10 @@ final class DashboardWidgetAccess
 
     public function supplier(Request $request): array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT id, is_vat_payer, taxpayer_type, accounting_mode FROM supplier WHERE id = ?');
+        $stmt = $this->db->pdo()->prepare('SELECT id, is_vat_payer, taxpayer_type, accounting_mode,
+            (EXISTS (SELECT 1 FROM invoices activity_invoice WHERE activity_invoice.supplier_id=supplier.id)
+                OR EXISTS (SELECT 1 FROM purchase_invoices activity_purchase WHERE activity_purchase.supplier_id=supplier.id)) AS has_documents
+            FROM supplier WHERE id = ?');
         $stmt->execute([SupplierGuard::currentId($request)]);
         return $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
     }
@@ -60,13 +63,14 @@ final class DashboardWidgetAccess
         $write = static fn (string $key): bool => RequestAuthorization::allows($request, $key, AccessLevel::WRITE);
         return match ($type) {
             'actions.quick' => ['invoiceCreate' => $write('invoices.create'), 'purchaseCreate' => $write('purchase_invoices.create'), 'clientCreate' => $write('clients.create')],
-            'actions.todo' => ['bankMatch' => $read('bank') && $write('bank.match'), 'recurringRun' => $read('recurring') && $write('recurring.run'),
+            'actions.todo' => ['bankMatch' => $read('bank') && $write('bank.match'),
+                'bankRematch' => RequestAuthorization::canRematchBankStatements($request), 'recurringRun' => $read('recurring') && $write('recurring.run'),
                 'overdueReminders' => $read('invoices') && $write('invoices.reminder'), 'invoiceApprovals' => $read('invoices.approval'),
                 'purchaseReview' => $read('purchase_invoices') && $write('purchase_invoices.transition'),
-                'purchaseApprove' => $write('purchase_invoices.approve'),
+                'purchaseApprove' => $read('purchase_invoices.approve'),
                 'bankConnections' => $read('bank') && $write('settings.bank_accounts'),
                 'taxTasks' => $read('reports') && $write('reports.submit') && $this->commercialAvailable($request),
-                'accountingPeriods' => $write('accounting.periods.manage') && $this->commercialAvailable($request),
+                'accountingPeriods' => $read('accounting') && $write('accounting.periods.manage') && $this->commercialAvailable($request),
                 'payrollSubmit' => $write('payroll.submissions') && $this->payrollAvailable($request)],
             'documents.requests' => ['clientView' => RequestAuthorization::allowsClientDocumentPortal($request),
                 'internalView' => !RequestAuthorization::isClientType($request) && $read('documents.requests')],
@@ -97,12 +101,14 @@ final class DashboardWidgetAccess
             // Pravidla a závislosti patří backendu; katalog předává vykreslovací metadata.
             $widgets[] = ['type' => $widget['type'], 'titleKey' => $widget['titleKey'],
                 'descriptionKey' => $widget['descriptionKey'], 'spans' => $widget['spans'],
+                'minSpan' => $widget['minSpan'], 'maxSpan' => $widget['maxSpan'],
                 'defaultSpan' => $widget['defaultSpan'], 'heights' => $widget['heights'], 'defaultHeight' => $widget['defaultHeight'], 'options' => (object) $widget['options'],
                 'repeatable' => $widget['repeatable'], 'capabilities' => (object) $this->capabilities($request, $widget['type'])];
         }
         $default = $this->registry->defaultLayout($board);
         // Výchozí konfigurace zůstává úplná: první vlastní uložení musí zachovat
         // i widgety, které budou dostupné až po změně firmy nebo oprávnění.
-        return ['board' => $board, 'widgets' => $widgets, 'defaultLayout' => $default];
+        return ['board' => $board, 'widgets' => $widgets, 'defaultLayout' => $default,
+            'businessActivity' => ['hasDocuments' => (bool) ($supplier['has_documents'] ?? false)]];
     }
 }

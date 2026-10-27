@@ -18,6 +18,16 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 
 final class DashboardBoardAuthorizationTest extends TestCase
 {
+    public function testStatementRematchingRemainsInternalAndRequiresBankReadAndMatchWrite(): void
+    {
+        foreach (['staff', 'client'] as $type) {
+            $request = $this->request(new EffectiveRole(14, 'Párování', $type, true, ['bank' => 1, 'bank.match' => 2]));
+            self::assertSame($type === 'staff', RequestAuthorization::canRematchBankStatements($request));
+            self::assertFalse(RequestAuthorization::canRematchBankStatements($this->request(new EffectiveRole(14, 'Bez čtení', $type, true, ['bank.match' => 2]))));
+            self::assertFalse(RequestAuthorization::canRematchBankStatements($this->request(new EffectiveRole(14, 'Bez akce', $type, true, ['bank' => 1]))));
+        }
+    }
+
     public function testPortalReaderCanCustomizeWithoutBusinessWriteAndHomeRequiresItsOwnPermission(): void
     {
         $reader = $this->request(new EffectiveRole(9, 'Čtenář', 'staff', true, ['profile' => 1]));
