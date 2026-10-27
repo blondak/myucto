@@ -181,6 +181,16 @@ dobrovolně zapnout v rozsahu 1 až 1440 minut.
 **Jak poznáte, že je hotovo:** vidíte přihlašovací obrazovku. Session se zruší
 okamžitě i na serveru.
 
+Pokud server odhlášení nepotvrdí nebo vyprší čekání na odpověď, aplikace úplně
+načte přihlašovací stránku s upozorněním. Automaticky vás nevrátí do aplikace,
+ani když je původní relace na serveru stále platná. Tento stav přežije obnovení
+stránky i otevření nového okna stejné domény. Už otevřená okna zakryjí soukromá
+data a také přejdou na přihlášení. Sdílení stavu vyžaduje povolené místní
+úložiště prohlížeče. Tlačítkem **Zkusit
+odhlášení znovu** lze požadavek zopakovat; případně se výslovně přihlaste.
+Zneplatnění relace i smazání chráněné session cookie provádí server při úspěšném
+odhlášení, samotné obnovení stránky je nenahrazuje.
+
 Zavřete-li jen okno bez odhlášení, session má absolutní platnost nejvýše
 **30 dní**. Během ní se může dříve zamknout po nečinnosti.
 

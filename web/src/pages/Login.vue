@@ -7,8 +7,11 @@ import { clearLoginBounces, loginRedirectLoopDetected } from '@/router'
 
 const { t } = useI18n()
 import { BTN_BASE, FILLED, ICONS, OUTLINE } from '@/components/ui/buttonStyles'
-import { isPortalLoggedOut } from '@/security/portalLogout'
+import { clearUnconfirmedLogout, hasUnconfirmedLogout } from '@/security/logoutRecovery'
+import { navigateFullPage } from '@/workspace/fullPageNavigation'
+import { isPortalLoggedOut, markPortalLoggedOut } from '@/security/portalLogout'
 import AppShell from '@/components/layout/AppShell.vue'
+import LogoutProgressOverlay from '@/components/LogoutProgressOverlay.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useTurnstile } from '@/composables/useTurnstile'
 import { authApi, type DomainLoginConfirmation } from '@/api/auth'
@@ -41,6 +44,8 @@ import {
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
+const logoutUnconfirmed = ref(hasUnconfirmedLogout())
+const logoutRetryBusy = ref(false)
 
 // Štítek pro „zapamatovat zařízení". Odpovídá cfg.auth.email_otp.trusted_device_days
 // (default 30) — čistě informativní, vlastní platnost řídí backend.
@@ -120,7 +125,12 @@ const turnstile = useTurnstile()
 const turnstileEl = ref<HTMLElement | null>(null)
 
 onMounted(async () => {
-  await auth.fetchSetupStatus()
+  try {
+    await auth.fetchSetupStatus()
+  } catch {
+    error.value = t('auth.login_failed')
+    return
+  }
   if (auth.needsSetup) {
     router.replace('/setup')
     return
@@ -130,60 +140,62 @@ onMounted(async () => {
     email.value = demo.email
     password.value = demo.password
   }
-  // Stale session detection: pokud uživatel přijde na /login s platnou cookie,
-  // hodíme ho rovnou kam patří (`/` nebo `/setup-totp`). Bez toho by submit
-  // formuláře probíhal v rozjetém stavu a UX by byl matoucí.
-  //
-  // Když nás sem guard v krátkém sledu odrazil několikrát, je server nekonzistentní
-  // (typicky cizí service worker cachující /api/) a další automatický návrat na `/`
-  // by smyčku jen protočil. Zůstaneme na formuláři a řekneme proč — v nainstalované
-  // PWA je to jediná cesta ven, okno tam nemá adresní řádek.
-  if (loginRedirectLoopDetected()) {
-    error.value = t('auth.redirect_loop_detected')
-    return
-  }
-  if (auth.domainContext?.mode === 'canonical') {
-    captureCanonicalDomainLogin(
-      route.query.domain_login_request,
-      route.query.state,
-      route.query.domain_login_handoff,
-    )
-    if (hasPendingCanonicalDomainLoginCleanup()) {
-      await completeCanonicalDomainLogin()
+  if (!logoutUnconfirmed.value) {
+    // Stale session detection: pokud uživatel přijde na /login s platnou cookie,
+    // hodíme ho rovnou kam patří (`/` nebo `/setup-totp`). Bez toho by submit
+    // formuláře probíhal v rozjetém stavu a UX by byl matoucí.
+    //
+    // Když nás sem guard v krátkém sledu odrazil několikrát, je server nekonzistentní
+    // (typicky cizí service worker cachující /api/) a další automatický návrat na `/`
+    // by smyčku jen protočil. Zůstaneme na formuláři a řekneme proč — v nainstalované
+    // PWA je to jediná cesta ven, okno tam nemá adresní řádek.
+    if (loginRedirectLoopDetected()) {
+      error.value = t('auth.redirect_loop_detected')
       return
     }
-  }
-  const domainHandoff = requestedDomainHandoffPath()
-  if (auth.domainContext?.locked && domainHandoff !== null && !portalLoggedOut.value) {
-    await startPortalLogin()
-    return
-  }
-  // Rozhoduje `isAuthenticated`, NE návratová hodnota refresh() — router guard
-  // (router/index.ts) čte taky stav storu, a jakýkoli rozjezd těch dvou podmínek
-  // je nekonečná smyčka `/` ↔ `/login`: guard by nás poslal sem, my zpátky na `/`.
-  const freshDomainLogin = hasPendingCanonicalDomainLogin() && !canonicalDomainLoginSessionCsrf()
-  if (!freshDomainLogin) await auth.refresh()
-  if (!freshDomainLogin && auth.isAuthenticated) {
-    if (await finishDomainLoginIfNeeded()) return
-    router.replace(postLoginTarget(auth.domainContext?.locked
-      ? requestedDomainReturnPath()
-      : requestedReturnPath('/')))
-    return
-  }
-  if (auth.domainContext?.locked) {
-    if (!portalLoggedOut.value) await startPortalLogin()
-    return
-  }
-  if (!hasPendingCanonicalDomainLogin() && demo?.auto_login && demo.email && demo.password && demoLoginCanRun()) {
-    try {
-      await auth.login(demo.email, demo.password)
-      if (await finishDomainLoginIfNeeded()) return
-      // I demo musí doručit na adresu, na kterou člověk klikl — jinak je
-      // odkaz do dema k ničemu právě tam, kde se ukazuje konkrétní obrazovka.
-      router.replace(postLoginTarget(requestedReturnPath('/')))
+    if (auth.domainContext?.mode === 'canonical') {
+      captureCanonicalDomainLogin(
+        route.query.domain_login_request,
+        route.query.state,
+        route.query.domain_login_handoff,
+      )
+      if (hasPendingCanonicalDomainLoginCleanup()) {
+        await completeCanonicalDomainLogin()
+        return
+      }
+    }
+    const domainHandoff = requestedDomainHandoffPath()
+    if (auth.domainContext?.locked && domainHandoff !== null && !portalLoggedOut.value) {
+      await startPortalLogin()
       return
-    } catch {
-      error.value = t('auth.demo_login_failed')
+    }
+    // Rozhoduje `isAuthenticated`, NE návratová hodnota refresh() — router guard
+    // (router/index.ts) čte taky stav storu, a jakýkoli rozjezd těch dvou podmínek
+    // je nekonečná smyčka `/` ↔ `/login`: guard by nás poslal sem, my zpátky na `/`.
+    const freshDomainLogin = hasPendingCanonicalDomainLogin() && !canonicalDomainLoginSessionCsrf()
+    if (!freshDomainLogin) await auth.refresh()
+    if (!freshDomainLogin && auth.isAuthenticated) {
+      if (await finishDomainLoginIfNeeded()) return
+      router.replace(postLoginTarget(auth.domainContext?.locked
+        ? requestedDomainReturnPath()
+        : requestedReturnPath('/')))
+      return
+    }
+    if (auth.domainContext?.locked) {
+      if (!portalLoggedOut.value) await startPortalLogin()
+      return
+    }
+    if (!hasPendingCanonicalDomainLogin() && demo?.auto_login && demo.email && demo.password && demoLoginCanRun()) {
+      try {
+        await auth.login(demo.email, demo.password)
+        if (await finishDomainLoginIfNeeded()) return
+        // I demo musí doručit na adresu, na kterou člověk klikl — jinak je
+        // odkaz do dema k ničemu právě tam, kde se ukazuje konkrétní obrazovka.
+        router.replace(postLoginTarget(requestedReturnPath('/')))
+        return
+      } catch {
+        error.value = t('auth.demo_login_failed')
+      }
     }
   }
   if (auth.setupStatus?.captcha.provider === 'turnstile') {
@@ -213,6 +225,28 @@ function postLoginTarget(fallback: string): string {
   if (auth.mustSetupMfa || auth.mustSetupTotp) return '/setup-mfa'
   if (auth.domainContext?.locked) return fallback
   return auth.shouldOfferMfa ? '/setup-mfa' : fallback
+}
+
+async function retryLogout(): Promise<void> {
+  if (logoutRetryBusy.value || auth.loading || passwordlessBusy.value || passkeyBusy.value || domainLoginBusy.value) return
+  logoutRetryBusy.value = true
+  try {
+    // Obnovíme pouze CSRF pro odhlášení; profil ani soukromá data se nenačítají.
+    const session = await authApi.sessionStatus()
+    auth.setSessionCsrfToken(session.csrf_token)
+    await auth.logout()
+    markPortalLoggedOut()
+    navigateFullPage('/login', 'replace')
+  } catch (e: any) {
+    if (e?.response?.status === 401 && ['unauthenticated', 'session_expired', 'invalid_token'].includes(e?.response?.data?.error?.code)) {
+      markPortalLoggedOut()
+      clearUnconfirmedLogout()
+      navigateFullPage('/login', 'replace')
+    }
+    // Ostatní chyby ponechají upozornění; auth.logout při chybě načte stránku znovu.
+  } finally {
+    logoutRetryBusy.value = false
+  }
 }
 
 async function startPortalLogin(): Promise<void> {
@@ -446,6 +480,7 @@ async function loginWithPasskey() {
     const flow = await authApi.passkeyLoginOptions(turnstile.token.value || undefined)
     const credential = await getCredential(flow.public_key)
     const result = await authApi.passkeyLoginVerify(flow.flow_token, credential)
+    clearUnconfirmedLogout()
     recordCanonicalDomainLoginSession(result.csrf_token)
     await auth.refresh()
     if (await finishDomainLoginIfNeeded()) return
@@ -474,6 +509,7 @@ async function verifyPasskey() {
   try {
     const credential = await getCredential(flow.publicKey)
     const result = await authApi.passkeyLoginVerify(flow.flowToken, credential)
+    clearUnconfirmedLogout()
     recordCanonicalDomainLoginSession(result.csrf_token)
     await auth.refresh()
     if (await finishDomainLoginIfNeeded()) return
@@ -543,6 +579,9 @@ async function resendCode() {
 </script>
 
 <template>
+  <Teleport to="body">
+    <LogoutProgressOverlay v-if="logoutRetryBusy" />
+  </Teleport>
   <AppShell :title="t('auth.login_title')">
     <div class="w-full max-w-sm">
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-6">
@@ -553,8 +592,19 @@ async function resendCode() {
           {{ t('auth.demo_login_hint') }}
         </div>
 
+        <div v-if="logoutUnconfirmed" role="alert" data-testid="logout-unconfirmed"
+             class="mb-5 space-y-3 rounded-md border border-warning-500/40 bg-warning-50 p-3 text-sm text-warning-800">
+          <p>{{ t('auth.logout_unconfirmed') }}</p>
+          <div class="flex flex-wrap">
+            <button type="button" :class="[BTN_BASE, OUTLINE.warning]" :disabled="logoutRetryBusy || auth.loading || passwordlessBusy || passkeyBusy || domainLoginBusy" @click="retryLogout">
+              <svg class="h-4 w-4" :class="{ 'animate-spin': logoutRetryBusy }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+              {{ t('auth.retry_logout') }}
+            </button>
+          </div>
+        </div>
+
         <div v-if="auth.domainContext?.locked" class="space-y-4">
-          <p v-if="portalLoggedOut" role="status" class="text-sm text-neutral-600">{{ t('domain_login.logged_out') }}</p>
+          <p v-if="portalLoggedOut && !logoutUnconfirmed" role="status" class="text-sm text-neutral-600">{{ t('domain_login.logged_out') }}</p>
           <div v-if="error" role="alert" class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">{{ error }}</div>
           <div class="flex flex-wrap">
             <button type="button" :class="[BTN_BASE, FILLED.primary]" :disabled="domainLoginBusy" @click="startPortalLogin">

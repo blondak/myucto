@@ -1,3 +1,4 @@
+import { hasUnconfirmedLogout, markUnconfirmedLogout, clearUnconfirmedLogout } from '@/security/logoutRecovery'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { isPortalLoggedOut, markPortalLoggedOut } from '@/security/portalLogout'
@@ -15,6 +16,8 @@ beforeEach(() => {
   vi.restoreAllMocks()
   vi.clearAllMocks()
   localStorage.clear()
+  clearUnconfirmedLogout()
+  markUnconfirmedLogout()
   markPortalLoggedOut()
   m.read.mockReturnValue({ requestToken: 'request', code: 'code', state: 'state', verifier: 'verifier' })
   m.exchange.mockResolvedValue({ csrf_token: 'csrf', return_path: '/portal' })
@@ -24,6 +27,7 @@ it('zruší stav odhlášení až po úspěšné výměně kódu a bezpečném n
   const replace = vi.spyOn(window.location, 'replace').mockImplementation(() => {})
   const wrapper = mount(DomainLoginCallback)
   await flushPromises()
+  expect(hasUnconfirmedLogout()).toBe(false)
   expect(isPortalLoggedOut()).toBe(false)
   expect(m.exchange).toHaveBeenCalledWith('request', 'code', 'state', 'verifier')
   expect(replace).toHaveBeenCalledWith('/portal')
@@ -37,6 +41,8 @@ it.each(['exchange', 'return-path', 'stale-callback'])('při chybě %s ponechá 
   if (failure === 'stale-callback') m.read.mockReturnValueOnce(null)
   const wrapper = mount(DomainLoginCallback)
   await flushPromises()
+  expect(hasUnconfirmedLogout()).toBe(true)
+  clearUnconfirmedLogout()
   expect(isPortalLoggedOut()).toBe(true)
   expect(replace).not.toHaveBeenCalled()
   if (failure === 'stale-callback') expect(m.exchange).not.toHaveBeenCalled()

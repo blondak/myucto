@@ -1,3 +1,4 @@
+import { hasUnconfirmedLogout, logoutRecoveryPath } from '@/security/logoutRecovery'
 import {
   createRouter,
   createWebHistory,
@@ -420,6 +421,14 @@ export async function authorizationGuard(
   } = {},
 ): Promise<boolean | RouteLocationRaw> {
   const auth = useAuthStore()
+
+  if (hasUnconfirmedLogout()) {
+    // Upozornění musí jít zobrazit i bez odpovědi setup-status při výpadku sítě.
+    if (to.name === 'login') return true
+    if (to.matched.some(record => record.meta.requiresAuth)) {
+      return { path: logoutRecoveryPath() }
+    }
+  }
 
   if (auth.setupStatus === null) {
     try {

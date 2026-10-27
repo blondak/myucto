@@ -1,3 +1,4 @@
+import { clearUnconfirmedLogout, markUnconfirmedLogout } from '@/security/logoutRecovery'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { RouteLocationNormalized, RouteLocationRaw } from 'vue-router'
@@ -30,12 +31,32 @@ async function bounce(target: RouteLocationRaw) {
 
 describe('návrat na původní adresu po přihlášení', () => {
   beforeEach(() => {
+    clearUnconfirmedLogout()
     setActivePinia(createPinia())
     const auth = useAuthStore()
     auth.setupStatus = { needs_setup: false } as never
     auth.user = null
     // Bez živé relace: `refresh()` na síti nic nezmění, identita zůstane prázdná.
     auth.refresh = vi.fn().mockResolvedValue(false) as never
+  })
+
+  it('po neúspěchu zobrazí login bez čekání na nedostupný backend', async () => {
+    const auth = useAuthStore()
+    auth.setupStatus = null
+    const setup = vi.spyOn(auth, 'fetchSetupStatus')
+    markUnconfirmedLogout()
+    expect(await bounce({ name: 'login' })).toBe(true)
+    expect(setup).not.toHaveBeenCalled()
+    clearUnconfirmedLogout()
+  })
+
+  it('nové okno se sdíleným příznakem nepustí ani platnou identitu na chráněnou stránku', async () => {
+    const auth = useAuthStore()
+    auth.user = { id: 1 } as never
+    markUnconfirmedLogout()
+    expect(await bounce({ path: '/payroll/people' })).toEqual({ path: '/login' })
+    expect(auth.refresh).not.toHaveBeenCalled()
+    clearUnconfirmedLogout()
   })
 
   it('nese adresu chráněné stránky do přihlášení', async () => {

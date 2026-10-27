@@ -21648,6 +21648,8 @@
     "totp_force_logout_hint": "Pokud nemáte autentikační aplikaci po ruce, můžete se odhlásit:",
     "logout": "Odhlásit",
     "logout_failed": "Odhlášení se nepodařilo potvrdit na serveru. Soukromá data byla z tohoto okna odstraněna; zkontrolujte připojení a zkuste odhlášení znovu.",
+    "logout_unconfirmed": "Odhlášení se nepodařilo potvrdit na serveru. Relace může být stále platná. Automatický návrat do aplikace je zablokovaný; zkuste odhlášení znovu nebo se výslovně přihlaste.",
+    "retry_logout": "Zkusit odhlášení znovu",
     "captcha_loading": "Počkejte prosím, dokud se nenačte CAPTCHA…",
     "captcha_failed": "CAPTCHA selhala, zkuste znovu.",
     "too_many_attempts": "Příliš mnoho pokusů. Zkuste to později.",

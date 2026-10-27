@@ -21648,6 +21648,8 @@
     "totp_force_logout_hint": "If you don't have your authenticator handy, you can sign out:",
     "logout": "Sign out",
     "logout_failed": "Sign-out could not be confirmed by the server. Private data was removed from this window; check your connection and try signing out again.",
+    "logout_unconfirmed": "The server could not confirm sign-out. Your session may still be active. Automatic return to the application is blocked; retry signing out or sign in explicitly.",
+    "retry_logout": "Retry sign-out",
     "captcha_loading": "Please wait until CAPTCHA loads…",
     "captcha_failed": "CAPTCHA failed, try again.",
     "too_many_attempts": "Too many attempts. Try again later.",

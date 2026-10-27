@@ -7,6 +7,7 @@ import { authApi } from '@/api/auth'
 import { setCsrfToken } from '@/api/client'
 import { clearTargetDomainLogin, readTargetDomainLogin } from '@/security/domainLogin'
 import { isClientDomainAuthenticatedPath } from '@/security/clientRoutePolicy'
+import { clearUnconfirmedLogout } from '@/security/logoutRecovery'
 import { clearPortalLoggedOut } from '@/security/portalLogout'
 
 const route = useRoute()
@@ -31,6 +32,7 @@ onMounted(async () => {
     if (!isClientDomainAuthenticatedPath(result.return_path)) {
       throw new Error('invalid_domain_login_return_path')
     }
+    clearUnconfirmedLogout()
     clearPortalLoggedOut()
     window.location.replace(result.return_path)
   } catch (e: any) {

@@ -59,11 +59,11 @@ describe('odhlášení vlastní domény', () => {
     expect(m.broadcast).toHaveBeenCalledWith('logout'); expect(store.csrfToken).toBe('')
     clearPortalLoggedOut(); expect(isPortalLoggedOut()).toBe(false)
   })
-  it('neúspěch netvrdí odhlášení a opakování může uspět', async () => {
+  it('neúspěch netvrdí odhlášení, zruší starý callback a opakování může uspět', async () => {
     const store = storeFor(true); const callback = pendingCallback()
     m.logout.mockRejectedValueOnce(new Error('offline'))
     await expect(store.logout()).rejects.toThrow('offline')
-    expect(isPortalLoggedOut()).toBe(false); expect(callback()).not.toBeNull()
+    expect(isPortalLoggedOut()).toBe(false); expect(callback()).toBeNull()
     expect(m.broadcast).not.toHaveBeenCalled(); await store.logout()
     expect(isPortalLoggedOut()).toBe(true); expect(callback()).toBeNull()
   })

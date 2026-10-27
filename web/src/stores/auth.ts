@@ -4,6 +4,7 @@ import { authApi, type User, type SetupStatus, type SessionState, type DomainCon
 import type { LicenseSummary } from '@/api/license'
 import { setCsrfToken, setDomainSupplierLock } from '@/api/client'
 import { domainLoginRequestContext, setDomainLoginCanonicalOrigin } from '@/security/domainLoginContext'
+import { clearUnconfirmedLogout, hasUnconfirmedLogout, markUnconfirmedLogout, reloadAfterLogoutFailure } from '@/security/logoutRecovery'
 import { markPortalLoggedOut } from '@/security/portalLogout'
 import { clearTargetDomainLogin, recordCanonicalDomainLoginSession } from '@/security/domainLogin'
 import { broadcastSessionEvent } from '@/security/sessionChannel'
@@ -140,6 +141,10 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function refresh() {
+    if (hasUnconfirmedLogout()) {
+      clearPrivateState()
+      return false
+    }
     const generation = ++refreshGeneration
     permissionsLoading.value = true
     try {
@@ -225,6 +230,7 @@ export const useAuthStore = defineStore('auth', () => {
         resend_otp: opts?.resendOtp || undefined,
         cf_turnstile_response: captchaToken,
       })
+      clearUnconfirmedLogout()
       recordCanonicalDomainLoginSession(data.csrf_token)
       user.value = data.user
       setSessionCsrfToken(data.csrf_token)
@@ -262,8 +268,9 @@ export const useAuthStore = defineStore('auth', () => {
     if (requestCsrfToken) setCsrfToken(requestCsrfToken)
 
     try {
-      await authApi.logout()
+      await authApi.logout(requestCsrfToken || undefined)
       logoutRetryCsrfToken = ''
+      clearUnconfirmedLogout()
       if (domainContext.value?.locked) {
         markPortalLoggedOut()
         clearTargetDomainLogin()
@@ -271,6 +278,7 @@ export const useAuthStore = defineStore('auth', () => {
       broadcastSessionEvent('logout')
     } catch (error) {
       logoutRetryCsrfToken = requestCsrfToken
+      reloadAfterLogoutFailure()
       throw error
     } finally {
       clearPrivateState()
@@ -282,6 +290,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     ++refreshGeneration
     permissionsLoading.value = false
+    markUnconfirmedLogout()
     const pending = performLogout()
     logoutPromise = pending
     void pending.then(

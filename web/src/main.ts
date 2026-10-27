@@ -1,4 +1,5 @@
 import './styles/main.css'
+import { installLogoutRecoveryListener } from '@/security/logoutRecovery'
 import { captureInitialDomainLogin } from '@/security/domainLoginContext'
 import { parseWindowFrameBootstrap } from '@/workspace/frameProtocol'
 import { initPwaInstall } from '@/composables/usePwaInstall'
@@ -18,6 +19,8 @@ window.addEventListener('vite:preloadError', (event) => {
 captureInitialDomainLogin(window.location)
 
 const frame = parseWindowFrameBootstrap(window.location.search, window.parent !== window)
+
+if (!frame) installLogoutRecoveryListener()
 
 if (frame) {
   const { installWindowSupplierScope } = await import('@/workspace/supplierContext')

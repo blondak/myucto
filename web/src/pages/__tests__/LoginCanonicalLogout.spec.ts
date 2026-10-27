@@ -1,3 +1,4 @@
+import { markUnconfirmedLogout, clearUnconfirmedLogout, hasUnconfirmedLogout } from '@/security/logoutRecovery'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
@@ -43,6 +44,7 @@ import Login from '../Login.vue'
 beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
+  clearUnconfirmedLogout()
   m.clear.mockReset().mockResolvedValue(undefined)
   m.cleanup = false
   m.csrf = null
@@ -161,5 +163,34 @@ it('nový tok ani v demu nevyplní a automaticky neodešle přihlašovací údaj
   expect(m.authorize).not.toHaveBeenCalled()
   expect((wrapper.get('input[type="email"]').element as HTMLInputElement).value).toBe('')
   expect((wrapper.get('input[type="password"]').element as HTMLInputElement).value).toBe('')
+  wrapper.unmount()
+})
+
+it('po neúspěchu potlačí platnou relaci, demo login i předání do klientské domény', async () => {
+  markUnconfirmedLogout()
+  m.csrf = 'existing-session'
+  m.auth.isAuthenticated = true
+  m.auth.setupStatus.demo = { enabled: true, auto_login: true, email: 'demo@example.test', password: 'synthetic-password' }
+  const wrapper = mount(Login)
+  await flushPromises()
+  expect(wrapper.get('[data-testid="logout-unconfirmed"]').text()).toContain('auth.logout_unconfirmed')
+  expect(wrapper.find('form').exists()).toBe(true)
+  expect(m.auth.refresh).not.toHaveBeenCalled()
+  expect(m.auth.login).not.toHaveBeenCalled()
+  expect(m.authorize).not.toHaveBeenCalled()
+  expect(m.replace).not.toHaveBeenCalled()
+  wrapper.unmount()
+  clearUnconfirmedLogout()
+})
+
+it('blokaci zruší až ověřené výslovné přihlášení passkey', async () => {
+  markUnconfirmedLogout()
+  const wrapper = mount(Login)
+  await flushPromises()
+  expect(hasUnconfirmedLogout()).toBe(true)
+  await wrapper.findAll('button').find(button => button.text() === 'auth.passwordless_passkey_login')!.trigger('click')
+  await flushPromises()
+  expect(m.verify).toHaveBeenCalled()
+  expect(hasUnconfirmedLogout()).toBe(false)
   wrapper.unmount()
 })
