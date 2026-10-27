@@ -69,10 +69,13 @@ final class DashboardWidgetHttpTest extends TestCase
         try {
             foreach ($this->suppliers as $supplier) {
                 $pdo->prepare('DELETE FROM currencies WHERE supplier_id = ?')->execute([$supplier]);
-                $pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$supplier]);
             }
         } finally {
             $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
+        }
+        // Kaskády při odstranění firmy musí běžet se zapnutými cizími klíči.
+        foreach ($this->suppliers as $supplier) {
+            $pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$supplier]);
         }
         $this->app = null;
         $this->db->close();
