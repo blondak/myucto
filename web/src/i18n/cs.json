@@ -865,7 +865,13 @@
     "upload": "Nahrát",
     "upload_original": "Nahrát původní soubor",
     "retake": "Vyfotit znovu",
-    "cancel": "Zrušit"
+    "cancel": "Zrušit",
+    "crop_toggle": "Oříznout podle dokladu",
+    "crop_hint": "Doklad jsme na fotce našli. Rohy můžete posunout.",
+    "crop_manual_hint": "Rohy posuňte na okraje dokladu.",
+    "crop_off_hint": "Nahraje se celá fotka.",
+    "crop_not_found": "Doklad se na fotce nepodařilo najít. Ořez můžete vyznačit ručně.",
+    "corner": "Roh dokladu {n}"
   },
   "documents": {
     "ai": {
@@ -3282,6 +3288,67 @@
       "apply_failed": "Pojišťovny se nepodařilo uložit.",
       "retry": "Zkusit znovu"
     },
+    "declaration_sign_bulk": {
+      "title": "Podepsaná prohlášení poplatníka hromadně",
+      "intro": "Vybraným osobám zapíše do zákonné evidence prohlášení poplatníka jako Podepsáno, stejně jako karta osoby. Tím se uplatní základní sleva na poplatníka; ostatní slevy a děti zapište na kartě osoby. Podepsané prohlášení se nepřepíše a do měsíců uzavřených schválenou mzdou se nezapisuje.",
+      "warning_one_payer": "Prohlášení může zaměstnanec za stejné období podepsat jen u jednoho plátce. Podepsal-li ho jinde, nezapisujte ho.",
+      "warning_responsibility": "Za pravdivost prohlášení odpovídá zaměstnanec. Aplikace podpis ani údaje v prohlášení neověří, zapisujte jen prohlášení, která máte podepsaná v ruce.",
+      "year": "Zdaňovací rok",
+      "signed_on": "Datum podpisu",
+      "reload": "Načíst náhled",
+      "effective_from": "Platí od {date}",
+      "basis": {
+        "year_start": "od začátku roku, prohlášení je podepsané před rokem nebo v lednu",
+        "signing_month": "od měsíce podpisu, za dřívější měsíce se sleva neuplatní",
+        "after_frozen_period": "až po období uzavřeném schválenou mzdou (do {date})"
+      },
+      "year_frozen": "Celý rok {year} je uzavřený schválenou mzdou (do {date}). Do uzavřeného výpočtu se zpětně nezapisuje.",
+      "recalculate_title": "Rozpracované mzdy k přepočtu",
+      "recalculate_hint": "Tyto mzdy se počítaly bez podpisu. Po zápisu je přepočítejte.",
+      "summary": {
+        "people": "Osob",
+        "ready": "Zapíše se",
+        "already_signed": "Už podepsáno",
+        "skipped": "Nelze zapsat"
+      },
+      "state": {
+        "ready": "Zapíše se",
+        "already_signed": "Na rok už podepsáno, přeskočí se",
+        "period_frozen": "Období uzavřené schválenou mzdou",
+        "timeline_gap": "Předchozí záznam končí dřív, zapište na kartě osoby",
+        "employee_not_found": "Osoba nenalezena"
+      },
+      "change": {
+        "add": "Nový záznam",
+        "close_previous": "Ukončí předchozí ({status})",
+        "replace": "Nahradí ({status})"
+      },
+      "status": {
+        "not-signed": "Nepodepsáno",
+        "unverified": "Neověřeno",
+        "signed": "Podepsáno"
+      },
+      "select_all": "Vybrat vše",
+      "select_none": "Zrušit výběr",
+      "select_person": "Vybrat: {name}",
+      "empty": "V roce {year} nemá nikdo trvající pracovní vztah.",
+      "confirm": "Potvrzuji, že mám podepsaná prohlášení vybraných osob.",
+      "apply": "Zapsat podpis ({count})",
+      "nothing_selected": "Vyberte aspoň jednu osobu, u které se podpis zapíše.",
+      "confirm_required": "Potvrďte, že máte prohlášení podepsaná.",
+      "applied_toast": "Podepsané prohlášení zapsáno u {count} osob.",
+      "result_title": "Výsledek zápisu",
+      "result": {
+        "applied": "Zapsáno",
+        "skipped": "Přeskočeno",
+        "failed": "Chyba"
+      },
+      "applied_item": "od {date}",
+      "person_fallback": "Osoba č. {id}",
+      "load_failed": "Náhled se nepodařilo načíst.",
+      "apply_failed": "Podepsaná prohlášení se nepodařilo zapsat.",
+      "retry": "Zkusit znovu"
+    },
     "statutory_bulk": {
       "title": "Doplnit výchozí zákonné údaje",
       "intro": "Osobám bez cizího prvku doplní chybějící údaje, které plynou z toho, že s cizinou nemají nic společného: daňovou rezidenci v Česku, českou příslušnost k pojištění bez formuláře A1 a u osob mladších 60 let neuplatňování slevy pracujícího důchodce. Existující záznam se nikdy nepřepíše. Zdravotní pojišťovnu hromadně nedoplníme, zná ji jen registrace nebo zaměstnanec.",
@@ -3316,6 +3383,7 @@
       "declaration_label": "Zapsat chybějící prohlášení jako nepodepsané ({count} osob)",
       "declaration_hint": "Zapíše stav „nepodepsal“. Bez podepsaného prohlášení se neuplatní sleva na poplatníka ani další slevy. Zapněte jen tehdy, když víte, že prohlášení opravdu nepodepsali.",
       "declaration_on": "Podpis se tím nevytváří. Až zaměstnanec prohlášení podepíše, zapište to na jeho kartě.",
+      "declaration_signed_link": "Podepsaná prohlášení hromadně",
       "withholding_title": "Riziko srážkové daně ({count})",
       "withholding_hint": "Bez podepsaného prohlášení se v měsíci, kdy úhrn příjmů od vás nedosáhne rozhodné částky, sráží srážková daň. Týká se každého druhu vztahu, i pracovního poměru, nejen dohod. Zkontrolujte je před zápisem.",
       "and_more": "a dalších {count}",
@@ -3396,6 +3464,64 @@
       "failed_title": "Nepovedlo se doplnit ({count})",
       "recalculate_notice": "Mzdový běh, u kterého jste pracoviště doplnili, je nutné znovu přepočítat a schválit novou revizi, aby se nová hodnota promítla do hlášení."
     },
+    "bulk_closure": {
+      "open": "Ukončit skončené dohody",
+      "open_count": "Ukončit skončené dohody ({count})",
+      "title": "Ukončit skončené dohody",
+      "intro": "Náhled vztahů, které už podle sjednaného konce nebo podle mezd neběží. Každý vybraný vztah se ukončí stejně jako tlačítkem na jeho kartě, včetně kontrolního seznamu odchodu (odhláška, výstupní doklady). Nic se nemění, dokud výběr nepotvrdíte.",
+      "inactivity_months": "Bez aktivity (měsíců)",
+      "archive_after_months": "Archivovat po (měsících)",
+      "reload": "Načíst náhled",
+      "retry": "Zkusit znovu",
+      "load_failed": "Náhled ukončení se nepodařilo načíst.",
+      "apply_failed": "Hromadné ukončení se nepodařilo provést.",
+      "empty": "Žádný vztah k ukončení ani k archivaci.",
+      "summary_blocked": "Vyžaduje kontrolu",
+      "groups": {
+        "expired": {
+          "summary": "Uplynul sjednaný konec",
+          "title": "Uplynul sjednaný konec",
+          "hint": "Aktivní vztahy, jejichž sjednaný konec už uplynul. Ukončí se k datu sjednaného konce."
+        },
+        "inactive": {
+          "summary": "Dohody bez aktivity",
+          "title": "Dohody bez aktivity",
+          "hint": "DPP a DPČ bez sjednaného konce, které za posledních {months} měsíců nemají mzdový vstup ani docházku. Ukončí se k poslednímu dni měsíce poslední aktivity."
+        },
+        "archive": {
+          "summary": "K archivaci",
+          "title": "Ukončené vztahy k archivaci",
+          "hint": "Vztahy ukončené před více než {months} měsíci. Archivace je jen úklid seznamu a jde vrátit."
+        }
+      },
+      "detail": {
+        "expired": "Sjednaný konec {date}",
+        "inactive": "Poslední aktivita {period}",
+        "never_active": "Bez mzdového vstupu i docházky",
+        "archive": "Ukončeno {date}"
+      },
+      "blocked": {
+        "activity_after_end": "Po datu konce má mzdový vstup nebo docházku ({period}). Zkontrolujte datum konce.",
+        "settled_after_end": "Po datu konce má zúčtovanou mzdu ({period}). Zkontrolujte datum konce."
+      },
+      "select_all": "Vybrat vše",
+      "end_on": "Ukončit k",
+      "archive_on": "Archivovat k {date}",
+      "nothing_selected": "Vyberte aspoň jeden vztah.",
+      "too_many": "Najednou lze zpracovat nejvýše {max} vztahů.",
+      "date_required": "U každého vybraného vztahu vyplňte datum.",
+      "apply": "Pokračovat ({count})",
+      "confirm_text": "Ukončí se {end} vztahů a archivuje {archive} vztahů. Pokračovat?",
+      "confirm_apply": "Potvrdit",
+      "back": "Zpět k výběru",
+      "applied_toast": "Zpracováno vztahů: {count}.",
+      "result_title": "Výsledek",
+      "result": {
+        "applied": "Provedeno",
+        "failed": "Nepovedlo se"
+      },
+      "failed_title": "Nepovedlo se ({count})"
+    },
     "warning_suppressions": {
       "title": "Skrytá varování",
       "intro": "Varování, která jste u mzdového běhu trvale skryli. Do kontrol běhu ani do jejich počtů se nepočítají, dokud je neobnovíte. Blokující chyby skrýt nejde.",
@@ -3424,6 +3550,7 @@
         "tax_declaration_not_signed_summary": "Nepodepsané prohlášení poplatníka k dani",
         "time_month_missing": "Chybí schválená pracovní doba",
         "employment_without_inputs": "Pracovní vztah bez mzdových vstupů",
+        "dpp_annual_hours_approaching": "Dohoda o provedení práce se blíží limitu 300 hodin",
         "recurring_component_without_input": "Pravidelná mzdová složka bez vstupu"
       }
     },
@@ -5485,6 +5612,7 @@
       "filter": "Zobrazení",
       "quick_inputs": "Měsíční zadání mezd",
       "statutory_bulk_action": "Doplnit výchozí zákonné údaje",
+      "declaration_sign_bulk_action": "Podepsaná prohlášení hromadně",
       "workplace_bulk_action": "Doplnit místo výkonu práce",
       "no_results_title": "Žádný zaměstnanec neodpovídá filtru",
       "no_results_description": "Upravte hledaný text nebo zvolte jiné zobrazení.",
@@ -5493,7 +5621,15 @@
         "all": "Všichni",
         "needs_setup": "K doplnění",
         "needs_data": "Mám doplnit údaje",
-        "blocking_data": "Brání podání"
+        "blocking_data": "Brání podání",
+        "dpp_hours_limit": "DPP u limitu 300 h"
+      },
+      "dpp_hours": {
+        "label": "DPP {hours} / {limit} h",
+        "title_ok": "Na DPP odpracováno v roce {year} celkem {hours} h z {limit} h. Zbývá {remaining} h.",
+        "title_approaching": "Blíží se limitu: na DPP odpracováno v roce {year} celkem {hours} h z {limit} h. Zbývá {remaining} h.",
+        "title_exceeded": "Limit překročen: na DPP odpracováno v roce {year} celkem {hours} h, víc než {limit} h. Práce nad limit už na DPP nejde.",
+        "takeover": "Z toho {hours} h převzato z předchozího programu."
       },
       "create": {
         "action": "Přidat zaměstnance",
@@ -33577,6 +33713,11 @@
       "open_person": "Otevřít kartu osoby"
     },
     "sample_badge": "Vzor",
+    "template": {
+      "download": "Stáhnout šablonu XLSX",
+      "hint": "Prázdná šablona pro Vzor MyÚčto: jeden řádek = osoba za měsíc, s ukázkovými řádky a návodem. Vyplněnou ji nahrajte do importu docházky.",
+      "failed": "Šablonu se nepodařilo stáhnout."
+    },
     "profiles_load_failed": "Profily mapování se nepodařilo načíst. Import docházky může pokračovat s automatickým návrhem podle hlaviček.",
     "relation_types": {
       "employment": "Pracovní poměr",
@@ -33961,7 +34102,11 @@
       "position": "Pozice",
       "weekly_hours": "Týdenní úvazek",
       "start_end_note": "Nástup / ukončení",
+      "start_date": "Datum nástupu",
       "monthly_wage": "Měsíční mzda (mzdový výměr)",
+      "hourly_rate": "Hodinová sazba",
+      "end_date": "Konec dohody",
+      "bank_account": "Číslo účtu",
       "worked_hours": "Odpracováno",
       "overtime_hours": "Přesčas",
       "night_hours": "Noční práce",
@@ -34141,6 +34286,14 @@
         "last_name": "Příjmení",
         "swap_names": "Prohodit jméno a příjmení",
         "remove_from_create": "Nezakládat",
+        "details": {
+          "start_on": "Nástup",
+          "agreed_end_on": "Konec dohody",
+          "hourly_rate": "Hodinová sazba",
+          "monthly_wage": "Měsíční mzda",
+          "bank_account": "Účet",
+          "unreadable": "„{value}“ nejde přečíst, nepřevezme se"
+        },
         "create_submit": "Založit osoby ({count})",
         "create_no_permission": "Nemáte oprávnění zakládat osoby.",
         "create_none": "Vyberte osoby k založení.",
@@ -34357,6 +34510,7 @@
       "state_dirty": "Neuložené změny",
       "updated_at": "Upraveno {date}",
       "sample_hint": "Ukázkový profil pro docházkový systém GIRITON, který dostane každá firma. Upravte ho podle svých souborů, nebo si ho duplikujte a upravujte kopii.",
+      "sample_hint_myucto": "Obecný ukázkový profil pro podklady ze šablony XLSX MyÚčto (list Podklady, jeden řádek = osoba za měsíc). Hodí se pro firmy bez docházkového systému, třeba s brigádníky na DPP a DPČ. Neznámé sloupce ignoruje.",
       "upgrade_badge": "Nová verze vzoru",
       "upgrade_title": "K dispozici je nová verze vzoru",
       "upgrade_hint": "Profil vznikl ze starší verze vzoru a upravili jste ho, proto se sám neaktualizoval. Aktualizace nahradí pravidla a složky profilu novou verzí vzoru a vlastní úpravy se ztratí. Chcete-li je zachovat, profil nejdřív duplikujte.",
@@ -34378,6 +34532,8 @@
       "duplicated": "Vznikla kopie profilu. Upravte název a uložte ji.",
       "restore_sample": "Obnovit vzor GIRITON",
       "restore_sample_hint": "Znovu založí vzorový profil GIRITON v aktuální verzi, třeba po omylem smazaném.",
+      "restore_sample_myucto": "Obnovit vzor MyÚčto",
+      "restore_sample_myucto_hint": "Znovu založí obecný Vzor MyÚčto v aktuální verzi, třeba po omylem smazaném.",
       "sample_restored": "Vzor „{name}“ byl obnoven.",
       "sample_exists": "Vzor „{name}“ ve firmě už je.",
       "sample_restore_failed": "Vzor se nepodařilo obnovit.",

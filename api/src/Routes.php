@@ -1105,6 +1105,7 @@ final class Routes
             $g->get('/imports/attendance/profiles/{id:[0-9]+}/export', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'exportProfile']);
             $g->post('/imports/attendance/profiles/import', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'importProfile']);
             $g->post('/imports/attendance/profiles/sample', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'restoreSampleProfile']);
+            $g->get('/imports/attendance/template', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'template']);
             // Dodatečné hromadné schválení pracovních měsíců z použité dávky docházky.
             $g->post('/time/imports/attendance/{id:[0-9]+}/apply', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'approveTimeMonths']);
             $g->get('/payments/liabilities', [PayrollPaymentAction::class, 'listLiabilities']);
@@ -1653,6 +1654,15 @@ final class Routes
                 '/statutory-evidence/health-insurer-bulk/apply',
                 [\MyInvoice\Action\Payroll\PayrollHealthInsurerBulkAction::class, 'apply'],
             );
+            // Hromadný zápis podepsaných prohlášení poplatníka.
+            $g->post(
+                '/statutory-evidence/declaration-signed-bulk/preview',
+                [\MyInvoice\Action\Payroll\PayrollTaxDeclarationBulkSignAction::class, 'preview'],
+            );
+            $g->post(
+                '/statutory-evidence/declaration-signed-bulk/apply',
+                [\MyInvoice\Action\Payroll\PayrollTaxDeclarationBulkSignAction::class, 'apply'],
+            );
             // Hromadné doplnění místa výkonu práce (obec a stát pro JMHZ).
             $g->post(
                 '/employments/workplace-bulk/preview',
@@ -1661,6 +1671,15 @@ final class Routes
             $g->post(
                 '/employments/workplace-bulk/apply',
                 [\MyInvoice\Action\Payroll\PayrollEmploymentWorkplaceBulkFillAction::class, 'apply'],
+            );
+            // Hromadné ukončení skončených dohod a archivace dávno ukončených vztahů.
+            $g->post(
+                '/employments/bulk-closure/preview',
+                [\MyInvoice\Action\Payroll\PayrollEmploymentBulkClosureAction::class, 'preview'],
+            );
+            $g->post(
+                '/employments/bulk-closure/apply',
+                [\MyInvoice\Action\Payroll\PayrollEmploymentBulkClosureAction::class, 'apply'],
             );
             $g->get(
                 '/people/{id:[0-9]+}/foreign-permits',

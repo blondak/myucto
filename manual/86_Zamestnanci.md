@@ -97,7 +97,10 @@ má stav **Aktivní** a v checklistu nástupu jsou registrace splněné.
 
 > [!TIP]
 > Víc lidí najednou doplníte tlačítky nad seznamem: **Doplnit výchozí zákonné
-> údaje**, **Zdravotní pojišťovny hromadně** a **Doplnit místo výkonu práce**.
+> údaje**, **Podepsaná prohlášení hromadně**, **Zdravotní pojišťovny hromadně**
+> a **Doplnit místo výkonu práce**.
+> Skončené dohody ukončíte najednou tlačítkem **Ukončit skončené dohody**
+> ([§ 86.9.1](#8691-hromadne-ukonceni-skoncenych-dohod)).
 
 ## 86.4 Krok za krokem: zákonná evidence osoby
 
@@ -117,6 +120,8 @@ a pojistného. Vede se po celých měsících.
    **Uložit vše** dole na kartě.
 6. Prohlášení poplatníka zapište v sekci **Prohlášení poplatníka k dani** jako
    **Podepsáno** nebo **Nepodepsáno**. Doplnit běžné údaje ho nezapíše.
+   Podepsaná prohlášení více lidí zapíšete najednou podle
+   [§ 86.4.1](#8641-podepsana-prohlaseni-hromadne).
 
 Podle situace doplňte i další sekce:
 
@@ -137,6 +142,45 @@ Podle situace doplňte i další sekce:
 > Bez prohlášení, rezidence, sociálního a zdravotního pojištění mzdový běh
 > zákonný výpočet osoby nespočítá a pošle ji do ručního posouzení. Podrobnosti
 > v [§ 86.12.3](#86123-zakonna-evidence-osoby).
+
+### 86.4.1 Podepsaná prohlášení hromadně
+
+Když na začátku sezóny přinesete balík podepsaných prohlášení poplatníka,
+nemusíte je zapisovat po jednom.
+
+1. V seznamu zaměstnanců klikněte na **Podepsaná prohlášení hromadně**. Ze
+   souhrnu **Doplnit výchozí zákonné údaje** vede na tentýž dialog odkaz
+   u chybějícího prohlášení.
+2. Vyplňte **Zdaňovací rok** a **Datum podpisu** (výchozí je dnešek). Náhled
+   ukáže, od kterého měsíce se podpis zapíše:
+   - od ledna, je-li prohlášení podepsané před začátkem roku nebo v lednu,
+   - jinak od měsíce podpisu, za dřívější měsíce se sleva neuplatní,
+   - nikdy do měsíců uzavřených schválenou mzdou; v tom případě až od
+     prvního měsíce po nich. Je-li uzavřený celý rok, nezapíše se nic.
+3. Projděte seznam osob. Nabízí ty, kterým v roce trvá pracovní vztah:
+   - **Zapíše se** - u osoby vznikne záznam **Podepsáno**; předchozí
+     **Nepodepsáno** nebo **Neověřeno** se dnem před podpisem ukončí, případně
+     se nahradí;
+   - **Na rok už podepsáno** - osoba se přeskočí, záznam se nepřepíše;
+   - **Předchozí záznam končí dřív** - řada by nenavazovala, zapište na kartě
+     osoby.
+4. Odškrtněte osoby, jejichž prohlášení nemáte, a potvrďte, že prohlášení
+   máte podepsaná. Klikněte na **Zapsat podpis**.
+5. Výsledek ukáže po osobách, kde se podpis zapsal, kde se přeskočil a kde
+   se zápis nepovedl. Chyba jedné osoby ostatní nezastaví.
+
+Zapisuje se do zákonné evidence stejně jako na kartě osoby, se stejnými
+kontrolami. Hromadně vzniká jen podpis, a tím i základní sleva na poplatníka.
+Další slevy a děti zapište na kartě osoby. Náhled vyjmenuje rozpracované mzdy
+za dotčené měsíce, ty po zápisu přepočítejte.
+
+> [!WARNING]
+> Prohlášení může zaměstnanec za stejné období podepsat jen u jednoho plátce.
+> Za jeho pravdivost odpovídá zaměstnanec, aplikace podpis ani údaje
+> v prohlášení neověří. Zapisujte jen prohlášení, která máte podepsaná v ruce.
+
+U dohody, jejíž měsíční příjem nedosáhne rozhodné částky, podpis přepne zdanění
+ze srážkové daně na zálohu, stejně jako ruční zápis na kartě.
 
 ## 86.5 Krok za krokem: děti a daňové zvýhodnění
 
@@ -269,6 +313,44 @@ checklistu jsou splněné a odhláška A2 je přijatá.
 Nenastoupil-li zaměstnanec vůbec, klikněte na **Označit nenástup** a podejte
 storno A8 nebo ukončení předregistrace P2.
 
+### 86.9.1 Hromadné ukončení skončených dohod
+
+Brigádníci na DPP a DPČ mívají krátké dohody. Aby seznam nezůstal plný lidí,
+kteří už nepracují, ukončíte skončené vztahy najednou tlačítkem **Ukončit
+skončené dohody** nad seznamem zaměstnanců. Číslo v závorce je počet vztahů,
+které aplikace navrhuje ukončit. Tlačítko vidí jen uživatel s právem měnit
+pracovní vztahy. Nic se neděje samo, vždy rozhodujete vy.
+
+1. Klikněte na **Ukončit skončené dohody**. Otevře se náhled ve třech skupinách:
+   - **Uplynul sjednaný konec**: aktivní nebo přerušený vztah (jakéhokoli druhu),
+     jehož sjednaný konec už uplynul. Navržené datum ukončení je sjednaný konec.
+   - **Dohody bez aktivity**: aktivní DPP nebo DPČ bez sjednaného konce, která
+     za zvolený počet měsíců (výchozí 3, včetně běžného měsíce) nemá žádný
+     nenulový mzdový vstup ani docházku. Navržené datum je poslední den měsíce
+     poslední aktivity, bez aktivity poslední den měsíce nástupu. Je-li už
+     zúčtovaný pozdější měsíc, navrhne se jeho poslední den, aby ukončení
+     neodporovalo odeslanému hlášení. Nulový vstup a nulový řádek mzdového běhu
+     se za aktivitu nepovažují.
+   - **Ukončené vztahy k archivaci**: vztahy ukončené před více než zvoleným
+     počtem měsíců (výchozí 12). Archivace jen odklidí vztah ze seznamu a jde
+     vrátit akcí **Vrátit z archivu**.
+2. Počet měsíců bez aktivity a počet měsíců před archivací změníte nahoře
+   a kliknete na **Načíst náhled**.
+3. Zkontrolujte výběr. U ukončení můžete změnit datum, ukončit lze jen k dnešku
+   nebo ke dni v minulosti. Vztah, který má po datu konce ještě mzdový vstup,
+   docházku nebo zúčtovanou mzdu, je označený **Vyžaduje kontrolu** a není
+   předvybraný. Datum konce u něj opravte, nebo ho ukončete ručně na kartě.
+4. Klikněte na **Pokračovat**, zkontrolujte souhrn a klikněte na **Potvrdit**.
+   Najednou lze zpracovat nejvýše 500 vztahů.
+5. Výsledek ukáže počet provedených a u každého vztahu, který se nepovedl,
+   důvod (například vztah mezitím změnil někdo jiný). Ostatní vztahy se tím
+   nezastaví.
+
+Každý vztah se ukončí stejně jako tlačítkem **Ukončit** na jeho kartě: projde
+stejnými kontrolami, zapíše se do časové osy a založí výstupní checklist.
+Odhlášku (A2, HOZ) a další kroky podle § 86.9 je potřeba vyřídit i u hromadně
+ukončených vztahů.
+
 ## 86.10 Krok za krokem: personální spis
 
 1. Na kartě vztahu klikněte v **Navazujících agendách** na **Personální spis**.
@@ -335,9 +417,20 @@ osoby k datu nástupu týmž uložením, takže nemůže vzniknout karta bez ní
 kód pojišťovny celé založení odmítne.
 
 Toolbar nad seznamem hledá podle jména nebo osobního čísla (stačí jeho část)
-a přepíná zobrazení **Aktivní**, **Všichni**, **Mám doplnit údaje** a **Brání
-podání**. Hledání i stránkování běží na serveru po 25 osobách, takže se stejně
-pracuje s deseti i pěti sty zaměstnanci. Na telefonu se tabulka mění na karty.
+a přepíná zobrazení **Aktivní**, **Všichni**, **Mám doplnit údaje**, **Brání
+podání** a **DPP u limitu 300 h**. Hledání i stránkování běží na serveru po 25
+osobách, takže se stejně pracuje s deseti i pěti sty zaměstnanci. Na telefonu
+se tabulka mění na karty.
+
+**Hodiny na DPP.** U osoby s dohodou o provedení práce ukazuje seznam i hlavička
+karty osoby značku **DPP 245 / 300 h**: kolik hodin osoba v aktuálním
+kalendářním roce odpracovala na všech svých DPP u firmy, včetně hodin převzatých
+z předchozího programu. Tooltip doplní, kolik hodin zbývá. Značka je šedá pod
+prahem upozornění, oranžová od 240 hodin (80 % limitu) a červená po překročení
+300 hodin. Zobrazení **DPP u limitu 300 h** vybere jen osoby od prahu
+upozornění výš, takže stovky brigádníků projdete najednou. Hodiny jsou tytéž,
+které poměřuje kontrola mzdového běhu ([§ 77.9.6](77_Dochazka_a_smeny.md#7796-rozsah-dohod-o-provedeni-prace-a-o-pracovni-cinnosti)):
+odpracované hodiny ze schválené docházky a převzaté hodiny.
 
 Seznam ukazuje stav osoby, další krok k dokončení karty, počet a druh vztahů
 a původní vztah převzatý z Mzdové rekapitulace. Akce v řádku odpovídá

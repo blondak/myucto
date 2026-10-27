@@ -257,9 +257,12 @@ final class RoutePermissionMap
         // údaje celé firmy, proto stejné právo jako zápis.
         ['POST', '#^/api/payroll/statutory-evidence/bulk-defaults/(preview|apply)$#', 'payroll.person.write', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/statutory-evidence/health-insurer-bulk/(preview|apply)$#', 'payroll.person.write', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/statutory-evidence/declaration-signed-bulk/(preview|apply)$#', 'payroll.person.write', AccessLevel::WRITE],
         // Hromadné doplnění pracoviště — tentýž zápis jako oprava podmínek na
         // kartě vztahu, jen pro víc vztahů. Náhled je POST se seznamem vztahů.
         ['POST', '#^/api/payroll/employments/workplace-bulk/(preview|apply)$#', 'payroll.employment.write', AccessLevel::WRITE],
+        // Hromadné ukončení a archivace — tentýž přechod stavu jako na kartě vztahu.
+        ['POST', '#^/api/payroll/employments/bulk-closure/(preview|apply)$#', 'payroll.employment.write', AccessLevel::WRITE],
         // Počáteční stavy kumulací: zápis je táž operace jako PUT
         // /people/{id}/statutory-openings, jen za víc osob naráz (soubor za celou
         // firmu). Vzorový soubor je prázdná šablona bez dat, tedy jen čtení.
@@ -606,9 +609,10 @@ final class RoutePermissionMap
         // Založení chybějících osob z podkladů je personální zápis, ne mzdový vstup.
         ['POST', '#^/api/payroll/imports/attendance/persons$#', 'payroll.person.write', AccessLevel::WRITE],
         // Profily mapování sloupců jsou nastavení firmy; číst je smí každý, kdo importuje.
-        ['POST', '#^/api/payroll/imports/attendance/profiles(?:/import|/[0-9]+/copy)?$#', 'payroll.settings', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/imports/attendance/profiles(?:/import|/sample|/[0-9]+/copy)?$#', 'payroll.settings', AccessLevel::WRITE],
         ['DELETE', '#^/api/payroll/imports/attendance/profiles/[0-9]+$#', 'payroll.settings', AccessLevel::WRITE],
-        ['GET', '#^/api/payroll/imports/attendance/(batches(?:/[0-9]+)?|profiles(?:/[0-9]+/export)?)$#', 'payroll.inputs.write', AccessLevel::READ],
+        // Šablona XLSX Vzoru MyÚčto je bez dat firmy; stáhne si ji každý, kdo importuje.
+        ['GET', '#^/api/payroll/imports/attendance/(batches(?:/[0-9]+)?|profiles(?:/[0-9]+/export)?|template)$#', 'payroll.inputs.write', AccessLevel::READ],
         ['POST', '#^/api/payroll/imports/attendance/(preview|apply)$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/settings/activation$#', 'payroll.settings', AccessLevel::READ],
         ['*', '#^/api/payroll/settings/activation$#', 'payroll.settings', AccessLevel::WRITE],

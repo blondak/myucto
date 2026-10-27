@@ -47,6 +47,7 @@ import PayrollPersonPensionRequestsPanel from './PayrollPersonPensionRequestsPan
 import PayrollPersonStatutoryEvidencePanel from './PayrollPersonStatutoryEvidencePanel.vue'
 import PayrollPersonForeignPermitPanel from './PayrollPersonForeignPermitPanel.vue'
 import PersonDataGapBadge from './PersonDataGapBadge.vue'
+import DppAnnualHoursBadge from './DppAnnualHoursBadge.vue'
 import PersonDataGapSummary from './PersonDataGapSummary.vue'
 import { employmentCodeLabel, isValidPersonalNumber, personalNumberLabel, todayIso } from './employmentLifecycleUi'
 import {
@@ -58,9 +59,11 @@ import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import DateInput from '@/components/ui/DateInput.vue'
+import PayrollDeclarationSignBulkDialog from '@/components/payroll/PayrollDeclarationSignBulkDialog.vue'
 import PayrollHealthInsurerBulkDialog from '@/components/payroll/PayrollHealthInsurerBulkDialog.vue'
 import PayrollStatutoryBulkDefaultsDialog from '@/components/payroll/PayrollStatutoryBulkDefaultsDialog.vue'
 import PayrollWorkplaceBulkFillDialog from '@/components/payroll/PayrollWorkplaceBulkFillDialog.vue'
+import PayrollBulkClosureDialog from '@/components/payroll/PayrollBulkClosureDialog.vue'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
 import { providePersonCardSave } from './personCardSave'
 
@@ -121,8 +124,18 @@ const canCreatePerson = computed(() => auth.canWrite('payroll.person.write'))
 const statutoryBulkOpen = ref(false)
 const statutoryBulkEffectiveOn = `${payrollWorkingPeriod()}-01`
 const workplaceBulkOpen = ref(false)
+const bulkClosureOpen = ref(false)
+// Počet vztahů k ukončení na tlačítku; výpadek náhledu tlačítko neschová.
+const bulkClosureCount = ref<number | null>(null)
 // Po importu hlášení JMHZ (nenese pojišťovnu) sem vede proklik `?bulk=health_insurer`.
 const healthInsurerBulkOpen = ref(route.query.bulk === 'health_insurer')
+// Z hromadného doplnění evidence (i na této stránce) vede proklik `?bulk=declaration_signed`.
+const declarationSignBulkOpen = ref(canCreatePerson.value && route.query.bulk === 'declaration_signed')
+watch(() => route.query.bulk, (bulk) => {
+  if (bulk !== 'declaration_signed' || !canCreatePerson.value) return
+  statutoryBulkOpen.value = false
+  declarationSignBulkOpen.value = true
+})
 const canWriteEmployment = computed(() => auth.canWrite('payroll.employment.write'))
 const canQuickEditPerson = computed(() =>
   auth.canWrite('payroll.person.write')
@@ -150,6 +163,7 @@ const filterOptions = computed(() => [
   { value: 'all' as const, label: t('payroll.people.filters.all') },
   { value: 'needs_data' as const, label: t('payroll.people.filters.needs_data') },
   { value: 'blocking_data' as const, label: t('payroll.people.filters.blocking_data') },
+  { value: 'dpp_hours_limit' as const, label: t('payroll.people.filters.dpp_hours_limit') },
 ])
 const relationOptions = computed(() => relationTypes.map(type => ({
   value: type,
@@ -1367,8 +1381,24 @@ watch(() => [route.query.person, route.query.panel, route.query.new, route.query
  */
 const payrollStartPeriod = ref<string | null>(null)
 
+async function loadBulkClosureCount() {
+  if (!canWriteEmployment.value) return
+  try {
+    const preview = await payrollApi.bulkClosurePreview()
+    bulkClosureCount.value = preview.summary.expired + preview.summary.inactive - preview.summary.blocked
+  } catch {
+    bulkClosureCount.value = null
+  }
+}
+
+function onBulkClosureApplied() {
+  void load()
+  void loadBulkClosureCount()
+}
+
 onMounted(async () => {
   await load()
+  void loadBulkClosureCount()
   await openFromQuery()
   const panel = Array.isArray(route.query.panel) ? route.query.panel[0] : route.query.panel
   if (typeof panel === 'string' && panel !== '') await focusPanel(panel)
@@ -1641,6 +1671,17 @@ onMounted(async () => {
             {{ t('payroll.people.statutory_bulk_action') }}
           </button>
           <button
+            v-if="canCreatePerson"
+            type="button"
+            class="whitespace-nowrap"
+            :class="btnOutline('success')"
+            data-test="declaration-sign-bulk-open"
+            @click="declarationSignBulkOpen = true"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
+            {{ t('payroll.people.declaration_sign_bulk_action') }}
+          </button>
+          <button
             v-if="canQuickEditPerson"
             type="button"
             class="whitespace-nowrap"
@@ -1661,6 +1702,17 @@ onMounted(async () => {
           >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.pin" /></svg>
             {{ t('payroll.people.workplace_bulk_action') }}
+          </button>
+          <button
+            v-if="canWriteEmployment"
+            type="button"
+            class="whitespace-nowrap"
+            :class="btnOutline('warning')"
+            data-test="bulk-closure-open"
+            @click="bulkClosureOpen = true"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.archive" /></svg>
+            {{ bulkClosureCount ? t('payroll.bulk_closure.open_count', { count: bulkClosureCount }) : t('payroll.bulk_closure.open') }}
           </button>
           <RouterLink
             :to="{ name: 'payroll-quick-inputs' }"
@@ -1684,6 +1736,12 @@ onMounted(async () => {
       @applied="load"
     />
 
+    <PayrollDeclarationSignBulkDialog
+      v-if="declarationSignBulkOpen"
+      @close="declarationSignBulkOpen = false"
+      @applied="load"
+    />
+
     <PayrollHealthInsurerBulkDialog
       v-if="healthInsurerBulkOpen"
       :period-start="statutoryBulkEffectiveOn"
@@ -1697,6 +1755,12 @@ onMounted(async () => {
       :employment-ids="null"
       @close="workplaceBulkOpen = false"
       @applied="load"
+    />
+
+    <PayrollBulkClosureDialog
+      v-if="bulkClosureOpen"
+      @close="bulkClosureOpen = false"
+      @applied="onBulkClosureApplied"
     />
 
     <div v-if="editing && loadingDetailId !== null" class="h-24 animate-pulse rounded-lg bg-neutral-100" />
@@ -1751,6 +1815,11 @@ onMounted(async () => {
                 :counts="selectedSummary.data_gap_counts ?? null"
                 test-id="person-header-data-gap"
                 @open="gap => openDataGap(selectedSummary!.id, gap)"
+              />
+              <DppAnnualHoursBadge
+                v-if="selectedSummary?.dpp_annual_hours"
+                :hours="selectedSummary.dpp_annual_hours"
+                test-id="person-header-dpp-hours"
               />
               <span class="text-neutral-500" data-test="person-header-employments">
                 {{ t('payroll.people.header_employments', { count: selectedEmploymentCount }, selectedEmploymentCount) }}
@@ -2075,6 +2144,12 @@ onMounted(async () => {
                         :test-id="`person-data-gap-${person.id}`"
                         @open="gap => openDataGap(person.id, gap)"
                       />
+                      <DppAnnualHoursBadge
+                        v-if="person.dpp_annual_hours"
+                        class="relative z-10"
+                        :hours="person.dpp_annual_hours"
+                        :test-id="`person-dpp-hours-${person.id}`"
+                      />
                     </div>
                   </td>
                   <td v-if="tbl.isVisible('relations')" class="px-4 py-3 text-neutral-600">{{ person.relation_types.map(relationLabel).join(', ') }}</td>
@@ -2136,6 +2211,11 @@ onMounted(async () => {
                   :counts="person.data_gap_counts ?? null"
                   :test-id="`person-data-gap-mobile-${person.id}`"
                   @open="gap => openDataGap(person.id, gap)"
+                />
+                <DppAnnualHoursBadge
+                  v-if="person.dpp_annual_hours"
+                  :hours="person.dpp_annual_hours"
+                  :test-id="`person-dpp-hours-mobile-${person.id}`"
                 />
               </div>
             </div>

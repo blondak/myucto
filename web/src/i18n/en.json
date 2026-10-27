@@ -865,7 +865,13 @@
     "upload": "Upload",
     "upload_original": "Upload original file",
     "retake": "Take again",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "crop_toggle": "Crop to the document",
+    "crop_hint": "We found the document in the photo. You can move the corners.",
+    "crop_manual_hint": "Move the corners to the edges of the document.",
+    "crop_off_hint": "The whole photo will be uploaded.",
+    "crop_not_found": "The document could not be found in the photo. You can mark the crop manually.",
+    "corner": "Document corner {n}"
   },
   "documents": {
     "ai": {
@@ -3282,6 +3288,67 @@
       "apply_failed": "Could not save the insurers.",
       "retry": "Try again"
     },
+    "declaration_sign_bulk": {
+      "title": "Signed taxpayer declarations in bulk",
+      "intro": "Records the taxpayer declaration as Signed in the statutory records of the selected people, the same way as the person card. This applies the basic taxpayer credit; record other credits and children on the person card. A signed declaration is never overwritten and nothing is written into months closed by an approved payroll.",
+      "warning_one_payer": "An employee may sign the declaration for the same period with one payer only. If they signed it elsewhere, do not record it.",
+      "warning_responsibility": "The employee is responsible for the truthfulness of the declaration. The application cannot verify the signature or the declared data, so record only declarations you hold signed.",
+      "year": "Tax year",
+      "signed_on": "Signature date",
+      "reload": "Load preview",
+      "effective_from": "Valid from {date}",
+      "basis": {
+        "year_start": "from the start of the year, the declaration was signed before the year or in January",
+        "signing_month": "from the month of signature, the credit does not apply to earlier months",
+        "after_frozen_period": "only after the period closed by an approved payroll (until {date})"
+      },
+      "year_frozen": "The whole year {year} is closed by an approved payroll (until {date}). Nothing is written retroactively into a closed calculation.",
+      "recalculate_title": "Payrolls in progress to recalculate",
+      "recalculate_hint": "These payrolls were calculated without the signature. Recalculate them after recording.",
+      "summary": {
+        "people": "People",
+        "ready": "Will be recorded",
+        "already_signed": "Already signed",
+        "skipped": "Cannot be recorded"
+      },
+      "state": {
+        "ready": "Will be recorded",
+        "already_signed": "Already signed for the year, skipped",
+        "period_frozen": "Period closed by an approved payroll",
+        "timeline_gap": "The previous record ends earlier, record it on the person card",
+        "employee_not_found": "Person not found"
+      },
+      "change": {
+        "add": "New record",
+        "close_previous": "Ends the previous one ({status})",
+        "replace": "Replaces ({status})"
+      },
+      "status": {
+        "not-signed": "Not signed",
+        "unverified": "Unverified",
+        "signed": "Signed"
+      },
+      "select_all": "Select all",
+      "select_none": "Clear selection",
+      "select_person": "Select: {name}",
+      "empty": "Nobody has an ongoing employment in {year}.",
+      "confirm": "I confirm that I hold the signed declarations of the selected people.",
+      "apply": "Record signature ({count})",
+      "nothing_selected": "Select at least one person to record the signature for.",
+      "confirm_required": "Confirm that you hold the signed declarations.",
+      "applied_toast": "Signed declaration recorded for {count} people.",
+      "result_title": "Result",
+      "result": {
+        "applied": "Recorded",
+        "skipped": "Skipped",
+        "failed": "Error"
+      },
+      "applied_item": "from {date}",
+      "person_fallback": "Person no. {id}",
+      "load_failed": "Could not load the preview.",
+      "apply_failed": "Could not record the signed declarations.",
+      "retry": "Try again"
+    },
     "statutory_bulk": {
       "title": "Fill in default statutory data",
       "intro": "For people without a foreign element, fills in the missing data that follows from having no ties abroad: Czech tax residence, Czech insurance jurisdiction without an A1 form and, for people under 60, the working pensioner discount not claimed. An existing record is never overwritten. The health insurer is never filled in bulk; only the registration or the employee knows it.",
@@ -3316,6 +3383,7 @@
       "declaration_label": "Record the missing declarations as not signed ({count} people)",
       "declaration_hint": "Records the state “not signed”. Without a signed declaration neither the taxpayer credit nor other credits apply. Turn this on only when you know the declarations really were not signed.",
       "declaration_on": "This does not create a signature. When the employee signs the declaration, record it on their card.",
+      "declaration_signed_link": "Signed declarations in bulk",
       "withholding_title": "Withholding tax risk ({count})",
       "withholding_hint": "Without a signed declaration, withholding tax applies in any month where the total income from you stays below the decisive amount. This applies to every relationship type, including regular employment, not just agreements. Review them before writing.",
       "and_more": "and {count} more",
@@ -3396,6 +3464,64 @@
       "failed_title": "Could not be filled in ({count})",
       "recalculate_notice": "The payroll run for which you filled in the workplace needs to be recalculated and approved as a new revision for the new value to be reflected in the report."
     },
+    "bulk_closure": {
+      "open": "End finished agreements",
+      "open_count": "End finished agreements ({count})",
+      "title": "End finished agreements",
+      "intro": "Preview of relationships that are no longer running according to their agreed end or to payroll. Each selected relationship is ended exactly as with the button on its card, including the exit checklist (deregistration, exit documents). Nothing changes until you confirm the selection.",
+      "inactivity_months": "Without activity (months)",
+      "archive_after_months": "Archive after (months)",
+      "reload": "Load preview",
+      "retry": "Try again",
+      "load_failed": "The preview could not be loaded.",
+      "apply_failed": "The bulk ending could not be completed.",
+      "empty": "No relationship to end or archive.",
+      "summary_blocked": "Needs review",
+      "groups": {
+        "expired": {
+          "summary": "Agreed end has passed",
+          "title": "Agreed end has passed",
+          "hint": "Active relationships whose agreed end has already passed. They will be ended as of the agreed end date."
+        },
+        "inactive": {
+          "summary": "Agreements without activity",
+          "title": "Agreements without activity",
+          "hint": "DPP and DPČ agreements without an agreed end that have no payroll input or attendance in the last {months} months. They will be ended as of the last day of the month of their last activity."
+        },
+        "archive": {
+          "summary": "To archive",
+          "title": "Ended relationships to archive",
+          "hint": "Relationships ended more than {months} months ago. Archiving only tidies up the list and can be undone."
+        }
+      },
+      "detail": {
+        "expired": "Agreed end {date}",
+        "inactive": "Last activity {period}",
+        "never_active": "No payroll input or attendance",
+        "archive": "Ended {date}"
+      },
+      "blocked": {
+        "activity_after_end": "Has payroll input or attendance after the end date ({period}). Check the end date.",
+        "settled_after_end": "Has settled payroll after the end date ({period}). Check the end date."
+      },
+      "select_all": "Select all",
+      "end_on": "End as of",
+      "archive_on": "Archive as of {date}",
+      "nothing_selected": "Select at least one relationship.",
+      "too_many": "At most {max} relationships can be processed at once.",
+      "date_required": "Fill in a date for every selected relationship.",
+      "apply": "Continue ({count})",
+      "confirm_text": "{end} relationships will be ended and {archive} archived. Continue?",
+      "confirm_apply": "Confirm",
+      "back": "Back to selection",
+      "applied_toast": "Relationships processed: {count}.",
+      "result_title": "Result",
+      "result": {
+        "applied": "Done",
+        "failed": "Failed"
+      },
+      "failed_title": "Failed ({count})"
+    },
     "warning_suppressions": {
       "title": "Hidden warnings",
       "intro": "Warnings you permanently hid on a payroll run. They are not counted in run checks or their totals until you restore them. Blocking errors cannot be hidden.",
@@ -3424,6 +3550,7 @@
         "tax_declaration_not_signed_summary": "Unsigned taxpayer declaration",
         "time_month_missing": "Approved working time missing",
         "employment_without_inputs": "Employment without payroll inputs",
+        "dpp_annual_hours_approaching": "Agreement to perform work approaching the 300-hour limit",
         "recurring_component_without_input": "Recurring payroll component without input"
       }
     },
@@ -5485,6 +5612,7 @@
       "filter": "View",
       "quick_inputs": "Monthly payroll entry",
       "statutory_bulk_action": "Fill in default statutory data",
+      "declaration_sign_bulk_action": "Signed declarations in bulk",
       "workplace_bulk_action": "Fill in place of work",
       "no_results_title": "No employee matches the filter",
       "no_results_description": "Change the search text or choose another view.",
@@ -5493,7 +5621,15 @@
         "all": "All",
         "needs_setup": "Setup required",
         "needs_data": "Data to add",
-        "blocking_data": "Blocks filing"
+        "blocking_data": "Blocks filing",
+        "dpp_hours_limit": "DPP near the 300 h limit"
+      },
+      "dpp_hours": {
+        "label": "DPP {hours} / {limit} h",
+        "title_ok": "Worked on DPP agreements in {year}: {hours} h of {limit} h. {remaining} h remaining.",
+        "title_approaching": "Approaching the limit: worked on DPP agreements in {year}: {hours} h of {limit} h. {remaining} h remaining.",
+        "title_exceeded": "Limit exceeded: worked on DPP agreements in {year}: {hours} h, more than {limit} h. Work above the limit cannot be done under a DPP.",
+        "takeover": "Including {hours} h taken over from the previous system."
       },
       "create": {
         "action": "Add employee",
@@ -33577,6 +33713,11 @@
       "open_person": "Open person card"
     },
     "sample_badge": "Sample",
+    "template": {
+      "download": "Download XLSX template",
+      "hint": "Blank template for the MyÚčto sample: one row = one person per month, with sample rows and instructions. Upload it filled in to the attendance import.",
+      "failed": "The template could not be downloaded."
+    },
     "profiles_load_failed": "Mapping profiles could not be loaded. The attendance import can continue with the automatic suggestion from headers.",
     "relation_types": {
       "employment": "Employment",
@@ -33961,7 +34102,11 @@
       "position": "Position",
       "weekly_hours": "Weekly hours",
       "start_end_note": "Start / end",
+      "start_date": "Start date",
       "monthly_wage": "Monthly wage (wage assessment)",
+      "hourly_rate": "Hourly rate",
+      "end_date": "Agreement end",
+      "bank_account": "Bank account",
       "worked_hours": "Worked",
       "overtime_hours": "Overtime",
       "night_hours": "Night work",
@@ -34141,6 +34286,14 @@
         "last_name": "Last name",
         "swap_names": "Swap first and last name",
         "remove_from_create": "Do not create",
+        "details": {
+          "start_on": "Start",
+          "agreed_end_on": "Agreement end",
+          "hourly_rate": "Hourly rate",
+          "monthly_wage": "Monthly wage",
+          "bank_account": "Account",
+          "unreadable": "“{value}” cannot be read and will not be taken over"
+        },
         "create_submit": "Create people ({count})",
         "create_no_permission": "You are not allowed to create people.",
         "create_none": "Select the people to create.",
@@ -34357,6 +34510,7 @@
       "state_dirty": "Unsaved changes",
       "updated_at": "Updated {date}",
       "sample_hint": "Sample profile for the GIRITON attendance system that every company gets. Adjust it to your files, or duplicate it and edit the copy.",
+      "sample_hint_myucto": "General sample profile for data from the MyÚčto XLSX template (sheet Podklady, one row = one person per month). Suits companies without an attendance system, e.g. with temporary workers on DPP and DPČ agreements. Unknown columns are ignored.",
       "upgrade_badge": "New sample version",
       "upgrade_title": "A new sample version is available",
       "upgrade_hint": "The profile was created from an older sample version and you edited it, so it was not updated automatically. Updating replaces the profile rules and components with the new sample version and your own changes are lost. To keep them, duplicate the profile first.",
@@ -34378,6 +34532,8 @@
       "duplicated": "A copy of the profile was created. Adjust its name and save it.",
       "restore_sample": "Restore GIRITON sample",
       "restore_sample_hint": "Creates the GIRITON sample profile again in the current version, e.g. after it was deleted by mistake.",
+      "restore_sample_myucto": "Restore MyÚčto sample",
+      "restore_sample_myucto_hint": "Creates the general MyÚčto sample profile again in the current version, e.g. after it was deleted by mistake.",
       "sample_restored": "Sample “{name}” was restored.",
       "sample_exists": "Sample “{name}” already exists in the company.",
       "sample_restore_failed": "The sample could not be restored.",

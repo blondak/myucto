@@ -148,7 +148,9 @@ pro JMHZ. Aplikace nabízí tři hromadné akce.
    nezapisuje.
 3. Chcete-li chybějící prohlášení zapsat jako nepodepsané, zaškrtněte
    **Zapsat chybějící prohlášení jako nepodepsané (N osob)**. Nejdřív si
-   přečtěte, komu by to přepnulo zdanění na srážkovou daň.
+   přečtěte, komu by to přepnulo zdanění na srážkovou daň. Podepsaná
+   prohlášení zapíšete odkazem **Podepsaná prohlášení hromadně**
+   ([§ 86.4.1](86_Zamestnanci.md#8641-podepsana-prohlaseni-hromadne)).
 4. Údaje uložte a pokračujte krokem, který nabídne dialog (**Spočítat mzdy**,
    **Obnovit podklady**, nová revize nebo **Vyžádat opravu**).
 
@@ -484,7 +486,9 @@ Skrývat a obnovovat smí uživatel s právem schvalovat mzdové běhy.
 
 Skrýt nejde blokující chyby, varování s výjimkou ani překročení zákonných
 limitů (dohoda o provedení práce nad 300 hodin, průměr dohody o pracovní
-činnosti, přesčasy, exekuce, sleva na pojistném).
+činnosti, přesčasy, exekuce, sleva na pojistném). Upozornění, že se dohoda
+o provedení práce blíží limitu (od 240 hodin), skrýt jde po vztazích. Až
+hodiny limit překročí, objeví se samostatné varování, které skrýt nejde.
 
 ### 80.11.12 Převzaté měsíce roku přechodu
 

@@ -194,6 +194,19 @@ export interface PayrollPersonEmploymentRef {
   is_primary: boolean
 }
 
+export type PayrollAgreementAnnualHoursStatus = 'ok' | 'approaching' | 'exceeded'
+
+/** Roční součet hodin na DPP (SSOT na serveru: PayrollAgreementAnnualHours). */
+export interface PayrollAgreementAnnualHours {
+  year: number
+  total_minutes: number
+  takeover_minutes: number
+  limit_minutes: number
+  warning_minutes: number
+  remaining_minutes: number
+  status: PayrollAgreementAnnualHoursStatus
+}
+
 export interface PayrollPersonListItem {
   id: number
   full_name: string
@@ -219,6 +232,11 @@ export interface PayrollPersonListItem {
    */
   data_gaps: PayrollPersonDataGap[]
   data_gap_counts: PayrollPersonDataGapCounts
+  /**
+   * Hodiny na DPP v aktuálním roce proti limitu 300 h (§ 75 ZP). `null` nebo
+   * chybí, když osoba dohodu o provedení práce nemá.
+   */
+  dpp_annual_hours?: PayrollAgreementAnnualHours | null
   can_delete: boolean
   delete_blocker: PayrollDeleteBlocker | null
   delete_cascade: PayrollDeleteCascade
@@ -501,6 +519,7 @@ export type PayrollPeopleFilter =
   | 'needs_setup'
   | 'needs_data'
   | 'blocking_data'
+  | 'dpp_hours_limit'
 
 /** Osoba v rozbalovací nabídce — jen to, čím se dá vybrat. */
 export interface PayrollPersonOption {
@@ -914,6 +933,43 @@ export interface PayrollHealthInsurerBulkResult {
   failed: Array<{ employee_id: number, message: string }>
 }
 
+export type PayrollDeclarationSignState = 'ready' | 'already_signed' | 'period_frozen' | 'timeline_gap' | 'employee_not_found'
+
+export type PayrollDeclarationSignChange = 'add' | 'close_previous' | 'replace'
+
+export interface PayrollDeclarationSignPerson {
+  employee_id: number
+  full_name: string | null
+  state: PayrollDeclarationSignState
+  change: PayrollDeclarationSignChange | null
+  /** Stav prohlášení, které se podpisem ukončí nebo nahradí (`not-signed`, `unverified`, `signed`). */
+  current_status: string | null
+  effective_from: string | null
+  effective_to: string | null
+}
+
+export interface PayrollDeclarationSignPreview {
+  year: number
+  signed_on: string
+  /** `null` = celý rok je uzavřený schválenou mzdou. */
+  effective_from: string | null
+  effective_from_basis: 'year_start' | 'signing_month' | 'after_frozen_period'
+  frozen_through: string | null
+  summary: Record<'people' | PayrollDeclarationSignState, number>
+  ready_employee_ids: number[]
+  runs_to_recalculate: Array<{ id: number, period_start: string, status: string }>
+  people: PayrollDeclarationSignPerson[]
+}
+
+export interface PayrollDeclarationSignResult {
+  year: number
+  signed_on: string
+  counts: { applied: number, skipped: number, failed: number }
+  applied: Array<{ employee_id: number, change: PayrollDeclarationSignChange, effective_from: string, effective_to: string | null }>
+  skipped: Array<{ employee_id: number, reasons: string[] }>
+  failed: Array<{ employee_id: number, message: string }>
+}
+
 export interface PayrollWorkplaceBulkPreviewItem {
   employment_id: number
   employee_id: number
@@ -956,6 +1012,52 @@ export interface PayrollWorkplaceBulkResult {
   applied: Array<{ employment_id: number }>
   skipped: Array<{ employment_id: number, reason: string }>
   failed: Array<{ employment_id: number, message: string }>
+}
+
+export type PayrollBulkClosureGroup = 'expired' | 'inactive' | 'archive'
+export type PayrollBulkClosureAction = 'end' | 'archive'
+
+export interface PayrollBulkClosureItem {
+  employment_id: number
+  employee_id: number
+  full_name: string
+  employment_code: string
+  relation_type: PayrollRelationType
+  status: PayrollEmploymentStatus
+  row_version: number
+  group: PayrollBulkClosureGroup
+  action: PayrollBulkClosureAction
+  start_on: string | null
+  agreed_end_on: string | null
+  last_activity_period: string | null
+  last_settled_period: string | null
+  proposed_on: string
+  blocked_reason: 'activity_after_end' | 'settled_after_end' | null
+  blocked_period: string | null
+}
+
+export interface PayrollBulkClosurePreview {
+  as_of: string
+  inactivity_months: number
+  archive_after_months: number
+  activity_since: string
+  archive_before: string
+  max_items: number
+  summary: { expired: number, inactive: number, archive: number, blocked: number }
+  items: PayrollBulkClosureItem[]
+}
+
+export interface PayrollBulkClosureCommand {
+  employment_id: number
+  action: PayrollBulkClosureAction
+  effective_on: string
+  row_version: number
+}
+
+export interface PayrollBulkClosureResult {
+  counts: { applied: number, failed: number }
+  applied: Array<{ employment_id: number, status: PayrollEmploymentStatus, effective_on: string }>
+  failed: Array<{ employment_id: number, code: string, message: string }>
 }
 
 export type PayrollForeignPermitKind = 'residence' | 'work'
@@ -7870,6 +7972,17 @@ export const payrollApi = {
       '/payroll/statutory-evidence/health-insurer-bulk/apply',
       { assignments },
     ).then(response => response.data.result),
+  /** Náhled hromadného zápisu podepsaných prohlášení; `employee_ids: null` = osoby se vztahem v roce. */
+  declarationSignBulkPreview: (payload: { year: number, signed_on: string, employee_ids?: number[] | null }) =>
+    api.post<{ preview: PayrollDeclarationSignPreview }>(
+      '/payroll/statutory-evidence/declaration-signed-bulk/preview',
+      payload,
+    ).then(response => response.data.preview),
+  declarationSignBulkApply: (payload: { year: number, signed_on: string, employee_ids: number[] }) =>
+    api.post<{ result: PayrollDeclarationSignResult }>(
+      '/payroll/statutory-evidence/declaration-signed-bulk/apply',
+      payload,
+    ).then(response => response.data.result),
   /** Náhled hromadného doplnění místa výkonu práce pro JMHZ; `employment_ids: null` = všechny vztahy. */
   workplaceBulkPreview: (payload: { period_start: string, employment_ids?: number[] | null }) =>
     api.post<{ preview: PayrollWorkplaceBulkPreview }>(
@@ -7885,6 +7998,20 @@ export const payrollApi = {
     api.post<{ result: PayrollWorkplaceBulkResult }>(
       '/payroll/employments/workplace-bulk/apply',
       payload,
+    ).then(response => response.data.result),
+  /** Náhled hromadného ukončení skončených dohod a archivace; nic nezapisuje. */
+  bulkClosurePreview: (payload: { inactivity_months?: number, archive_after_months?: number } = {}) =>
+    api.post<{ preview: PayrollBulkClosurePreview }>(
+      '/payroll/employments/bulk-closure/preview',
+      payload,
+    ).then(response => response.data.preview),
+  bulkClosureApply: (
+    items: PayrollBulkClosureCommand[],
+    criteria: { inactivity_months: number, archive_after_months: number },
+  ) =>
+    api.post<{ result: PayrollBulkClosureResult }>(
+      '/payroll/employments/bulk-closure/apply',
+      { items, ...criteria },
     ).then(response => response.data.result),
   foreignPermits: (employeeId: number, asOf?: string) =>
     api.get<{ permits: PayrollForeignPermitView }>(
