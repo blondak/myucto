@@ -68,7 +68,8 @@ final class SummaryAction
             $currencyIds = array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
         }
         return match ($metric) {
-            'sales' => $this->salesStatistics($pdo, (int) date('Y'), $supplierId, $currencyIds),
+            'sales' => $this->revenueStatistics($pdo, (int) date('Y'), (int) date('Y') - 1, $supplierId, $this->fetchIsVatPayer($pdo, $supplierId), $currencyIds)
+                + $this->salesStatistics($pdo, (int) date('Y'), $supplierId, $currencyIds),
             'purchases' => $this->purchaseStatistics($pdo, (int) date('Y'), $supplierId, $this->fetchIsVatPayer($pdo, $supplierId), $currencyIds),
             'overdue' => $this->overdue($pdo, $supplierId),
             'upcoming' => $this->unpaidUpcoming($pdo, $supplierId),
@@ -483,7 +484,15 @@ final class SummaryAction
 
     private function kpi(\PDO $pdo, int $year, int $prevYear, int $sid, bool $isVatPayer): array
     {
-        $overdueOperator = $this->overduePolicy->comparisonOperator();
+        return $this->revenueStatistics($pdo, $year, $prevYear, $sid, $isVatPayer)
+            + $this->salesStatistics($pdo, $year, $sid)
+            + $this->purchaseStatistics($pdo, $year, $sid, $isVatPayer);
+    }
+
+    /** Obrat a meziroční srovnání sdílí původní přehled i dílčí poskytovatel prodeje. */
+    private function revenueStatistics(\PDO $pdo, int $year, int $prevYear, int $sid, bool $isVatPayer, ?array $currencyIds = null): array
+    {
+        $currencyCondition = $currencyIds === null ? '' : ' AND i.currency_id IN (' . implode(',', $currencyIds ?: [0]) . ')';
         $rev = $this->revenueCol($isVatPayer);
         // Tentýž obrat ještě jednou, přepočtený na CZK — z něj se sečte `total_czk` (viz níže).
         // Jde o DALŠÍ SLOUPCE téhož dotazu, ne druhý průchod tabulkou.
@@ -525,7 +534,7 @@ final class SummaryAction
                                             THEN i.project_id END) AS prev_year_project_count
                   FROM invoices i
                   JOIN currencies cur ON cur.id = i.currency_id
-                 WHERE i.supplier_id = ?
+                 WHERE i.supplier_id = ? {$currencyCondition}
                    -- prevYear a year jsou po sobě jdoucí → půlotevřený rozsah = YEAR IN (year, prevYear)
                    AND i.effective_tax_date >= ? AND i.effective_tax_date < ?
                    AND i.status IN ('issued', 'sent', 'reminded', 'paid')
@@ -573,11 +582,6 @@ final class SummaryAction
             ];
         }
 
-        ['issued_count_ytd' => $issuedCount, 'overdue_count' => $overdueTotalCount,
-            'overdue_per_currency' => $overduePerCurrency, 'avg_payment_days' => $avgPaymentDays,
-            'status_counts_ytd' => $statusCounts] = $this->salesStatistics($pdo, $year, $sid);
-        $purchases = $this->purchaseStatistics($pdo, $year, $sid, $isVatPayer);
-
         return [
             'per_currency'        => array_values($perCurrency),
             // Obrat napříč VŠEMI měnami, přepočtený kurzem dokladu. Per-měnové řady jsou
@@ -594,17 +598,6 @@ final class SummaryAction
                     ? round((($czkThisYear - $czkPrevYearYtd) / $czkPrevYearYtd) * 100, 1)
                     : null,
             ],
-            'issued_count_ytd'    => $issuedCount,
-            'overdue_count'       => $overdueTotalCount,
-            'overdue_per_currency'=> $overduePerCurrency,
-            'avg_payment_days'    => $avgPaymentDays,
-            'status_counts_ytd'   => $statusCounts,
-            // Přijaté faktury YTD
-            'purchase_count_ytd'  => $purchases['purchase_count_ytd'],
-            'purchase_costs_ytd'  => $purchases['purchase_costs_ytd'],
-            'purchase_unpaid_count' => $purchases['purchase_unpaid_count'],
-            'purchase_unpaid_total' => $purchases['purchase_unpaid_total'],
-            'purchase_overdue_count' => $purchases['purchase_overdue_count'],
         ];
     }
 

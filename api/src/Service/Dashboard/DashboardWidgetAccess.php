@@ -16,8 +16,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 final class DashboardWidgetAccess
 {
     public const RULES = ['base', 'invoices.read', 'purchases.read', 'clients.invoices.read',
-        'invoices.approval.read', 'documents.requests', 'actions.quick', 'actions.todo',
-        'reports.read', 'accounting.status'];
+        'invoices.approval.read', 'documents.requests', 'actions.quick',
+        'reports.read', 'portfolio.read', 'accounting.status'];
     public const SCOPES = ['company', 'vat_payer', 'self_employed', 'double_entry'];
 
     public function __construct(private readonly Connection $db, private readonly DashboardWidgetRegistry $registry, private readonly LicenseConsistency $consistency) {}
@@ -35,7 +35,7 @@ final class DashboardWidgetAccess
     public function allows(Request $request, array $widget, array $supplier): bool
     {
         if ((int) ($supplier['id'] ?? 0) <= 0 || (int) $supplier['id'] !== SupplierGuard::currentId($request)) return false;
-        if (in_array($widget['type'], ['tax.net', 'tax.advances', 'accounting.status'], true)
+        if (in_array($widget['type'], ['tax.net', 'tax.advances', 'tax.calendar', 'accounting.status'], true)
             && !$this->commercialAvailable($request)) return false;
         $scope = match ($widget['scope']) {
             'company' => true,
@@ -51,7 +51,9 @@ final class DashboardWidgetAccess
             'purchases.read' => RequestAuthorization::allows($request, 'purchase_invoices'),
             'clients.invoices.read' => RequestAuthorization::allows($request, 'invoices') && RequestAuthorization::allows($request, 'clients'),
             'invoices.approval.read' => RequestAuthorization::allows($request, 'invoices.approval'),
-            'documents.requests', 'actions.quick', 'actions.todo', 'accounting.status' => in_array(true, $this->capabilities($request, $widget['type']), true),
+            'documents.requests', 'actions.quick', 'accounting.status' => in_array(true, $this->capabilities($request, $widget['type']), true),
+            // Úplný feed i odkládání používají práva původních /api/crm/action-items rout.
+            'portfolio.read' => RequestAuthorization::allows($request, 'dashboard.portfolio'),
             'reports.read' => RequestAuthorization::allows($request, 'reports'),
             default => false,
         };
@@ -63,15 +65,7 @@ final class DashboardWidgetAccess
         $write = static fn (string $key): bool => RequestAuthorization::allows($request, $key, AccessLevel::WRITE);
         return match ($type) {
             'actions.quick' => ['invoiceCreate' => $write('invoices.create'), 'purchaseCreate' => $write('purchase_invoices.create'), 'clientCreate' => $write('clients.create')],
-            'actions.todo' => ['bankMatch' => $read('bank') && $write('bank.match'),
-                'bankRematch' => RequestAuthorization::canRematchBankStatements($request), 'recurringRun' => $read('recurring') && $write('recurring.run'),
-                'overdueReminders' => $read('invoices') && $write('invoices.reminder'), 'invoiceApprovals' => $read('invoices.approval'),
-                'purchaseReview' => $read('purchase_invoices') && $write('purchase_invoices.transition'),
-                'purchaseApprove' => $read('purchase_invoices.approve'),
-                'bankConnections' => $read('bank') && $write('settings.bank_accounts'),
-                'taxTasks' => $read('reports') && $write('reports.submit') && $this->commercialAvailable($request),
-                'accountingPeriods' => $read('accounting') && $write('accounting.periods.manage') && $this->commercialAvailable($request),
-                'payrollSubmit' => $write('payroll.submissions') && $this->payrollAvailable($request)],
+            'actions.todo' => ['dismiss' => $write('dashboard.portfolio')],
             'documents.requests' => ['clientView' => RequestAuthorization::allowsClientDocumentPortal($request),
                 'internalView' => !RequestAuthorization::isClientType($request) && $read('documents.requests')],
             'accounting.status' => ['postDocuments' => $write('accounting.periods.manage') && $this->commercialAvailable($request),
@@ -86,12 +80,6 @@ final class DashboardWidgetAccess
             && $this->consistency->allowsCommercial();
     }
 
-    private function payrollAvailable(Request $request): bool
-    {
-        return LicenseMiddleware::state($request)?->hasPayrollFeatures() === true
-            && $this->consistency->allowsPayroll();
-    }
-
     public function catalog(Request $request, string $board, ?array $supplier = null): array
     {
         $supplier ??= $this->supplier($request);
@@ -100,15 +88,10 @@ final class DashboardWidgetAccess
             if (!$this->allows($request, $widget, $supplier)) continue;
             // Pravidla a závislosti patří backendu; katalog předává vykreslovací metadata.
             $widgets[] = ['type' => $widget['type'], 'titleKey' => $widget['titleKey'],
-                'descriptionKey' => $widget['descriptionKey'], 'spans' => $widget['spans'],
-                'minSpan' => $widget['minSpan'], 'maxSpan' => $widget['maxSpan'],
-                'defaultSpan' => $widget['defaultSpan'], 'heights' => $widget['heights'], 'defaultHeight' => $widget['defaultHeight'], 'options' => (object) $widget['options'],
-                'repeatable' => $widget['repeatable'], 'capabilities' => (object) $this->capabilities($request, $widget['type'])];
+                'descriptionKey' => $widget['descriptionKey'], 'options' => (object) $widget['options'],
+                'capabilities' => (object) $this->capabilities($request, $widget['type'])];
         }
-        $default = $this->registry->defaultLayout($board);
-        // Výchozí konfigurace zůstává úplná: první vlastní uložení musí zachovat
-        // i widgety, které budou dostupné až po změně firmy nebo oprávnění.
-        return ['board' => $board, 'widgets' => $widgets, 'defaultLayout' => $default,
+        return ['board' => $board, 'widgets' => $widgets,
             'businessActivity' => ['hasDocuments' => (bool) ($supplier['has_documents'] ?? false)]];
     }
 }

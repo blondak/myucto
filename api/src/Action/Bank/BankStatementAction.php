@@ -1839,6 +1839,7 @@ final class BankStatementAction
         // zobrazení, kdo všechno byl touto platbou uhrazen.
         $matchedByTx = [];
         $matchedPurchasesByTx = [];
+        $matchedOtherItemsByTx = [];
         $txIds = array_map(static fn ($t) => (int) $t['id'], $transactions);
         if ($txIds !== []) {
             $ph = implode(',', array_fill(0, count($txIds), '?'));
@@ -1863,6 +1864,7 @@ final class BankStatementAction
             }
 
             $matchedPurchasesByTx = PurchasePaymentMatchReader::byTransactions($this->db->pdo(), $sid, $txIds);
+            $matchedOtherItemsByTx = \MyInvoice\Service\Bank\OtherItemPaymentMatchReader::byTransactions($this->db->pdo(), $sid, $txIds);
         }
 
         // Automatizace: stav zaúčtování per transakce (jen double_entry, §3.7 #6).
@@ -1886,6 +1888,7 @@ final class BankStatementAction
             $t['matched_vendor_name'] = isset($t['matched_vendor_name']) && $t['matched_vendor_name'] !== null ? (string) $t['matched_vendor_name'] : null;
             $t['matched_invoices'] = $matchedByTx[$t['id']] ?? [];
             $t['matched_purchase_invoices'] = $matchedPurchasesByTx[$t['id']] ?? [];
+            $t['matched_other_items'] = $matchedOtherItemsByTx[$t['id']] ?? [];
             $t['posting'] = $postingByTx[$t['id']] ?? null;
             // Stav zpracování po importu nese výpis (`processing_failed`), ne pohyb.
             unset($t['processing_pending_at'], $t['processing_error']);
@@ -2381,7 +2384,7 @@ final class BankStatementAction
 
         // Efektivní měna transakce = měna transakce, jinak měna výpisu (= měna účtu), jinak CZK.
         $stmt = $pdo->prepare(
-            "SELECT bt.amount, bt.posted_at,
+            "SELECT bt.amount, bt.posted_at, bt.card_last4,
                     UPPER(COALESCE(NULLIF(bt.currency,''), NULLIF(bs.currency,''), 'CZK')) AS ccy
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
@@ -2408,14 +2411,14 @@ final class BankStatementAction
             return Json::ok($response, ['candidates' => $candidates, 'fallback' => false]);
         }
 
-        $candidates = $this->searchMatchCandidates($sid, $posted, $txAmount, $txCcy, self::CANDIDATE_DAY_WINDOW, false);
+        $candidates = $this->searchMatchCandidates($sid, $posted, $txAmount, $txCcy, self::CANDIDATE_DAY_WINDOW, false, ($tx['card_last4'] ?? null) !== null);
         if (RequestAuthorization::isClientType($request)) {
             $candidates = array_values(array_filter($candidates, static fn (array $candidate): bool => ClientBankAccess::canRead($request, (string) $candidate['type'])));
         }
         $fallback = false;
         if ($candidates === []) {
             $fallback = true;
-            $candidates = $this->searchMatchCandidates($sid, $posted, $txAmount, $txCcy, self::CANDIDATE_FALLBACK_DAY_WINDOW, true);
+            $candidates = $this->searchMatchCandidates($sid, $posted, $txAmount, $txCcy, self::CANDIDATE_FALLBACK_DAY_WINDOW, true, ($tx['card_last4'] ?? null) !== null);
         }
 
         if (RequestAuthorization::isClientType($request)) {
@@ -2429,7 +2432,7 @@ final class BankStatementAction
      *   converted_amount:?float,converted_currency:?string,issue_date:string,due_date:string,
      *   party:?string,paid:bool,currency_mismatch:bool}>
      */
-    private function searchMatchCandidates(int $sid, string $posted, float $txAmount, string $txCcy, int $win, bool $allowRawAmountFallback): array
+    private function searchMatchCandidates(int $sid, string $posted, float $txAmount, string $txCcy, int $win, bool $allowRawAmountFallback, bool $card = false): array
     {
         $pdo = $this->db->pdo();
 
@@ -2489,7 +2492,7 @@ final class BankStatementAction
             } elseif ($txCcy === $local) {
                 // Cizoměnová faktura placená v CZK → přepočet kurzem faktury (CZK = částka × kurz).
                 $expected = FxPaymentSettlement::expectedLocalAmount($invMag, $rate);
-                $tol = FxPaymentSettlement::matchTolerance($expected, $absTol);
+                $tol = FxPaymentSettlement::matchTolerance($expected, $absTol, $card);
                 $converted = $expected;
             } elseif ($allowRawAmountFallback) {
                 // Fallback (nic nesedí přesně): porovnej syrovou magnitudu BEZ FX převodu —
@@ -4025,7 +4028,8 @@ final class BankStatementAction
                                   WHERE oi.supplier_id = p.supplier_id AND oi.doc_type = 'purchase_invoice' AND oi.doc_id = p.id), 0)
                         + COALESCE((SELECT SUM(s.amount) FROM invoice_settlements s
                                     WHERE s.supplier_id = p.supplier_id AND s.doc_type = 'purchase_invoice'
-                                      AND s.doc_id = p.id AND s.status = 'confirmed'), 0) AS offset_paid,
+                                      AND s.doc_id = p.id AND s.status = 'confirmed'), 0)
+                        + p.settled_outside_amount AS offset_paid,
                         (SELECT COUNT(*) FROM cash_documents cd
                           WHERE cd.supplier_id = p.supplier_id AND cd.purchase_invoice_id = p.id
                             AND cd.status = 'posted') AS cash_count,
@@ -4244,7 +4248,7 @@ final class BankStatementAction
         }
         // Load transaction for amount + posted_at
         $tx = $pdo->prepare(
-            'SELECT bt.posted_at, bt.amount, bt.statement_id,
+            'SELECT bt.posted_at, bt.amount, bt.statement_id, bt.card_last4,
                     COALESCE(NULLIF(bt.currency, ""), NULLIF(bs.currency, "")) AS currency
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
@@ -4368,7 +4372,14 @@ final class BankStatementAction
                 // i automatické párování). Menší platba nechá doklad částečně uhrazený a UI
                 // nabídne rozdíl vyrovnat zápočtem proti účtu. Sloučená úhrada
                 // (manualMatchPurchaseSplit) nesoulad odmítá celou, proto ji to netýká.
-                $settlesFully = FxPaymentSettlement::settlesRemaining($absAmount, $remaining, $docCurrency, $docRate, $txCurrency);
+                $settlesFully = FxPaymentSettlement::settlesRemaining(
+                    $absAmount,
+                    $remaining,
+                    $docCurrency,
+                    $docRate,
+                    $txCurrency,
+                    ($txRow['card_last4'] ?? null) !== null,
+                );
             }
 
             // Mark purchase paid — jen pokud ještě není (ručně zaplacenou jen navážeme,
@@ -4606,6 +4617,11 @@ final class BankStatementAction
             if (RequestAuthorization::isClientType($request)) $this->assertUnallocated($tx);
             if (RequestAuthorization::isClientType($request) && $tx['match_status'] === 'unmatched') {
                 $this->clientAccess->assertAvailable($request, $txId);
+            }
+            $allocated = $pdo->prepare('SELECT 1 FROM other_item_allocations WHERE bank_transaction_id = ? AND reversed_on IS NULL LIMIT 1');
+            $allocated->execute([$txId]);
+            if ($allocated->fetchColumn() !== false) {
+                throw new \DomainException('Pohyb je přiřazený ostatní položce. Nejprve zrušte přiřazení.', 409);
             }
             $note = array_key_exists('note', $body) ? ($note !== null ? trim($note) : null) : $tx['ignore_note'];
             $note = $note === '' ? null : $note;

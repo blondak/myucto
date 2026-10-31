@@ -59,21 +59,10 @@ final class DashboardWidgetAccessTest extends TestCase
     {
         self::assertFalse($this->allowed($this->request(['invoices.create' => 1]), 'actions.quick'));
         self::assertTrue($this->allowed($this->request(['invoices.create' => 2]), 'actions.quick'));
-        self::assertFalse($this->allowed($this->request(['bank.match' => 2]), 'actions.todo'));
-        self::assertTrue($this->allowed($this->request(['bank' => 1, 'bank.match' => 2]), 'actions.todo'));
-        self::assertFalse($this->allowed($this->request(['recurring' => 1, 'recurring.run' => 1]), 'actions.todo'));
-        self::assertTrue($this->allowed($this->request(['recurring' => 1, 'recurring.run' => 2]), 'actions.todo'));
-        self::assertFalse($this->allowed($this->request(['dashboard' => 2]), 'actions.quick'));
-    }
-
-    public function testPurchaseApprovalsKeepReadOnlyAccessAndClientBankMatchingDoesNotGrantRematch(): void
-    {
-        $approver = $this->request(['purchase_invoices.approve' => 1]);
-        self::assertTrue($this->access->capabilities($approver, 'actions.todo')['purchaseApprove']);
-        $client = $this->request(['bank' => 1, 'bank.match' => 2], 'client');
-        self::assertTrue($this->access->capabilities($client, 'actions.todo')['bankMatch']);
-        self::assertFalse($this->access->capabilities($client, 'actions.todo')['bankRematch']);
-        self::assertTrue($this->access->capabilities($this->request(['bank' => 1, 'bank.match' => 2]), 'actions.todo')['bankRematch']);
+        self::assertFalse($this->allowed($this->request(['bank' => 1, 'bank.match' => 2]), 'actions.todo'));
+        self::assertTrue($this->allowed($this->request(['dashboard.portfolio' => 1]), 'actions.todo'));
+        self::assertFalse($this->access->capabilities($this->request(['dashboard.portfolio' => 1]), 'actions.todo')['dismiss']);
+        self::assertTrue($this->access->capabilities($this->request(['dashboard.portfolio' => 2]), 'actions.todo')['dismiss']);
     }
 
     public function testDocumentViewsStaySeparatedByClientPolicy(): void
@@ -84,7 +73,7 @@ final class DashboardWidgetAccessTest extends TestCase
         self::assertFalse($this->allowed($this->request(['documents.submit' => 1]), 'documents.requests'));
     }
 
-    public function testCatalogFiltersDefinitionsButPreservesUnavailableDefaultInstances(): void
+    public function testCatalogFiltersDefinitionsWithoutLayoutOrPersistence(): void
     {
         $statement = $this->createStub(\PDOStatement::class);
         $statement->method('fetch')->willReturn(self::SUPPLIER);
@@ -98,13 +87,20 @@ final class DashboardWidgetAccessTest extends TestCase
         self::assertContains('business.kpi', $available);
         self::assertNotContains('sales.summary', $available);
         self::assertNotContains('accounting.status', $available);
-        self::assertContains('sales.summary', array_column($catalog['defaultLayout']['widgets'], 'type'));
-        self::assertCount(32, $catalog['defaultLayout']['widgets']);
         self::assertNotNull($this->registry->get('accounting.status'));
-        self::assertCount(24, $this->registry->all());
+        self::assertCount(23, $this->registry->all());
         self::assertSame('portal', $catalog['board']);
+        self::assertArrayNotHasKey('defaultLayout', $catalog);
         self::assertIsObject($catalog['widgets'][0]['options']);
-        self::assertArrayHasKey('heights', $catalog['widgets'][0]);
+    }
+
+    public function testCalendarWithoutCommercialLicenseIsNotAdvertisedOrReadable(): void
+    {
+        $request = $this->request(['reports' => 1]);
+        self::assertFalse($this->allowed($request, 'tax.calendar'));
+        self::assertFalse($this->allowed($request, 'tax.advances'));
+        $catalog = $this->access->catalog($request, 'portal', self::SUPPLIER);
+        self::assertNotContains('tax.calendar', array_column($catalog['widgets'], 'type'));
     }
 
     private function allowed(Request $request, string $type, array $supplier = self::SUPPLIER): bool

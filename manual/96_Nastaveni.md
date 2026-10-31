@@ -126,7 +126,13 @@ její deaktivace nebo odebrání firmy se projeví bez nového přihlášení a 
 
 **Správce instance** zajišťuje technický provoz bez přístupu k firemním agendám. Aktivní účet zabírá uživatelské
 licenční místo, mzdové místo nečerpá. Přihlašuje se běžným účtem, může používat vlastní MFA a po přihlášení otevře samostatnou
-**Správu instance**. Superadmin do ní může vstoupit také z menu Systém.
+**Správu instance** mimo běžné pracovní panely a firemní menu aplikace. Horní lišta vypadá stejně jako v aplikaci, menu
+ale obsahuje jen **Přehled** a **Profil** a chybí v ní přepínač firem. Téma, jazyk a odhlášení jsou v uživatelském menu
+vpravo nahoře, na mobilu ve vysouvacím menu.
+
+Superadmin otevírá stejnou správu tlačítkem **Správa instance** na stránce **Systém → Diagnostika** jako běžnou stránku
+v pracovním panelu. Přímý odkaz na technickou plochu ho přesměruje do této integrované správy. Na spravované instalaci se
+o provoz stará provozovatel: Správa instance tam není dostupná a tlačítko se nezobrazí.
 
 **Založení a rozsah:**
 
@@ -280,7 +286,7 @@ Všechny tři volby (sloupce, hustota, řazení) se ukládají **automaticky**, 
 ## 96.9 Krok za krokem: automatické účtování
 
 V sekci **Daňové nastavení** (jen u firem v režimu podvojné účetnictví; u daňové evidence se doklady neúčtují a blok se
-vůbec nezobrazí) jsou dva přepínače, ve výchozím stavu vypnuté:
+vůbec nezobrazí) jsou dva přepínače. Nová právnická osoba je má od založení zapnuté, stejně jako firma po dokončení průvodce aktivací účetnictví:
 
 <!-- cols: 40 60 -->
 | Přepínač | Co dělá |
@@ -641,7 +647,7 @@ a odmítal by legitimní kódy. Text, který nezačíná číslicí, se neulož�
 
 Vlastní kód přidávejte pro režim, který vestavěné nepokrývají, ne pro překlopení existujícího na jiný řádek. Vestavěné
 varianty už pokrývají tuzemský přenos podle režimu (§ 92c odpad, § 92d nemovitost, § 92e stavební práce), zvláštní režimy
-§ 89 a § 90 i rozlišení vývozu zboží od služby do 3. země. Pokud přesto namapujete kód na jiný řádek přiznání, respektuje
+§ 89 (přirážka `1c`/`2c`, zbytek ceny na ř. 26 `26c`) a § 90 i rozlišení vývozu zboží od služby do 3. země. Pokud přesto namapujete kód na jiný řádek přiznání, respektuje
 se to; přemapování podle skutečné sazby se spouští jen při rozporu sazby kódu se sazbou řádku, ne proti vašemu mapování.
 
 ### 96.16.3 Státní svátky
@@ -838,10 +844,15 @@ a přepínač **Ranní přehled e-mailem** připravuje souhrn pro automatizačn�
 
 Podrobné nastavení je rozdělené do skupin:
 
-- **Platby a převody**: spárované bankovní platby, vlastní převody a jejich detektor,
+- **Platby a převody**: řádky **Vystavené faktury** a **Přijaté faktury**, spárované bankovní platby, vlastní převody a jejich detektor,
 - **Odvody**: jednotlivé druhy daní, sociální a zdravotní pojištění a rozpoznávání odvodů,
 - **Banka**: poplatky, úroky, vlastní pravidla a naučené kontace,
 - **AI**: návrhy bankovních plateb a dokladů; úroveň Automaticky je zde technicky zakázaná.
+
+Řádky **Vystavené faktury** a **Přijaté faktury** odpovídají přepínačům automatického účtování faktur v Daňovém
+nastavení ([§ 96.9](#969-krok-za-krokem-automaticke-uctovani)). Dokud řádek v tomto boxu nezměníte, řídí se zaúčtování
+faktur přepínačem. Úroveň uložená u řádku má potom přednost a faktura se automaticky zaúčtuje jen na úrovni
+**Automaticky**.
 
 Výsledná úroveň je vždy nejvýše tak automatická, jak dovoluje preset a konkrétní řádek. Nastavení **Vypnuto** detektor
 nebo typ operace nepustí, **Jen návrhy** vyžaduje potvrzení a **Automaticky** pouze dovoluje motoru pokračovat

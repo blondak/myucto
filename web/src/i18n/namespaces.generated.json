@@ -11,7 +11,6 @@
     "eet",
     "favorites",
     "hosting",
-    "instance_admin",
     "instance_alert",
     "invoice",
     "jointAllocations",
@@ -69,7 +68,6 @@
     "creditas_bank",
     "cron_jobs",
     "dashboard",
-    "dashboardBoard",
     "dashboardWidgets",
     "databox",
     "diagnostics",
@@ -90,12 +88,14 @@
     "gopay",
     "group_stats",
     "imports",
+    "instance_admin",
     "instance_export",
     "integrations",
     "internal_documents",
     "invoice_default_note",
     "kb_plus",
     "linked_documents",
+    "list_nav",
     "lock",
     "logbook",
     "logbook_fuel",
@@ -177,6 +177,9 @@
     "workReportTracking"
   ],
   "routes": {
+    "instance-admin": [
+      "instance_admin"
+    ],
     "instance-admin-profile": [
       "domain_login",
       "mfa_setup",
@@ -223,17 +226,19 @@
       "errors"
     ],
     "home": [
+      "activation",
+      "automation",
+      "bank",
       "dashboard",
-      "dashboardBoard",
-      "portal",
-      "reports"
+      "errors",
+      "taxReturn",
+      "time_billing"
     ],
     "portal-mcp": [
-      "client_mcp"
+      "client_mcp",
+      "mcp_server_page"
     ],
     "portal": [
-      "dashboard",
-      "dashboardBoard",
       "portal",
       "reports"
     ],
@@ -341,6 +346,7 @@
       "dimensions",
       "documents",
       "linked_documents",
+      "list_nav",
       "lock",
       "payment_method",
       "payment_order",
@@ -509,6 +515,7 @@
       "dimensions",
       "documents",
       "linked_documents",
+      "list_nav",
       "lock",
       "payment_method",
       "purchase_invoice",
@@ -690,6 +697,7 @@
       "internal_documents"
     ],
     "accounting-ai-assistant": [
+      "internal_documents",
       "other_items"
     ],
     "accounting-setup-assistant": [
@@ -1075,7 +1083,11 @@
       "cron_jobs",
       "diagnostics"
     ],
+    "admin-instance": [
+      "instance_admin"
+    ],
     "admin-users": [
+      "instance_admin",
       "roles",
       "settings",
       "users"
@@ -1170,6 +1182,7 @@
       "activation",
       "automation",
       "bank",
+      "bank_template_admin",
       "dimensions",
       "purchase_invoice",
       "template_tools",
@@ -1313,7 +1326,8 @@
       "time_billing"
     ],
     "admin-diagnostics": [
-      "diagnostics"
+      "diagnostics",
+      "instance_admin"
     ],
     "admin-support": [
       "support_page"
@@ -1333,6 +1347,7 @@
       "api_tokens"
     ],
     "profile-mcp-server": [
+      "client_mcp",
       "mcp_server_page"
     ]
   }

@@ -11,7 +11,6 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Auth\ApiTokenService;
 use MyInvoice\Service\Auth\DatabaseSecurityClock;
 use MyInvoice\Service\Auth\SessionManager;
-use MyInvoice\Service\Dashboard\DashboardWidgetRegistry;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
@@ -89,15 +88,11 @@ final class DashboardWidgetHttpTest extends TestCase
         $catalog = $this->request('GET', '/api/dashboard-widgets/catalog?board=portal', $session);
         self::assertSame(200, $catalog->getStatusCode(), (string) $catalog->getBody());
         $body = $this->json($catalog);
-        foreach ($body['widgets'] as $definition) {
-            self::assertSame(range($definition['minSpan'], $definition['maxSpan']), $definition['spans'], $definition['type']);
-        }
         $available = array_column($body['widgets'], 'type');
         self::assertContains('business.kpi', $available);
         self::assertNotContains('sales.summary', $available);
         self::assertNotContains('clients.top', $available);
         self::assertNotContains('actions.quick', $available);
-        self::assertContains('sales.summary', array_column($body['defaultLayout']['widgets'], 'type'), 'Úplný výchozí stav musí uchovat dočasně skryté widgety.');
 
         $query = $this->request('POST', '/api/dashboard-widgets/query', $session, ['board' => 'portal', 'widgets' => [
             $this->widget('base', 'business.kpi'), $this->widget('sales', 'sales.summary'), $this->widget('contacts', 'clients.top'),
@@ -107,51 +102,10 @@ final class DashboardWidgetHttpTest extends TestCase
         self::assertContains($data['base']['status'], ['ok', 'empty']);
         self::assertSame(['status' => 'unavailable', 'data' => null], $data['sales']);
         self::assertSame(['status' => 'unavailable', 'data' => null], $data['contacts']);
-        $layout = $this->layout();
-        $layout['widgets'][0]['span'] = 5;
-        $saved = $this->request('PUT', '/api/user/dashboard-layouts/portal', $session, ['layout' => $layout, 'revision' => '0']);
-        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
-        self::assertSame(5, $this->json($saved)['layout']['widgets'][0]['span']);
-        self::assertSame($this->json($saved), $this->json($this->request('GET', '/api/user/dashboard-layouts/portal', $session)));
-        $layout['widgets'][0]['span'] = 13;
-        $invalid = $this->request('PUT', '/api/user/dashboard-layouts/portal', $session, ['layout' => $layout, 'revision' => $this->json($saved)['revision']]);
-        self::assertSame(422, $invalid->getStatusCode(), (string) $invalid->getBody());
-        self::assertSame($this->json($saved), $this->json($this->request('GET', '/api/user/dashboard-layouts/portal', $session)));
         self::assertSame(403, $this->request('GET', '/api/dashboard-widgets/catalog?board=home', $session)->getStatusCode());
-        self::assertSame(403, $this->request('PUT', '/api/user/dashboard-layouts/home', $session, ['layout' => $this->layout(), 'revision' => '0'])->getStatusCode());
-    }
-
-    public function testReadonlyOwnLayoutRoundTripCsrfConflictResetAndOwnerIsolation(): void
-    {
-        $reader = $this->user($this->readonlyRole, 'readonly');
-        $other = $this->user($this->readonlyRole, 'readonly');
-        $this->assign($reader, $this->suppliers[0]);
-        $this->assign($other, $this->suppliers[0]);
-        $session = $this->session($reader);
-        $otherSession = $this->session($other);
-        $initial = $this->request('GET', '/api/user/dashboard-layouts/home', $session);
-        self::assertSame(200, $initial->getStatusCode(), (string) $initial->getBody());
-        self::assertSame(['layout' => null, 'revision' => '0'], $this->json($initial));
-        $body = ['layout' => $this->layout(), 'revision' => '0'];
-        $noCsrf = $this->request('PUT', '/api/user/dashboard-layouts/home', $session, $body, csrf: false);
+        $noCsrf = $this->request('POST', '/api/dashboard-widgets/query', $session, ['board' => 'portal', 'widgets' => []], csrf: false);
         self::assertSame(403, $noCsrf->getStatusCode());
         self::assertSame('csrf_failed', $this->json($noCsrf)['error']['code']);
-        $put = $this->request('PUT', '/api/user/dashboard-layouts/home', $session, $body);
-        self::assertSame(200, $put->getStatusCode(), (string) $put->getBody());
-        $saved = $this->json($put);
-        self::assertSame('business.kpi', $saved['layout']['widgets'][0]['type']);
-        self::assertSame($saved, $this->json($this->request('GET', '/api/user/dashboard-layouts/home', $session)));
-        self::assertSame('0', $this->json($this->request('GET', '/api/user/dashboard-layouts/home', $otherSession))['revision']);
-        self::assertSame('0', $this->json($this->request('GET', '/api/user/dashboard-layouts/portal', $session))['revision']);
-        self::assertSame(422, $this->request('PUT', '/api/user/dashboard-layouts/home', $session, $body + ['user_id' => $other])->getStatusCode());
-        self::assertSame(409, $this->request('PUT', '/api/user/dashboard-layouts/home', $session, $body)->getStatusCode());
-        $reset = $this->request('DELETE', '/api/user/dashboard-layouts/home', $session, ['revision' => $saved['revision']]);
-        self::assertSame(200, $reset->getStatusCode(), (string) $reset->getBody());
-        $deleted = $this->json($reset);
-        self::assertNull($deleted['layout']);
-        self::assertNotSame('0', $deleted['revision']);
-        self::assertSame($deleted, $this->json($this->request('DELETE', '/api/user/dashboard-layouts/home', $session, ['revision' => $deleted['revision']])));
-        self::assertSame(409, $this->request('PUT', '/api/user/dashboard-layouts/home', $session, $body)->getStatusCode());
     }
 
     public function testCompanyOverrideRoleIsResolvedForEveryCatalogAndQuery(): void
@@ -185,13 +139,11 @@ final class DashboardWidgetHttpTest extends TestCase
         self::assertSame(200, $alias->getStatusCode(), (string) $alias->getBody());
         self::assertSame('1', $alias->getHeaderLine('X-API-Version'));
         self::assertSame('portal', $this->json($alias)['board']);
-        self::assertSame(['layout' => null, 'revision' => '0'], $this->json($this->request('GET', '/api/v1/user/dashboard-layouts/home', $session)));
         $tokens = new ApiTokenService($this->db, new RedisFactory($this->config));
         $token = $tokens->generate($user, $this->suppliers[0], 'Syntetický HTTP test', 'read_write');
         foreach (['/api', '/api/v1'] as $prefix) {
-            foreach ([['GET', '/dashboard-widgets/catalog?board=portal', null], ['POST', '/dashboard-widgets/query', ['board' => 'portal', 'widgets' => []]],
-                ['GET', '/user/dashboard-layouts/home', null], ['PUT', '/user/dashboard-layouts/home', ['layout' => $this->layout(), 'revision' => '0']],
-                ['DELETE', '/user/dashboard-layouts/home', ['revision' => '0']]] as [$method, $path, $body]) {
+            foreach ([['GET', '/dashboard-widgets/catalog?board=portal', null],
+                ['POST', '/dashboard-widgets/query', ['board' => 'portal', 'widgets' => []]]] as [$method, $path, $body]) {
                 $response = $this->request($method, $prefix . $path, body: $body, token: $token['plaintext']);
                 self::assertSame(403, $response->getStatusCode(), $method . ' ' . $prefix . $path . ': ' . (string) $response->getBody());
                 self::assertSame('token_endpoint_forbidden', $this->json($response)['error']['code']);
@@ -288,13 +240,7 @@ final class DashboardWidgetHttpTest extends TestCase
 
     private function widget(string $id, string $type): array
     {
-        $definition = (new DashboardWidgetRegistry())->get($type);
-        return ['id' => $id, 'type' => $type, 'span' => $definition['defaultSpan'], 'options' => (object) []];
-    }
-
-    private function layout(): array
-    {
-        return ['schemaVersion' => 1, 'presetVersion' => 1, 'widgets' => [$this->widget('kpi', 'business.kpi')]];
+        return ['id' => $id, 'type' => $type, 'options' => (object) []];
     }
 
     private function json(ResponseInterface $response): array

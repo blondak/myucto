@@ -18,17 +18,7 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 
 final class DashboardBoardAuthorizationTest extends TestCase
 {
-    public function testStatementRematchingRemainsInternalAndRequiresBankReadAndMatchWrite(): void
-    {
-        foreach (['staff', 'client'] as $type) {
-            $request = $this->request(new EffectiveRole(14, 'Párování', $type, true, ['bank' => 1, 'bank.match' => 2]));
-            self::assertSame($type === 'staff', RequestAuthorization::canRematchBankStatements($request));
-            self::assertFalse(RequestAuthorization::canRematchBankStatements($this->request(new EffectiveRole(14, 'Bez čtení', $type, true, ['bank.match' => 2]))));
-            self::assertFalse(RequestAuthorization::canRematchBankStatements($this->request(new EffectiveRole(14, 'Bez akce', $type, true, ['bank' => 1]))));
-        }
-    }
-
-    public function testPortalReaderCanCustomizeWithoutBusinessWriteAndHomeRequiresItsOwnPermission(): void
+    public function testPortalReaderCanQueryWithoutBusinessWriteAndHomeRequiresItsOwnPermission(): void
     {
         $reader = $this->request(new EffectiveRole(9, 'Čtenář', 'staff', true, ['profile' => 1]));
         self::assertTrue(RequestAuthorization::canAccessDashboardBoard($reader, 'portal'));
@@ -63,16 +53,13 @@ final class DashboardBoardAuthorizationTest extends TestCase
         self::assertFalse(RequestAuthorization::canAccessDashboardBoard($request, 'unknown'));
     }
 
-    public function testNarrowReadRoutesResolveEffectiveCompanyRoleIncludingLayoutWrites(): void
+    public function testNarrowReadRoutesResolveEffectiveCompanyRole(): void
     {
         $map = new RoutePermissionMap();
         $domain = new ClientRoutePolicy();
         foreach ([
             ['GET', '/api/dashboard-widgets/catalog'],
             ['POST', '/api/dashboard-widgets/query'],
-            ['GET', '/api/user/dashboard-layouts/portal'],
-            ['PUT', '/api/user/dashboard-layouts/portal'],
-            ['DELETE', '/api/user/dashboard-layouts/portal'],
         ] as [$method, $path]) {
             $route = $map->match($method, $path);
             self::assertNotNull($route, $path);

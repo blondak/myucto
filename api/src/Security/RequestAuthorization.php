@@ -36,14 +36,6 @@ final class RequestAuthorization
         };
     }
 
-    /** Celý výpis přepárují interní role; klient může párovat jen jednotlivé pohyby. */
-    public static function canRematchBankStatements(Request $request): bool
-    {
-        return !self::isClientType($request)
-            && self::allows($request, 'bank')
-            && self::allows($request, 'bank.match', AccessLevel::WRITE);
-    }
-
     /**
      * Je požadavek z přihlášené browserové relace?
      *
@@ -339,6 +331,16 @@ final class RequestAuthorization
             && self::allows($request, 'invoices.create', AccessLevel::WRITE)
             && self::allows($request, 'invoices.issue', AccessLevel::WRITE)
             && self::allows($request, 'invoices.mark_paid', AccessLevel::WRITE);
+    }
+
+    /**
+     * Založení interního dokladu (koncept). Stejné právo vyžaduje route
+     * `POST /api/accounting/internal-documents` v RoutePermissionMap; AI asistent podle
+     * něj rozhoduje, zda smí interní doklad vůbec navrhnout.
+     */
+    public static function canCreateInternalDocument(Request $request): bool
+    {
+        return self::allows($request, 'accounting.journal.write', AccessLevel::WRITE);
     }
 
     /**

@@ -402,6 +402,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'admin/activity-log',     name: 'activity-log',   component: () => import('@/pages/admin/ActivityLog.vue'), meta: {  } },
       { path: 'admin/sent-emails',      name: 'sent-emails',    component: () => import('@/pages/admin/SentEmails.vue'), meta: {  } },
       { path: 'admin/cron-jobs',        name: 'cron-jobs',      component: () => import('@/pages/admin/CronJobs.vue'),    meta: {  } },
+      { path: 'admin/instance', name: 'admin-instance', component: () => import('@/pages/admin/InstanceAdmin.vue') },
       { path: 'admin/users',            name: 'admin-users',    component: () => import('@/pages/admin/Users.vue'),       meta: {  } },
       { path: 'admin/roles',            name: 'admin-roles',    component: () => import('@/pages/admin/Roles.vue'),       meta: { superadminOnly: true } },
       { path: 'admin/settings',         name: 'admin-settings', component: () => import('@/pages/admin/Settings.vue'),    meta: {  } },
@@ -457,8 +458,8 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'admin/bank-rule-templates', name: 'admin-bank-rule-templates', component: () => import('@/pages/admin/BankRuleTemplates.vue'), meta: { requiresDoubleEntry: true } },
       {
         path: 'templates', name: 'templates', component: () => import('@/pages/TemplatesPage.vue'),
-        // Bookmark na bývalou záložku katalogu šablon vede na jeho samostatnou stránku.
-        beforeEnter: to => (to.query.section === 'bank' ? { path: '/admin/bank-rule-templates' } : true),
+        // Bookmark na bývalou záložku katalogu šablon (`section=bank`) vede na jeho záložku.
+        beforeEnter: to => (to.query.section === 'bank' ? { path: '/templates', query: { section: 'rule-templates' } } : true),
       },
       // Nástroje (reorg menu, audit 2026-07) — archivy, kurzový režim, repo sazba,
       // předkontace a účetní období jako záložky jedné stránky (?section=…). Export/Import

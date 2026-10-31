@@ -16,7 +16,6 @@ use MyInvoice\Service\Crm\CrmAggregationService;
 use MyInvoice\Service\Dashboard\DashboardWidgetAccess;
 use MyInvoice\Service\Dashboard\DashboardWidgetDataService;
 use MyInvoice\Service\Dashboard\DashboardWidgetRegistry;
-use MyInvoice\Service\Invoice\OverduePolicy;
 use MyInvoice\Service\Report\DphPriznaniBuilder;
 use MyInvoice\Service\Tax\Return\TaxAdvanceScheduleService;
 use PHPUnit\Framework\TestCase;
@@ -66,21 +65,14 @@ final class DashboardWidgetDataServiceTest extends TestCase
         self::assertCount(1, $this->queries);
     }
 
-    public function testDividerDoesNotRunAnyDataProvider(): void
-    {
-        $result = (array) $this->service()->query($this->request([]), [$this->widget('space', 'layout.divider')])['widgets'];
-        self::assertSame(['status' => 'ok', 'data' => ['layout' => true]], $result['space']);
-        self::assertCount(1, $this->queries, 'Pouze kontext firmy, žádná agregace ani seznam.');
-    }
-
-    public function testWeeklyBusinessForecastNeverLoadsInternalOtherItems(): void
+    public function testWeeklyBusinessForecastIncludesOtherItemsLikePortal(): void
     {
         $result = (array) $this->service()->query($this->request([]), [$this->widget('forecast', 'cashflow.weekly')])['widgets'];
         self::assertSame('ok', $result['forecast']['status']);
-        self::assertSame(150.0, $result['forecast']['data']['total_in']);
+        self::assertSame(170.0, $result['forecast']['data']['total_in']);
         self::assertSame(50.0, $result['forecast']['data']['total_out']);
-        self::assertSame(100.0, $result['forecast']['data']['total_net']);
-        self::assertCount(3, $this->queries, 'Kontext a dvě fakturační strany; jiné položky ani mzdy se nečtou.');
+        self::assertSame(120.0, $result['forecast']['data']['total_net']);
+        self::assertCount(5, $this->queries, 'Kontext, dvě fakturační strany, ostatní položky a jejich splátky jako v portálu.');
     }
 
     public function testCalendarRegistrationLinkRequiresItsActualTargetPermission(): void
@@ -97,7 +89,7 @@ final class DashboardWidgetDataServiceTest extends TestCase
 
     public function testKpiWhitelistRemovesNamesAndDetailedAmounts(): void
     {
-        $row = DashboardWidgetDataService::kpiRow(['period' => '2026-10', 'currency' => 'EUR', 'revenue' => 30,
+        $row = \MyInvoice\Service\Portal\PortalSummaryService::kpiRow(['period' => '2026-10', 'currency' => 'EUR', 'revenue' => 30,
             'costs' => 10, 'profit' => 20, 'revenue_czk' => 750, 'costs_czk' => 250, 'profit_czk' => 500,
             'company_name' => 'Syntetická protistrana', 'invoice_number' => 'TEST-42', 'vat_output' => 7]);
         self::assertSame(30.0, $row['invoiced']);
@@ -110,10 +102,10 @@ final class DashboardWidgetDataServiceTest extends TestCase
     public function testPeriodsKeepCalendarBoundariesAndLeapDayConventionOfPortal(): void
     {
         $now = new \DateTimeImmutable('2024-02-29');
-        self::assertSame(['2024-02-01', '2024-03-01', '2024-02'], DashboardWidgetDataService::periodRange('current_month', $now));
-        self::assertSame(['2024-01-01', '2024-02-01', '2024-01'], DashboardWidgetDataService::periodRange('last_month', $now));
-        self::assertSame(['2023-03-01', '2024-03-01', null], DashboardWidgetDataService::periodRange('last_12m', $now));
-        self::assertSame(['2023-01-01', '2023-03-01', null], DashboardWidgetDataService::periodRange('prev_year_ytd', $now));
+        self::assertSame(['2024-02-01', '2024-03-01', '2024-02'], CrmAggregationService::overviewPeriodRange('current_month', $now));
+        self::assertSame(['2024-01-01', '2024-02-01', '2024-01'], CrmAggregationService::overviewPeriodRange('last_month', $now));
+        self::assertSame(['2023-03-01', '2024-03-01', null], CrmAggregationService::overviewPeriodRange('last_12m', $now));
+        self::assertSame(['2023-01-01', '2023-03-01', null], CrmAggregationService::overviewPeriodRange('prev_year_ytd', $now));
     }
 
     private function widget(string $id, string $type, array $options = []): array
@@ -141,6 +133,10 @@ final class DashboardWidgetDataServiceTest extends TestCase
                 $stmt->method('fetch')->willReturn(['id' => $this->supplierId, 'is_vat_payer' => 0, 'taxpayer_type' => 'fo', 'accounting_mode' => 'double_entry']);
             } elseif (str_starts_with($sql, 'SELECT is_vat_payer')) {
                 $stmt->method('fetchColumn')->willReturn(0);
+            } elseif (str_starts_with($sql, 'WITH planned AS')) {
+                $stmt->method('fetchAll')->willReturn([]);
+            } elseif (str_contains($sql, 'FROM other_items')) {
+                $stmt->method('fetchAll')->willReturn([['id' => 1, 'currency' => 'CZK', 'status' => 'draft', 'side' => 'receivable', 'due_on' => date('Y-m-d'), 'remaining' => 20]]);
             } elseif (str_contains($sql, 'GROUP BY bucket')) {
                 $stmt->method('fetchAll')->willReturn([['bucket' => 0, 'amt' => str_contains($sql, 'FROM invoices i') ? 150 : 50]]);
             } elseif (str_contains($sql, 'FROM invoices i') && str_contains($sql, 'GROUP BY cur.code')) {
@@ -158,8 +154,12 @@ final class DashboardWidgetDataServiceTest extends TestCase
         $registry = new DashboardWidgetRegistry();
         // Tyto závislosti se při testovaných widgetech nesmějí vůbec volat.
         $unreachable = static fn (string $class): object => (new \ReflectionClass($class))->newInstanceWithoutConstructor();
-        return new DashboardWidgetDataService($db, $registry, new DashboardWidgetAccess($db, $registry, new \MyInvoice\Service\License\LicenseConsistency($db, new Config([]), \MyInvoice\Infrastructure\Cache\EntityCache::disabled(), new \Psr\Log\NullLogger())), new CrmAggregationService($db),
-            $unreachable(SummaryAction::class), new DocumentRequestRepository($db), $unreachable(DphPriznaniBuilder::class),
-            $unreachable(TaxAction::class), $unreachable(TaxAdvanceScheduleService::class), new OverduePolicy(new Config([])));
+        $crm = new CrmAggregationService($db);
+        $documents = new DocumentRequestRepository($db);
+        $dph = $unreachable(DphPriznaniBuilder::class);
+        return new DashboardWidgetDataService($registry,
+            new DashboardWidgetAccess($db, $registry, new \MyInvoice\Service\License\LicenseConsistency($db, new Config([]), \MyInvoice\Infrastructure\Cache\EntityCache::disabled(), new \Psr\Log\NullLogger())), $crm,
+            $unreachable(SummaryAction::class), $unreachable(TaxAction::class), $unreachable(TaxAdvanceScheduleService::class),
+            new \MyInvoice\Service\Portal\PortalSummaryService($db, $crm, $dph, $documents));
     }
 }

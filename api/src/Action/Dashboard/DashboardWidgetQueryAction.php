@@ -30,10 +30,10 @@ final class DashboardWidgetQueryAction
             return Json::error($response, 'invalid_dashboard_query', 'Neplatný požadavek přehledu.', 422);
         }
         try {
-            $layout = $this->registry->validate(['schemaVersion' => 1, 'presetVersion' => 1, 'widgets' => $body['widgets'] ?? null]);
+            $widgets = $this->registry->validateWidgets($body['widgets'] ?? null);
         } catch (\InvalidArgumentException) {
             return Json::error($response, 'invalid_dashboard_query', 'Neplatný požadavek přehledu.', 422);
         }
-        return Json::ok($response, $this->data->query($request, $layout['widgets']));
+        return Json::ok($response, $this->data->query($request, $widgets));
     }
 }

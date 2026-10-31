@@ -91,10 +91,9 @@ final class DashboardWidgetDataTest extends TestCase
         $registry = $this->container->get(DashboardWidgetRegistry::class);
         $widgets = [];
         foreach ($registry->all() as $i => $definition) {
-            if ($definition['type'] === 'layout.divider') continue;
-            $widgets[] = ['id' => 'test-' . $i, 'type' => $definition['type'], 'span' => $definition['defaultSpan'], 'options' => (object) []];
+            $widgets[] = ['id' => 'test-' . $i, 'type' => $definition['type'], 'options' => (object) []];
         }
-        $widgets = $registry->validate(['schemaVersion' => 1, 'presetVersion' => 1, 'widgets' => $widgets])['widgets'];
+        $widgets = $registry->validateWidgets($widgets);
         self::assertCount(23, $widgets);
         $result = (array) $this->container->get(DashboardWidgetDataService::class)->query($this->request('admin'), $widgets)['widgets'];
         foreach ($widgets as $widget) {
@@ -110,8 +109,8 @@ final class DashboardWidgetDataTest extends TestCase
         $types = ['business.kpi', 'business.monthly', 'sales.summary', 'purchases.summary', 'receivables.aging', 'payables.aging',
             'cashflow.weekly', 'cashflow.collections', 'receivables.due', 'invoices.overdue', 'invoices.upcoming', 'clients.top', 'invoices.drafts', 'invoices.approvals'];
         $widgets = [];
-        foreach ($types as $type) $widgets[] = ['id' => str_replace('.', '-', $type), 'type' => $type, 'span' => $registry->get($type)['defaultSpan'], 'options' => (object) []];
-        $widgets = $registry->validate(['schemaVersion' => 1, 'presetVersion' => 1, 'widgets' => $widgets])['widgets'];
+        foreach ($types as $type) $widgets[] = ['id' => str_replace('.', '-', $type), 'type' => $type, 'options' => (object) []];
+        $widgets = $registry->validateWidgets($widgets);
         $service = $this->container->get(DashboardWidgetDataService::class);
         $admin = (array) $service->query($this->request('admin'), $widgets)['widgets'];
         $client = (array) $service->query($this->request('client'), $widgets)['widgets'];
@@ -149,7 +148,7 @@ final class DashboardWidgetDataTest extends TestCase
             ['id' => 'vat', 'type' => 'vat.current', 'options' => (object) []]];
         $approvalOnly = (array) $service->query($this->request('client', ['invoices.approval' => 1]), $widgets)['widgets'];
         self::assertSame('/admin/approvals', $approvalOnly['approvals']['data']['links']['list']);
-        self::assertSame('/admin/approvals', $approvalOnly['todo']['data']['items'][0]['link']);
+        self::assertSame('unavailable', $approvalOnly['todo']['status']);
         self::assertArrayNotHasKey('link', $approvalOnly['vat']['data']);
         $admin = (array) $service->query($this->request('admin'), $widgets)['widgets'];
         $link = $admin['vat']['data']['link'];
@@ -230,6 +229,93 @@ final class DashboardWidgetDataTest extends TestCase
         self::assertStringNotContainsString('Synthetic secret partner', $serialized);
         self::assertStringNotContainsString('SYNTH-1210', $serialized);
         self::assertStringNotContainsString('SYNTH-PURCHASE', $serialized);
+    }
+
+    public function testForecastKeepsOtherItemsAndMatchesPortalExactly(): void
+    {
+        $this->container->get(\MyInvoice\Service\Accounting\ChartOfAccountsSeeder::class)->seedForSupplier($this->sid);
+        $items = $this->container->get(\MyInvoice\Service\Accounting\OtherItemService::class);
+        foreach ([['receivable', 700, '602'], ['payable', 200, '518']] as [$side, $amount, $account]) {
+            $items->create($this->sid, [
+                'side' => $side, 'kind' => 'other', 'title' => 'Syntetická položka výhledu',
+                'issued_on' => date('Y-m-d'), 'accounting_on' => date('Y-m-d'),
+                'due_on' => date('Y-m-d', strtotime('+1 day')), 'currency' => 'CZK',
+                'amount' => $amount, 'exchange_rate' => 1, 'counter_account_code' => $account,
+            ], $this->user);
+        }
+        $request = $this->request('client', []);
+        $portal = json_decode((string) ($this->container->get(PortalSummaryAction::class))($request, new Response())->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $result = (array) $this->container->get(DashboardWidgetDataService::class)->query($request,
+            [['id' => 'forecast', 'type' => 'cashflow.weekly', 'options' => (object) []]])['widgets'];
+        self::assertSame('ok', $result['forecast']['status']);
+        self::assertSame(3120.0, $result['forecast']['data']['total_in']);
+        self::assertSame(442.0, $result['forecast']['data']['total_out']);
+        self::assertEquals($portal['cashflow']['forecast'], $result['forecast']['data']);
+    }
+
+    public function testTodoUsesCompleteOriginalFeedAndHonorsDismissals(): void
+    {
+        $request = $this->request('admin');
+        $service = $this->container->get(DashboardWidgetDataService::class);
+        $widgets = [['id' => 'todo', 'type' => 'actions.todo', 'options' => (object) ['rows' => 20]]];
+        $crm = $this->container->get(CrmAggregationService::class);
+        $expected = $crm->actionItems($this->sid, $this->user, new \DateTimeImmutable('today'), true, true);
+        self::assertContains('overdue_invoices', array_column($expected['items'], 'type'));
+        self::assertContains('unbooked_documents', array_column($expected['items'], 'type'));
+        $data = (array) $service->query($request, $widgets)['widgets'];
+        self::assertEquals($expected, $data['todo']['data']);
+        $crm->dismissActionItem($this->sid, $this->user, 'overdue_invoices', 'week');
+        $data = (array) $service->query($request, $widgets)['widgets'];
+        self::assertNotContains('overdue_invoices', array_column($data['todo']['data']['items'], 'type'));
+        self::assertContains('overdue_invoices', $data['todo']['data']['dismissed_types']);
+        self::assertSame(1, $data['todo']['data']['dismissed_count']);
+        $crm->restoreActionItem($this->sid, $this->user, 'overdue_invoices');
+        $data = (array) $service->query($request, $widgets)['widgets'];
+        self::assertContains('overdue_invoices', array_column($data['todo']['data']['items'], 'type'));
+    }
+
+    public function testAutomaticCurrencyKeepsBothCzkAndEurReceivables(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO currencies (supplier_id,code,label,symbol,name_cs,name_en) VALUES (?,'EUR','Synthetic EUR','€','Euro','Euro')")->execute([$this->sid]);
+        $eur = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO invoices (supplier_id,invoice_type,client_id,varsymbol,issue_date,due_date,currency_id,
+            exchange_rate,total_without_vat,total_vat,total_with_vat,status)
+            VALUES (?,'invoice',?,'SYNTH-EUR-AUTO',CURDATE(),CURDATE(),?,25,100,21,121,'issued')")->execute([$this->sid, $this->client, $eur]);
+        $widgets = [['id' => 'aging', 'type' => 'receivables.aging', 'options' => (object) ['currency' => 'auto']],
+            ['id' => 'sales', 'type' => 'sales.summary', 'options' => (object) ['currency' => 'auto']]];
+        $data = (array) $this->container->get(DashboardWidgetDataService::class)->query($this->request('admin'), $widgets)['widgets'];
+        self::assertSame(['CZK', 'EUR'], array_values(array_unique(array_column($data['aging']['data']['rows'], 'currency'))));
+        self::assertArrayHasKey('per_currency', $data['sales']['data']);
+        self::assertSame(['CZK', 'EUR'], array_column($data['sales']['data']['per_currency'], 'currency'));
+        self::assertSame(5500.0, $data['sales']['data']['total_czk']['this_year']);
+    }
+
+    public function testUpcomingListLinkUsesSupportedUnpaidFilter(): void
+    {
+        $data = (array) $this->container->get(DashboardWidgetDataService::class)->query($this->request('admin'),
+            [['id' => 'upcoming', 'type' => 'invoices.upcoming', 'options' => (object) []]])['widgets'];
+        self::assertSame('/invoices?unpaid=1', $data['upcoming']['data']['links']['list']);
+        self::assertNotEmpty($data['upcoming']['data']['items']);
+    }
+
+    public function testQuarterlyVatWidgetUsesPortalStatusAndPeriodLink(): void
+    {
+        $this->db->pdo()->prepare("UPDATE supplier SET vat_period='quarterly' WHERE id=?")->execute([$this->sid]);
+        $request = $this->request('admin');
+        $portal = json_decode((string) ($this->container->get(PortalSummaryAction::class))($request, new Response())->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $data = (array) $this->container->get(DashboardWidgetDataService::class)->query($request,
+            [['id' => 'vat', 'type' => 'vat.current', 'options' => (object) []]])['widgets'];
+        self::assertSame('quarterly', $data['vat']['data']['period_type']);
+        self::assertSame(intdiv((int) date('n') - 1, 3) + 1, $data['vat']['data']['quarter']);
+        $status = $data['vat']['data'];
+        $link = $status['link'];
+        unset($status['link']);
+        self::assertEquals($portal['vat']['status'], $status);
+        parse_str((string) parse_url($link, PHP_URL_QUERY), $query);
+        self::assertSame('quarterly', $query['period']);
+        self::assertSame((string) (($status['quarter'] - 1) * 3 + 1), $query['month']);
+        self::assertSame('0', $query['remember']);
     }
 
     private function request(string $role, ?array $permissions = null): \Psr\Http\Message\ServerRequestInterface

@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { MatchCandidate } from './bank'
 
 export type OtherItemSide = 'receivable' | 'payable'
 export type OtherItemStatus = 'draft' | 'posted' | 'reversed' | 'confirmed' | 'cancelled' | 'paid' | 'partial' | 'forecast'
@@ -25,6 +26,7 @@ export interface OtherItem {
   amount_czk?: number | null
   amount: number
   paid_amount: number
+  settled_outside_amount?: number
   remaining_amount: number
   status: OtherItemStatus | string
   certainty: 'confirmed' | 'scheduled' | 'estimate'
@@ -130,4 +132,13 @@ export const otherItemsApi = {
     api.post<OtherItem>(`/accounting/other-items/${id}/allocations`, payload).then(r => r.data),
   unallocate: (id: number, allocationId: number) =>
     api.delete<OtherItem>(`/accounting/other-items/${id}/allocations/${allocationId}`).then(r => r.data),
+  /** Otevřené položky pro dialog „Spárovat" u bankovního pohybu. */
+  bankCandidates: (bankTransactionId: number, q = '') =>
+    api.get<{ candidates: MatchCandidate[] }>('/accounting/other-items/bank-candidates', {
+      params: { bank_transaction_id: bankTransactionId, q: q || undefined },
+    }).then(r => r.data.candidates),
+  /** Přiřadí pohyb položce; nezaúčtovaný pohyb server zároveň zaúčtuje proti účtu položky. */
+  matchBankTransaction: (id: number, bankTransactionId: number) =>
+    api.post<OtherItem>(`/accounting/other-items/${id}/match-bank-transaction`, { bank_transaction_id: bankTransactionId })
+      .then(r => r.data),
 }

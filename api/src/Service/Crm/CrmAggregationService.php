@@ -254,12 +254,6 @@ final class CrmAggregationService
         return $rows;
     }
 
-    /** Obchodní KPI se stejným přepočtem jako portál, bez ostatních období a pipeline. */
-    public function dashboardRange(int $supplierId, string $from, string $toExclusive, ?string $period = null): array
-    {
-        return $this->aggregateRange($supplierId, $this->isVatPayer($supplierId), $from, $toExclusive, $period);
-    }
-
     /**
      * Predikát vyřazující doklady, jejichž protistrana je spojená osoba. Prázdný,
      * když se vyřazovat nemá, takže výchozí dotazy zůstávají beze změny.
@@ -379,6 +373,33 @@ final class CrmAggregationService
         return false;
     }
 
+    /** Jeden výřez stejného přehledu; portál i widget používají stejné hranice a agregaci. */
+    public function overviewPeriod(int $supplierId, string $period, ?\DateTimeImmutable $now = null): array
+    {
+        [$from, $to, $label] = self::overviewPeriodRange($period, $now ?? new \DateTimeImmutable('today'));
+        return $this->aggregateRange($supplierId, $this->isVatPayer($supplierId), $from, $to, $label);
+    }
+
+    /** @return array{string,string,?string} */
+    public static function overviewPeriodRange(string $period, \DateTimeImmutable $now): array
+    {
+        $month = $now->modify('first day of this month');
+        $year = (int) $now->format('Y');
+        $yearStart = new \DateTimeImmutable(sprintf('%04d-01-01', $year));
+        $prevYearStart = new \DateTimeImmutable(sprintf('%04d-01-01', $year - 1));
+        [$from, $to, $label] = match ($period) {
+            'current_month' => [$month, $month->modify('+1 month'), $month->format('Y-m')],
+            'last_month' => [$month->modify('-1 month'), $month, $month->modify('-1 month')->format('Y-m')],
+            'ytd' => [$yearStart, $now->modify('+1 day'), null],
+            'last_12m' => [$month->modify('-11 months'), $month->modify('+1 month'), null],
+            'prev_12m' => [$month->modify('-23 months'), $month->modify('-11 months'), null],
+            'prev_year_full' => [$prevYearStart, $yearStart, null],
+            'prev_year_ytd' => [$prevYearStart, $now->modify('+1 day')->modify('-1 year'), null],
+            default => throw new \InvalidArgumentException('Neplatné období KPI.'),
+        };
+        return [$from->format('Y-m-d'), $to->format('Y-m-d'), $label];
+    }
+
     /**
      * Overview KPI (per currency):
      *   - current_month / last_month — aktuální a minulý měsíc
@@ -404,26 +425,21 @@ final class CrmAggregationService
         $d = static fn (\DateTimeImmutable $x): string => $x->format('Y-m-d');
 
         $today          = new \DateTimeImmutable('today');
-        $tomorrow       = $today->modify('+1 day');
         $firstThisMonth = $today->modify('first day of this month');
         $firstNextMonth = $firstThisMonth->modify('+1 month');
-        $firstPrevMonth = $firstThisMonth->modify('-1 month');
-        $first12        = $firstThisMonth->modify('-11 months'); // trailing 12 kal. měsíců vč. aktuálního
-        $first24        = $firstThisMonth->modify('-23 months');
-
-        $year     = (int) $today->format('Y');
-        $yearStart     = new \DateTimeImmutable(sprintf('%04d-01-01', $year));
-        $prevYearStart = new \DateTimeImmutable(sprintf('%04d-01-01', $year - 1));
-        $prevYearYtdEnd = $tomorrow->modify('-1 year'); // loni do stejného dne (půlotevřeně)
+        $yearStart = $today->modify('first day of January');
+        $period = function (string $name) use ($supplierId, $payer, $today): array {
+            return $this->aggregateRange($supplierId, $payer, ...self::overviewPeriodRange($name, $today));
+        };
 
         return [
-            'current_month'  => $this->aggregateRange($supplierId, $payer, $d($firstThisMonth), $d($firstNextMonth), $firstThisMonth->format('Y-m')),
-            'last_month'     => $this->aggregateRange($supplierId, $payer, $d($firstPrevMonth), $d($firstThisMonth), $firstPrevMonth->format('Y-m')),
-            'ytd'            => $this->aggregateRange($supplierId, $payer, $d($yearStart), $d($tomorrow)),
-            'last_12m'       => $this->aggregateRange($supplierId, $payer, $d($first12), $d($firstNextMonth)),
-            'prev_12m'       => $this->aggregateRange($supplierId, $payer, $d($first24), $d($first12)),
-            'prev_year_full' => $this->aggregateRange($supplierId, $payer, $d($prevYearStart), $d($yearStart)),
-            'prev_year_ytd'  => $this->aggregateRange($supplierId, $payer, $d($prevYearStart), $d($prevYearYtdEnd)),
+            'current_month'  => $period('current_month'),
+            'last_month'     => $period('last_month'),
+            'ytd'            => $period('ytd'),
+            'last_12m'       => $period('last_12m'),
+            'prev_12m'       => $period('prev_12m'),
+            'prev_year_full' => $period('prev_year_full'),
+            'prev_year_ytd'  => $period('prev_year_ytd'),
             'current_month_pipeline' => $this->currentMonthPipeline($supplierId, $payer, $d($firstThisMonth), $d($firstNextMonth)),
             'other_item_result_impact' => (new OtherItemForecastService($this->db))->resultImpact(
                 $supplierId, $d($yearStart), $d($yearStart->modify('+1 year'))),
@@ -610,7 +626,7 @@ final class CrmAggregationService
              WHERE i.supplier_id = ?
                AND i.issue_date >= ?
                AND i.status NOT IN ('draft', 'cancelled')
-               AND i.invoice_type != 'proforma'
+               AND i.invoice_type NOT IN ('proforma','rent_calendar','advance_calendar')
           GROUP BY i.client_id, c.company_name
           ORDER BY revenue_czk DESC
              LIMIT " . (int) $limit;
@@ -796,7 +812,7 @@ final class CrmAggregationService
              WHERE i.supplier_id = ?
                AND i.status IN ('issued', 'sent', 'reminded')
                AND " . $this->receivableDocTypeSql() . "
-               AND (i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0)" . self::relatedPartyExclude('i', 'client_id', $excludeRelated) . "
+               AND (i.invoice_type NOT IN ('rent_calendar','advance_calendar') AND (i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0))" . self::relatedPartyExclude('i', 'client_id', $excludeRelated) . "
           GROUP BY bucket, currency
           ORDER BY currency, FIELD(bucket, 'not_due', 'overdue_30', 'overdue_60', 'overdue_90', 'overdue_90_plus')
         ";
@@ -866,7 +882,7 @@ final class CrmAggregationService
               WHERE i.supplier_id = ?
                 AND i.status IN ('issued', 'sent', 'reminded')
                 AND " . $this->receivableDocTypeSql() . "
-                AND (i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0)
+                AND (i.invoice_type NOT IN ('rent_calendar','advance_calendar') AND (i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0))
                 AND i.due_date < ?
            ORDER BY i.due_date, i.id"
         );
@@ -936,7 +952,7 @@ final class CrmAggregationService
                 AND status = 'paid'
                 AND paid_at IS NOT NULL
                 AND issue_date >= ?
-                AND invoice_type != 'proforma'"
+                AND invoice_type NOT IN ('proforma','rent_calendar','advance_calendar')"
         );
         $stmt->execute([$supplierId, $start]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
@@ -963,7 +979,7 @@ final class CrmAggregationService
               AND status = 'paid'
               AND paid_at IS NOT NULL
               AND issue_date >= ?
-              AND invoice_type != 'proforma'"
+              AND invoice_type NOT IN ('proforma','rent_calendar','advance_calendar')"
         );
         $stmt->execute([$supplierId, $start]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
@@ -1152,7 +1168,7 @@ final class CrmAggregationService
              WHERE i.supplier_id = ?
                AND i.issue_date >= ?
                AND i.status NOT IN ('draft', 'cancelled')
-               AND i.invoice_type != 'proforma'  -- proformy vynechat (nejsou daňový doklad)
+               AND i.invoice_type NOT IN ('proforma','rent_calendar','advance_calendar')  -- proformy vynechat (nejsou daňový doklad)
           GROUP BY i.revenue_category_id, rc.code, rc.label
           ORDER BY total DESC
         ";
@@ -1192,7 +1208,7 @@ final class CrmAggregationService
                JOIN invoices i ON i.client_id = c.id AND i.status NOT IN ('draft', 'cancelled')
           LEFT JOIN currencies cur ON cur.id = i.currency_id
               WHERE c.supplier_id = ?
-                AND i.invoice_type != 'proforma'
+                AND i.invoice_type NOT IN ('proforma','rent_calendar','advance_calendar')
                 AND c.is_customer = 1
            GROUP BY c.id, c.company_name
              HAVING DATEDIFF(?, MAX(i.issue_date)) > ?
@@ -3170,7 +3186,7 @@ final class CrmAggregationService
                         AND i.due_date {$overdueOperator} CURDATE()
                         AND (i.invoice_type != 'proforma'
                              OR NOT " . AdvanceSettledSql::proforma('i') . ")
-                        AND (i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0)"
+                        AND (i.invoice_type NOT IN ('rent_calendar','advance_calendar') AND (i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0))"
                 );
                 $stmt->execute([$supplierId]);
                 break;
@@ -3278,7 +3294,7 @@ final class CrmAggregationService
      *   total_in: float, total_out: float, total_net: float
      * }
      */
-    public function cashFlowForecast(int $supplierId, int $weeksAhead = 4, string $currency = 'CZK', bool $includeOtherItems = true): array
+    public function cashFlowForecast(int $supplierId, int $weeksAhead = 4, string $currency = 'CZK'): array
     {
         $pdo = $this->db->pdo();
         $today = new \DateTimeImmutable('today');
@@ -3337,7 +3353,7 @@ final class CrmAggregationService
           LEFT JOIN currencies c ON c.id = i.currency_id
               WHERE i.supplier_id = ?
                 AND i.status IN ('issued', 'sent', 'reminded')
-                AND i.invoice_type != 'proforma'
+                AND i.invoice_type NOT IN ('proforma','rent_calendar','advance_calendar')
                 AND (i.invoice_type NOT IN ('invoice','tax_document') OR i.amount_to_pay - i.paid_total > 0)
                 AND i.due_date BETWEEN ? AND ?
                 AND COALESCE(c.code, 'CZK') = ?
@@ -3370,8 +3386,7 @@ final class CrmAggregationService
             $outByBucket[(int) $r['bucket']] = (float) $r['amt'];
         }
 
-        // Sdílený obchodní widget zobrazuje pouze faktury; původní CRM kontrakt zahrnuje i jiné položky.
-        foreach ($includeOtherItems ? (new OtherItemForecastService($this->db))->dueBetween($supplierId, $globalStart, $globalEnd, $currency) : [] as $item) {
+        foreach ((new OtherItemForecastService($this->db))->dueBetween($supplierId, $globalStart, $globalEnd, $currency) as $item) {
             foreach ($bounds as $idx => [$start, $end]) {
                 if ($item['due_on'] < $start->format('Y-m-d') || $item['due_on'] > $end->format('Y-m-d')) continue;
                 if ($item['side'] === 'receivable') $inByBucket[$idx] = ($inByBucket[$idx] ?? 0.0) + $item['remaining'];
@@ -3438,7 +3453,7 @@ final class CrmAggregationService
                    AND i.status = 'paid'
                    AND i.paid_at IS NOT NULL
                    AND i.due_date IS NOT NULL
-                   AND i.invoice_type != 'proforma'
+                   AND i.invoice_type NOT IN ('proforma','rent_calendar','advance_calendar')
               )
               SELECT pi.client_id,
                      c.company_name,
@@ -3501,7 +3516,7 @@ final class CrmAggregationService
               WHERE i.supplier_id = ?
                 AND i.status IN ('paid', 'sent', 'reminded')
                 -- tax_document je auto-paid bez upomínek — do statistiky účinnosti nepatří
-                AND i.invoice_type NOT IN ('proforma', 'tax_document')
+                AND i.invoice_type NOT IN ('proforma', 'tax_document','rent_calendar','advance_calendar')
                 AND i.issue_date >= ?"
         );
         $stmt->execute([$supplierId, $start]);
@@ -3553,7 +3568,7 @@ final class CrmAggregationService
               WHERE supplier_id = ?
                 AND status = 'paid'
                 AND paid_at IS NOT NULL
-                AND invoice_type != 'proforma'
+                AND invoice_type NOT IN ('proforma','rent_calendar','advance_calendar')
                 AND issue_date >= ?
                 AND paid_at >= issue_date"
         );

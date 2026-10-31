@@ -76,20 +76,19 @@ api.interceptors.response.use(
     // H-10: stav diskové kvóty jede v hlavičkách každé odpovědi, ať se admin
     // o blížícím se zámku dozví dřív, než mu přestane jít uložit doklad.
     readStorageQuotaHeaders(response.headers)
-    // Zapisující požadavek ohlásí změnu dat, aby si ji zaparkovaná okna
-    // pracovní plochy obnovila při návratu (`useWindowRefresh`). Okno v iframe
-    // ji pošle správci oken, hlavní dokument ji vyvolá jako událost, kterou
-    // správce oken rozešle stejně.
+    // Zapisující požadavek ohlásí změnu dat správci oken, který podle cesty pozná
+    // dotčená okna (`workspace/dataDependencies.ts`). Okno v iframe mu ji pošle,
+    // hlavní dokument ji vyvolá jako událost.
     const method = response.config.method?.toLowerCase() ?? 'get'
-    const path = new URL(response.config.url ?? '', window.location.origin).pathname.replace(/^\/api(?:\/v1)?\//, '/')
-    // Hromadné čtení widgetů nesmí spustit další obnovu ostatních přehledů.
-    const dashboardRead = method === 'post' && path === '/dashboard-widgets/query'
-    if (!['get', 'head', 'options'].includes(method) && !dashboardRead) {
+    const requestPath = new URL(response.config.url ?? '', window.location.origin).pathname.replace(/^\/api\/(?:v1\/)?/, '/')
+    const widgetRead = method === 'post' && requestPath === '/dashboard-widgets/query'
+    if (!['get', 'head', 'options'].includes(method) && !widgetRead) {
+      const path = new URL(response.config.url ?? '', window.location.origin).pathname.replace(/^\/api\//, '/')
       const resource = path.split('/')[1]
       if (resource && /^[a-z0-9-]+$/.test(resource)) {
         const scope = getWindowSupplierScope()
-        if (scope) postWindowFrameMessage({ type: 'myucto-window-mutation', id: scope.windowId, resource })
-        else window.dispatchEvent(new CustomEvent('myucto:data-mutation', { detail: { resource } }))
+        if (scope) postWindowFrameMessage({ type: 'myucto-window-mutation', id: scope.windowId, resource, path })
+        else window.dispatchEvent(new CustomEvent('myucto:data-mutation', { detail: { resource, path } }))
       }
     }
     return response
